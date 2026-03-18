@@ -142,7 +142,7 @@ function ScanIllustration({ theme }) {
       <View style={styles.scanIconStack}>
         <Camera size={80} color={theme.textTertiary} strokeWidth={1.2} />
         <View style={styles.scanLineOverlay}>
-          <ScanLine size={48} color={Colors.scoreExcellent} strokeWidth={1.5} />
+          <ScanLine size={40} color={theme.textPrimary} strokeWidth={1.5} />
         </View>
       </View>
     </View>

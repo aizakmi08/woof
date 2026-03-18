@@ -1,5 +1,5 @@
 const APP_NAME = "Woof";
-const SUPPORT_EMAIL = "support@woofapp.com";
+const SUPPORT_EMAIL = "woofapp.help@gmail.com";
 const EFFECTIVE_DATE = "March 16, 2026";
 
 const baseStyles = `
