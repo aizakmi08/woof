@@ -104,7 +104,11 @@ function AppNavigator() {
         <Stack.Screen
           name="Paywall"
           component={PaywallScreen}
-          options={{ presentation: "modal", gestureEnabled: true }}
+          options={{
+            presentation: "modal",
+            gestureEnabled: true,
+            contentStyle: { backgroundColor: "#FAFAFA" },
+          }}
         />
         <Stack.Screen name="WebView" component={WebViewScreen} />
       </Stack.Navigator>

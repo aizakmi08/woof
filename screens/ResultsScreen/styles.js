@@ -779,6 +779,20 @@ export function createStyles(theme) {
       marginTop: Spacing.md,
       marginLeft: 24,
     },
+    ingExpandButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      paddingVertical: 14,
+      marginTop: 4,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: Colors.divider,
+    },
+    ingExpandText: {
+      color: theme.textSecondary,
+      fontSize: 14,
+      fontWeight: "500",
+    },
 
     // --- Scan Another (outline button) ---
     scanAnotherButton: {
@@ -790,10 +804,6 @@ export function createStyles(theme) {
       alignItems: "center",
       marginTop: Spacing.subsectionGap,
       overflow: "hidden",
-    },
-    scanAnotherFill: {
-      ...StyleSheet.absoluteFillObject,
-      backgroundColor: "rgba(28, 28, 30, 0.05)",
     },
     scanAnotherText: {
       ...Typography.button,

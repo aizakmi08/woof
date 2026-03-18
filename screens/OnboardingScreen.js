@@ -17,7 +17,7 @@ import Animated, {
   FadeOut,
 } from "react-native-reanimated";
 import Svg, { Circle } from "react-native-svg";
-import { Camera, ScanLine } from "lucide-react-native";
+import { ScanLine } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useTheme, getScoreConfig, Colors, Spacing, Shadows, Typography } from "../theme";
@@ -139,12 +139,7 @@ function IngredientIllustration({ theme }) {
 function ScanIllustration({ theme }) {
   return (
     <View style={styles.illustrationContainer}>
-      <View style={styles.scanIconStack}>
-        <Camera size={80} color={theme.textTertiary} strokeWidth={1.2} />
-        <View style={styles.scanLineOverlay}>
-          <ScanLine size={40} color={theme.textPrimary} strokeWidth={1.5} />
-        </View>
-      </View>
+      <ScanLine size={80} color={theme.textTertiary} strokeWidth={1.2} />
     </View>
   );
 }
@@ -342,16 +337,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 40,
-  },
-
-  // Scan icon (screen 1)
-  scanIconStack: {
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  scanLineOverlay: {
-    position: "absolute",
-    bottom: -4,
   },
 
   // Score ring (screen 2)

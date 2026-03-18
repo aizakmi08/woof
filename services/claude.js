@@ -1,36 +1,73 @@
 import { parse as parsePartialJson } from "partial-json";
 import { supabase } from "./supabase";
-import { SUPABASE_URL } from "../config/env";
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../config/env";
+import { fetch as rnFetch } from "react-native-fetch-api";
+import { polyfill as polyfillReadableStream } from "react-native-fetch-api/src/polyfill";
+
+// Polyfill ReadableStream for production builds
+polyfillReadableStream();
 
 const ANALYZE_URL = `${SUPABASE_URL}/functions/v1/analyze`;
 
-// Try expo/fetch for ReadableStream body support, fall back to global fetch
-let streamFetch = global.fetch;
-try {
-  const expoFetch = require("expo/fetch");
-  if (expoFetch && expoFetch.fetch) {
-    streamFetch = expoFetch.fetch;
-    console.log("[CLAUDE] Using expo/fetch for streaming support");
-  }
-} catch {
-  console.log("[CLAUDE] expo/fetch not available, using global fetch");
-}
+// Use react-native-fetch-api for proper streaming support in production
+const streamFetch = rnFetch;
+console.log("[CLAUDE] Using react-native-fetch-api for streaming support");
 
 async function _getAuthHeaders() {
-  let { data: { session } } = await supabase.auth.getSession();
+  let { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
-  // If token is expired or will expire within 60s, refresh proactively
-  if (session?.expires_at && Date.now() / 1000 > session.expires_at - 60) {
-    console.log("[CLAUDE] Token expired or expiring soon, refreshing...");
-    const { data } = await supabase.auth.refreshSession();
-    if (data.session) session = data.session;
+  if (sessionError) {
+    console.log("[CLAUDE] Session error:", sessionError.message);
+    throw new Error("Authentication error. Please sign out and back in.");
+  }
+
+  if (!session) {
+    console.log("[CLAUDE] No active session");
+    throw new Error("Not authenticated. Please sign in first.");
+  }
+
+  const now = Date.now() / 1000;
+  const expiresAt = session.expires_at || 0;
+  const expiresIn = expiresAt - now;
+
+  console.log(`[CLAUDE] Session check:`, {
+    userId: session.user?.id?.slice(0, 8) + '...',
+    expiresAt: new Date(expiresAt * 1000).toISOString(),
+    expiresIn: Math.round(expiresIn) + 's',
+    hasRefreshToken: !!session.refresh_token,
+  });
+
+  // ALWAYS refresh if token is expired or will expire within 5 minutes
+  if (expiresIn < 300) {
+    console.log("[CLAUDE] Token expired or expiring soon, force refreshing...");
+    const { data, error: refreshError } = await supabase.auth.refreshSession();
+    if (refreshError) {
+      console.log("[CLAUDE] Token refresh failed:", refreshError.message);
+      // Token is completely dead - force sign out
+      console.log("[CLAUDE] Forcing sign out due to dead token");
+      await supabase.auth.signOut().catch(() => {});
+      throw new Error("Session expired. Please sign in again.");
+    }
+    if (data.session) {
+      session = data.session;
+      console.log("[CLAUDE] Token refreshed successfully, new expiry:", new Date(data.session.expires_at * 1000).toISOString());
+    } else {
+      console.log("[CLAUDE] Refresh returned no session");
+      await supabase.auth.signOut().catch(() => {});
+      throw new Error("Session expired. Please sign in again.");
+    }
   }
 
   const token = session?.access_token;
-  if (!token) throw new Error("Not authenticated. Please sign in first.");
+  if (!token) {
+    console.log("[CLAUDE] No access token in session");
+    throw new Error("Not authenticated. Please sign in first.");
+  }
+
   return {
     "Authorization": `Bearer ${token}`,
     "Content-Type": "application/json",
+    "apikey": SUPABASE_ANON_KEY,
   };
 }
 
@@ -89,10 +126,19 @@ async function _callStreaming({ mode, payload, onUpdate, signal }) {
     } catch {
       message = errBody || message;
     }
+
+    // Log the actual server error for debugging
+    console.log(`[CLAUDE] Server error ${response.status}:`, message);
+
     throw new Error(message);
   }
 
   console.log(`[TIMER] Claude API response: ${Date.now() - t0}ms`);
+
+  // Verify streaming support
+  const hasReadableStream = response.body && typeof response.body.getReader === "function";
+  console.log(`[CLAUDE] ReadableStream available: ${hasReadableStream}`);
+
   let firstChunk = true;
   let firstParsed = false;
   let accumulated = "";
@@ -100,7 +146,7 @@ async function _callStreaming({ mode, payload, onUpdate, signal }) {
   const THROTTLE_MS = 100;
 
   // Try ReadableStream first
-  if (response.body && typeof response.body.getReader === "function") {
+  if (hasReadableStream) {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
 
@@ -181,17 +227,39 @@ async function _callStreaming({ mode, payload, onUpdate, signal }) {
     }
   } else {
     // Fallback: read entire response as text and extract SSE
-    console.log("[CLAUDE] ReadableStream not available, falling back to text SSE parse");
+    console.log("[CLAUDE] ⚠️ ReadableStream not available, falling back to text SSE parse (slower, waits for full response)");
     const text = await response.text();
     accumulated = extractTextFromSSE(text);
+    console.log(`[CLAUDE] Fallback text response length: ${text.length} chars, extracted: ${accumulated.length} chars`);
   }
 
   if (!accumulated) {
     throw new Error("No response from Claude.");
   }
 
-  // Final parse with strict JSON
-  const final = cleanAndParse(accumulated);
+  // Final parse — try strict JSON first, fall back to partial JSON if incomplete
+  let final;
+  try {
+    final = cleanAndParse(accumulated);
+  } catch (err) {
+    console.log("[CLAUDE] Final parse failed (incomplete stream?), using partial JSON:", err.message);
+    // Strip markdown and try partial parse
+    let textToParse = accumulated.trim();
+    if (textToParse.startsWith("```")) {
+      textToParse = textToParse.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "");
+    }
+    try {
+      final = parsePartialJson(textToParse);
+    } catch (partialErr) {
+      // If even partial parse fails, throw original error
+      throw new Error(`Failed to parse Claude response: ${err.message}`);
+    }
+  }
+
+  if (!final || typeof final !== "object") {
+    throw new Error("Invalid response format from Claude.");
+  }
+
   onUpdate(final);
   console.log("[CLAUDE] Stream complete:", final.productName, "| score:", final.overallScore);
   console.log(`[TIMER] Claude stream total: ${Date.now() - t0}ms`);
@@ -220,6 +288,10 @@ async function _callNonStreaming({ mode, payload, signal }) {
     } catch {
       message = errBody || message;
     }
+
+    // Log the actual server error for debugging
+    console.log(`[CLAUDE] Server error ${response.status}:`, message);
+
     throw new Error(message);
   }
 
@@ -240,25 +312,31 @@ export async function analyzeIngredients(base64Image, { onUpdate, signal, cacheK
   const payload = { imageBase64: base64Image };
   if (cacheKey) payload.cacheKey = cacheKey;
 
-  // Streaming path
+  // Streaming path with retry
   if (onUpdate) {
-    try {
-      return await _callStreaming({
-        mode: "photo",
-        payload,
-        onUpdate,
-        signal,
-      });
-    } catch (err) {
-      if (err.name === "AbortError" || signal?.aborted) throw err;
-      console.log("[CLAUDE] Streaming failed, retrying non-streaming:", err.message);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await _callStreaming({
+          mode: "photo",
+          payload,
+          onUpdate,
+          signal,
+        });
+      } catch (err) {
+        if (err.name === "AbortError" || signal?.aborted) throw err;
+        if (attempt === 0) {
+          console.log("[CLAUDE] Streaming attempt 1 failed, retrying:", err.message);
+          continue;
+        }
+        console.log("[CLAUDE] Streaming attempt 2 failed, falling back to non-streaming:", err.message);
+      }
     }
   }
 
   // Non-streaming path (fallback or no onUpdate)
   const controller = new AbortController();
   const elapsed = Date.now() - t0;
-  const remainingMs = Math.max(10000, 60000 - elapsed);
+  const remainingMs = Math.max(10000, 90000 - elapsed);
   const timeout = setTimeout(() => controller.abort(), remainingMs);
 
   if (signal) {
@@ -290,25 +368,31 @@ export async function analyzeWithData(opffProduct, base64Image, { onUpdate, sign
   if (base64Image) payload.imageBase64 = base64Image;
   if (cacheKey) payload.cacheKey = cacheKey;
 
-  // Streaming path
+  // Streaming path with retry
   if (onUpdate) {
-    try {
-      return await _callStreaming({
-        mode: "verified",
-        payload,
-        onUpdate,
-        signal,
-      });
-    } catch (err) {
-      if (err.name === "AbortError" || signal?.aborted) throw err;
-      console.log("[CLAUDE] Streaming failed, retrying non-streaming:", err.message);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await _callStreaming({
+          mode: "verified",
+          payload,
+          onUpdate,
+          signal,
+        });
+      } catch (err) {
+        if (err.name === "AbortError" || signal?.aborted) throw err;
+        if (attempt === 0) {
+          console.log("[CLAUDE] Streaming attempt 1 failed, retrying:", err.message);
+          continue;
+        }
+        console.log("[CLAUDE] Streaming failed after 2 attempts:", err.message);
+      }
     }
   }
 
   // Non-streaming path (fallback or no onUpdate)
   const controller = new AbortController();
   const elapsed = Date.now() - t0;
-  const remainingMs = Math.max(10000, 60000 - elapsed);
+  const remainingMs = Math.max(10000, 90000 - elapsed);
   const timeout = setTimeout(() => controller.abort(), remainingMs);
 
   if (signal) {

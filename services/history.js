@@ -1,7 +1,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "./supabase";
 
-const STORAGE_KEY = "@woof/scan_history";
+const STORAGE_KEY_PREFIX = "@woof/scan_history_";
+const LEGACY_STORAGE_KEY = "@woof/scan_history"; // For migration
 const MIGRATION_PREFIX = "@woof/history_migrated_";
 const MAX_ENTRIES = 50;
 
@@ -9,16 +10,34 @@ const MAX_ENTRIES = 50;
 
 async function getCurrentUserId() {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
+    // Add timeout to prevent hanging on slow auth checks
+    const timeoutMs = 3000;
+    const timeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("AUTH_SESSION_TIMEOUT")), timeoutMs)
+    );
+
+    const { data: { session } } = await Promise.race([
+      supabase.auth.getSession(),
+      timeout
+    ]);
     return session?.user?.id ?? null;
-  } catch {
+  } catch (err) {
+    if (err.message !== "AUTH_SESSION_TIMEOUT") {
+      console.log("[HISTORY] getCurrentUserId error:", err.message);
+    }
     return null;
   }
 }
 
-async function getLocalHistory() {
+function getStorageKey(userId) {
+  // User-specific key for authenticated users, legacy key for anonymous
+  return userId ? `${STORAGE_KEY_PREFIX}${userId}` : LEGACY_STORAGE_KEY;
+}
+
+async function getLocalHistory(userId = null) {
   try {
-    const raw = await AsyncStorage.getItem(STORAGE_KEY);
+    const key = getStorageKey(userId);
+    const raw = await AsyncStorage.getItem(key);
     if (!raw) return [];
     return JSON.parse(raw);
   } catch (err) {
@@ -27,8 +46,9 @@ async function getLocalHistory() {
   }
 }
 
-async function saveLocalHistory(entries) {
-  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+async function saveLocalHistory(entries, userId = null) {
+  const key = getStorageKey(userId);
+  await AsyncStorage.setItem(key, JSON.stringify(entries));
 }
 
 function toSupabaseRow(entry, userId) {
@@ -79,14 +99,30 @@ export async function getHistory() {
         .limit(MAX_ENTRIES);
 
       if (!error && data) {
-        return data.map(fromSupabaseRow);
+        const supabaseEntries = data.map(fromSupabaseRow);
+        // Merge local entries for THIS USER that may not have been synced yet
+        try {
+          const localEntries = await getLocalHistory(userId);
+          const supabaseIds = new Set(supabaseEntries.map((e) => e.id));
+          const unsynced = localEntries.filter((e) => !supabaseIds.has(e.id));
+          if (unsynced.length > 0) {
+            console.log("[HISTORY] Merging", unsynced.length, "unsynced local entries");
+            const merged = [...unsynced, ...supabaseEntries]
+              .sort((a, b) => new Date(b.dateScanned) - new Date(a.dateScanned))
+              .slice(0, MAX_ENTRIES);
+            return merged;
+          }
+        } catch {
+          // Local merge failed, still return Supabase data
+        }
+        return supabaseEntries;
       }
     } catch (err) {
       console.log("[HISTORY] Supabase read failed, falling back to local:", err.message);
     }
   }
 
-  return getLocalHistory();
+  return getLocalHistory(userId);
 }
 
 /**
@@ -95,17 +131,17 @@ export async function getHistory() {
  */
 export async function addHistoryEntry(entry) {
   try {
-    const localHistory = await getLocalHistory();
+    const userId = await getCurrentUserId();
+    const localHistory = await getLocalHistory(userId);
     const newEntry = {
       id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
       ...entry,
     };
     const updated = [newEntry, ...localHistory].slice(0, MAX_ENTRIES);
-    await saveLocalHistory(updated);
+    await saveLocalHistory(updated, userId);
     console.log("[HISTORY] Saved entry locally:", newEntry.productName);
 
     // Fire-and-forget Supabase upsert
-    const userId = await getCurrentUserId();
     if (userId) {
       supabase
         .from("scan_history")
@@ -125,10 +161,11 @@ export async function addHistoryEntry(entry) {
  */
 export async function clearHistory() {
   try {
-    await AsyncStorage.removeItem(STORAGE_KEY);
+    const userId = await getCurrentUserId();
+    const key = getStorageKey(userId);
+    await AsyncStorage.removeItem(key);
     console.log("[HISTORY] Cleared local history");
 
-    const userId = await getCurrentUserId();
     if (userId) {
       supabase
         .from("scan_history")
@@ -146,6 +183,7 @@ export async function clearHistory() {
 
 /**
  * Migrate local AsyncStorage history to Supabase on first sign-in.
+ * Also migrates from legacy shared key to user-specific key.
  * Idempotent — keyed by user ID.
  */
 export async function migrateLocalHistoryToSupabase(userId) {
@@ -158,7 +196,31 @@ export async function migrateLocalHistoryToSupabase(userId) {
       return;
     }
 
-    const localHistory = await getLocalHistory();
+    // First, check if there's legacy data to migrate
+    let localHistory = [];
+    const legacyRaw = await AsyncStorage.getItem(LEGACY_STORAGE_KEY);
+    if (legacyRaw) {
+      try {
+        const legacyData = JSON.parse(legacyRaw);
+        if (legacyData.length > 0) {
+          console.log("[HISTORY] Found", legacyData.length, "entries in legacy storage");
+          localHistory = legacyData;
+
+          // Save to user-specific key
+          await saveLocalHistory(legacyData, userId);
+
+          // Clear legacy key to prevent future confusion
+          await AsyncStorage.removeItem(LEGACY_STORAGE_KEY);
+          console.log("[HISTORY] Migrated legacy data to user-specific storage");
+        }
+      } catch (parseErr) {
+        console.log("[HISTORY] Failed to parse legacy data:", parseErr.message);
+      }
+    } else {
+      // No legacy data, check user-specific storage
+      localHistory = await getLocalHistory(userId);
+    }
+
     if (localHistory.length === 0) {
       await AsyncStorage.setItem(migrationKey, "true");
       return;
@@ -171,11 +233,16 @@ export async function migrateLocalHistoryToSupabase(userId) {
 
     if (error) {
       console.log("[HISTORY] Migration upsert error:", error.message);
+      // Don't mark as complete so it retries next time
       return;
     }
 
-    await AsyncStorage.setItem(migrationKey, "true");
-    console.log("[HISTORY] Migrated", localHistory.length, "entries to Supabase");
+    try {
+      await AsyncStorage.setItem(migrationKey, "true");
+      console.log("[HISTORY] Migrated", localHistory.length, "entries to Supabase");
+    } catch (storageErr) {
+      console.log("[HISTORY] Failed to save migration flag:", storageErr.message);
+    }
   } catch (err) {
     console.log("[HISTORY] Migration error:", err.message);
   }

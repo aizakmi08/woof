@@ -157,30 +157,36 @@ export default function ResultsScreen({ route, navigation }) {
       // Layer 2: AsyncStorage (instant, offline-capable)
       // Layer 3: Supabase cache (network, shared)
       (async () => {
-        // Try local result first
-        const local = await analysisService.getLocalResult(cacheKey);
-        if (local?.analysis) {
-          setResult(local.analysis);
-          setDataSource(local.dataSource || "ai");
-          if (local.opffData) setOpffData(local.opffData);
-          setFromCache(true);
-          setDone(true);
-          return;
-        }
+        try {
+          // Try local result first
+          const local = await analysisService.getLocalResult(cacheKey);
+          if (local?.analysis) {
+            setResult(local.analysis);
+            setDataSource(local.dataSource || "ai");
+            if (local.opffData) setOpffData(local.opffData);
+            setFromCache(true);
+            setDone(true);
+            return;
+          }
 
-        // Fall back to Supabase
-        const cached = await getCachedAnalysis(cacheKey);
-        if (cached.hit) {
-          setResult(cached.analysis);
-          setDataSource(cached.dataSource || "ai");
-          if (cached.opffData) setOpffData(cached.opffData);
-          setFromCache(true);
-          setDone(true);
-          return;
-        }
+          // Fall back to Supabase
+          const cached = await getCachedAnalysis(cacheKey);
+          if (cached.hit) {
+            setResult(cached.analysis);
+            setDataSource(cached.dataSource || "ai");
+            if (cached.opffData) setOpffData(cached.opffData);
+            setFromCache(true);
+            setDone(true);
+            return;
+          }
 
-        setError("This result is no longer available. Cached results expire after 7 days.");
-        setDone(true);
+          setError("This result is no longer available. Cached results expire after 7 days.");
+          setDone(true);
+        } catch (err) {
+          console.log("[RESULTS] Error loading cached result:", err.message);
+          setError("Failed to load result. Please try scanning again.");
+          setDone(true);
+        }
       })();
       return;
     }
@@ -260,7 +266,7 @@ export default function ResultsScreen({ route, navigation }) {
 
   const [isSlowLoading, setIsSlowLoading] = useState(false);
 
-  // Progressive loading messages
+  // Progressive loading messages + timeout
   useEffect(() => {
     if (!streaming || done) return;
     setIsSlowLoading(false);
@@ -271,6 +277,15 @@ export default function ResultsScreen({ route, navigation }) {
         setIsSlowLoading(true);
       }, 15000),
       setTimeout(() => setLoadingStatus("Almost there..."), 25000),
+      // Hard timeout after 90 seconds
+      setTimeout(() => {
+        if (!done) {
+          console.log("[RESULTS] Analysis timeout — showing error");
+          setError("Analysis is taking too long. Please try again.");
+          setStreaming(false);
+          setDone(true);
+        }
+      }, 90000),
     ];
     return () => timers.forEach(clearTimeout);
   }, [streaming, done]);
@@ -294,7 +309,11 @@ export default function ResultsScreen({ route, navigation }) {
   useEffect(() => {
     if (!done || scanCounted || isPro || mode === "history") return;
     setScanCounted(true);
-    incrementScanCount();
+    try {
+      incrementScanCount();
+    } catch (err) {
+      console.log("[RESULTS] Error incrementing scan count:", err.message);
+    }
   }, [done, scanCounted, isPro, mode, incrementScanCount]);
 
   // History saving is now handled by analysisService on completion
@@ -310,10 +329,10 @@ export default function ResultsScreen({ route, navigation }) {
     let showTimer, hideTimer;
     AsyncStorage.getItem("@woof_first_scan_toast_shown").then((val) => {
       if (val) return;
-      AsyncStorage.setItem("@woof_first_scan_toast_shown", "true");
+      AsyncStorage.setItem("@woof_first_scan_toast_shown", "true").catch(() => {});
       showTimer = setTimeout(() => setShowFirstScanToast(true), 1200);
       hideTimer = setTimeout(() => setShowFirstScanToast(false), 4200);
-    });
+    }).catch(() => {});
     return () => { clearTimeout(showTimer); clearTimeout(hideTimer); };
   }, [done, isPro, mode, result?.overallScore]);
 
@@ -324,7 +343,7 @@ export default function ResultsScreen({ route, navigation }) {
     if (scansUsed < 2) return;
     AsyncStorage.getItem("@woof_post_scan_prompt_shown").then((val) => {
       if (!val) setShowPostScanPrompt(true);
-    });
+    }).catch(() => {});
   }, [done, isPro, mode]);
 
   const dismissPostScanPrompt = () => {
@@ -394,11 +413,14 @@ export default function ResultsScreen({ route, navigation }) {
           dialogTitle: `Woof Score: ${result.overallScore}/100`,
         });
       }
-    } catch {
+    } catch (err) {
+      console.log("[SHARE] Image share failed:", err.message);
       // Fallback to text share
       try {
         await Share.share({ message: shareMessage });
-      } catch {}
+      } catch (shareErr) {
+        console.log("[SHARE] Text share also failed:", shareErr.message);
+      }
     }
   };
 
@@ -463,8 +485,8 @@ export default function ResultsScreen({ route, navigation }) {
   if (!result) return null;
 
   // --- Derived data ---
-  const hasScore = result.overallScore != null;
-  const { nutritionAnalysis, customerRating, categories } = result;
+  const hasScore = result?.overallScore != null;
+  const { nutritionAnalysis, customerRating, categories } = result || {};
 
   // --- Success — unified scrollable page ---
   return (
@@ -576,10 +598,10 @@ export default function ResultsScreen({ route, navigation }) {
           />
         </StreamSection>
 
-        {/* 5. First 3 Ingredients (visible to all) */}
+        {/* 5. Ingredients (pro: 5 + expand, free: 3 + fade) */}
         <StreamSection visible={result.ingredients?.length > 0} delay={250}>
           <IngredientsSection
-            ingredients={result.ingredients?.slice(0, isPro ? undefined : 3)}
+            ingredients={isPro ? result.ingredients : result.ingredients?.slice(0, 3)}
             onIngredientPress={setSelectedIngredient}
             totalCount={!isPro ? result.ingredients?.length : undefined}
             fadeLastItem={!isPro && result.ingredients?.length > 3}
@@ -589,19 +611,19 @@ export default function ResultsScreen({ route, navigation }) {
         {/* First scan toast (free users only) */}
         <FirstScanToast visible={showFirstScanToast} />
 
-        {/* Scan Another — above gate for free users */}
-        {done && !isPro && (
-          <StreamSection visible delay={300}>
-            <ScanAnotherButton onPress={handleScanAnother} />
-          </StreamSection>
-        )}
-
         {/* ProGateOverlay — shown for free users when analysis is done */}
         {!isPro && done && hasScore && (
           <ProGateOverlay
             onUpgrade={() => navigatePaywall("results_gate")}
             remainingScans={remainingScans()}
           />
+        )}
+
+        {/* Scan Another — below gate for free users */}
+        {done && !isPro && (
+          <StreamSection visible delay={300}>
+            <ScanAnotherButton onPress={handleScanAnother} />
+          </StreamSection>
         )}
 
         {/* Pro-only sections */}
@@ -627,17 +649,7 @@ export default function ResultsScreen({ route, navigation }) {
               )}
             </StreamSection>
 
-            {/* 7. Full Ingredients (rest beyond first 3) */}
-            {result.ingredients?.length > 3 && (
-              <StreamSection visible delay={250}>
-                <IngredientsSection
-                  ingredients={result.ingredients}
-                  onIngredientPress={setSelectedIngredient}
-                />
-              </StreamSection>
-            )}
-
-            {/* 8. Nutrition Facts */}
+            {/* 7. Nutrition Facts */}
             <StreamSection visible={!!nutritionAnalysis} delay={300}>
               <NutritionFacts nutrition={nutritionAnalysis} />
             </StreamSection>

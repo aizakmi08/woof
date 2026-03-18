@@ -8,6 +8,7 @@ import {
   Alert,
   Pressable,
 } from "react-native";
+import * as ImageManipulator from "expo-image-manipulator";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Animated, {
   useSharedValue,
@@ -25,6 +26,7 @@ import { BlurView } from "expo-blur";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { ChevronLeft, HelpCircle, CameraOff, X } from "lucide-react-native";
 import { useTheme, Colors, Spacing, Shadows } from "../theme";
+import { useAuth } from "../services/auth";
 import * as Haptics from "expo-haptics";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
@@ -103,6 +105,14 @@ export default function ScannerScreen({ navigation, route }) {
   const [showFallbackBanner, setShowFallbackBanner] = useState(false);
   const [barcodeEnabled, setBarcodeEnabled] = useState(true);
   const theme = useTheme();
+  const { checkSession } = useAuth();
+
+  // Proactively refresh auth session when scanner mounts
+  useEffect(() => {
+    checkSession().catch((err) => {
+      console.log("[SCANNER] Session check failed:", err.message);
+    });
+  }, [checkSession]);
 
   // Barcode-not-found fallback: show banner and briefly disable barcode scanning
   useEffect(() => {
@@ -222,17 +232,22 @@ export default function ScannerScreen({ navigation, route }) {
 
     try {
       const photo = await cameraRef.current.takePictureAsync({
-        base64: true,
-        quality: 0.7,
+        quality: 0.8,
       });
-      if (!photo?.base64) {
+      if (!photo?.uri) {
         Alert.alert("Capture Failed", "Could not read the photo. Please try again.");
         setCapturing(false);
         return;
       }
+      // Resize to 1024px max dimension — drastically reduces upload + Claude processing time
+      const resized = await ImageManipulator.manipulateAsync(
+        photo.uri,
+        [{ resize: { width: 1024 } }],
+        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+      );
       navigation.push("Results", {
         mode: "photo",
-        base64: photo.base64,
+        base64: resized.base64,
         uri: photo.uri,
       });
     } catch (err) {

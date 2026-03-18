@@ -17,11 +17,26 @@ import Animated, {
   FadeInDown,
 } from "react-native-reanimated";
 import { WebView } from "react-native-webview";
+import Svg, { Path } from "react-native-svg";
 import { X } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { useAuth } from "../services/auth";
 import { useTheme, Colors, Spacing, Shadows, Typography } from "../theme";
 import { PRIVACY_HTML, TERMS_HTML } from "../legal";
+
+function AppLogo({ size = 48 }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 1024 1024">
+      <Path d="M503.336 454.671C513.775 453.303 528.487 456.332 538.452 459.545C562.736 466.887 583.104 488.258 594.653 510.351C605.092 530.321 607.692 537.7 628.016 549.433C623.093 551.323 617.848 552.825 612.908 554.843C596.003 561.751 581.59 570.297 568.992 583.495C553.892 599.314 545.305 616.66 540.672 637.914C539.318 644.129 537.675 651.946 537.815 658.305C508.944 654.534 492.551 656.384 465.13 666.999C451.055 672.51 439.733 676.433 424.872 678.762C386.3 684.809 355.707 669.364 350.754 628.227C347.659 602.528 354.074 572.475 378.049 557.873C388.219 551.679 399.794 548.695 407.921 539.431C421.226 525.324 425.723 507.914 437.897 492.618C456.132 469.707 474.69 458.41 503.336 454.671Z" fill="#1C1C1E" />
+      <Path d="M645.446 570.243C695.669 566.239 739.617 603.735 743.571 653.962C747.525 704.189 709.986 748.1 659.755 752.004C609.594 755.903 565.758 718.428 561.809 668.271C557.861 618.114 595.293 574.241 645.446 570.243Z" fill="#1C1C1E" />
+      <Path fill="#64D161" d="M685.654 627.076C690.778 626.769 697.132 627.744 700.715 631.541C714.89 646.566 694.777 661.797 685.469 670.956L666.929 689.315C643.227 712.71 637.731 706.417 617.421 684.7C610.037 677.999 599.147 669.823 599.633 658.853C599.877 654.351 601.901 650.129 605.259 647.12C619.365 634.456 635.58 654.955 643.912 664.705C655.464 653.768 672.808 632.747 685.654 627.076Z" />
+      <Path d="M430.039 275.677C440.247 273.906 454.194 278.484 462.724 283.981C509.697 314.249 509.812 408.041 448.083 420.925C435.157 422.777 421.032 418.117 410.639 410.459C367.718 378.834 367.362 284.414 430.039 275.677Z" fill="#1C1C1E" />
+      <Path d="M583.789 275.6C615.436 273.391 635.569 301.136 639.635 330.048C645.08 368.759 625.046 415.489 582.232 421.272C573.643 422.464 561.098 418.345 554.017 413.56C519.463 390.215 517.694 336.201 539.758 303.824C551.184 287.056 564.377 279.332 583.789 275.6Z" fill="#1C1C1E" />
+      <Path d="M682.257 394.627C691.705 393.739 702.144 395.464 709.887 401.097C739.194 422.419 737.537 468.586 718.104 495.882C708.376 509.546 696.757 517.046 680.609 519.898C627.366 522.232 617.919 452.938 643.53 418.512C654.159 404.226 664.927 397.632 682.257 394.627Z" fill="#1C1C1E" />
+      <Path d="M327.359 393.594C377.914 388.979 407.507 460.303 380.078 499.819C373.494 509.341 363.389 515.849 351.996 517.903C346.536 518.801 341.914 518.338 336.432 517.39C288.519 509.102 268.964 429.347 308.82 400.949C314.505 396.899 320.563 395.077 327.359 393.594Z" fill="#1C1C1E" />
+    </Svg>
+  );
+}
 
 function AuthButton({ onPress, onPressIn, onPressOut, style, children, disabled, accessibilityLabel }) {
   return (
@@ -89,12 +104,13 @@ export default function AuthScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: theme.bg }]}>
       {/* Branding */}
       <View style={styles.brandingContainer}>
-        <Animated.Text
+        <Animated.View
           entering={FadeInDown.delay(100).duration(500).springify()}
-          style={[styles.brand, { color: theme.textPrimary }]}
+          style={styles.brandRow}
         >
-          Woof
-        </Animated.Text>
+          <AppLogo size={64} />
+          <Text style={[styles.brand, { color: theme.textPrimary }]}>Woof</Text>
+        </Animated.View>
         <Animated.Text
           entering={FadeInDown.delay(200).duration(500).springify()}
           style={[styles.tagline, { color: theme.textTertiary }]}
@@ -248,6 +264,11 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
+  },
+  brandRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   brand: {
     fontSize: 48,

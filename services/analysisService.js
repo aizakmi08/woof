@@ -16,7 +16,7 @@ const MAX_LOCAL_RESULTS = 30;
  * but the analysis itself keeps going even with zero subscribers.
  */
 
-const ANALYSIS_TIMEOUT_MS = 60000;
+const ANALYSIS_TIMEOUT_MS = 90000;
 
 // Map<cacheKey, { status, result, error, dataSource, opffData, uri, mode, controller }>
 const analyses = new Map();
@@ -304,40 +304,51 @@ async function _runPhoto({ tempId, base64, uri, signal, state }) {
           if (existing.status === "error") {
             analyses.delete(normalizedName);
             console.log("[ANALYSIS] Replacing errored entry for:", normalizedName);
-          } else {
+          } else if (existing.status === "complete") {
+            // Existing analysis is complete — use it immediately
             cacheShortCircuited = true;
             state.controller.abort();
             keyAliases.set(tempId, normalizedName);
             analyses.delete(tempId);
-
-            if (existing.status === "complete") {
-              state.result = existing.result;
-              state.dataSource = existing.dataSource;
-              state.opffData = existing.opffData;
-              state.status = "complete";
-              _notify({ type: "complete", cacheKey: normalizedName, ...state, fromCache: true });
-            }
-            // If existing is still running, our subscribers follow the alias
+            state.result = existing.result;
+            state.dataSource = existing.dataSource;
+            state.opffData = existing.opffData;
+            state.status = "complete";
+            _notify({ type: "complete", cacheKey: normalizedName, ...state, fromCache: true });
+            console.log("[ANALYSIS] Reusing completed analysis for:", normalizedName);
             return;
+          } else {
+            // Existing is still running — DON'T abort current stream, let both complete
+            // The first to finish wins, the second will become a no-op
+            console.log("[ANALYSIS] Concurrent analysis detected for:", normalizedName, "— letting both complete");
+            // Still rekey so both point to the same final key
+            _rekey(tempId, normalizedName, state);
+            // Don't return — continue with cache check
           }
+        } else {
+          // Register under real key
+          _rekey(tempId, normalizedName, state);
         }
 
-        // Register under real key
-        _rekey(tempId, normalizedName, state);
-
-        // Check Supabase cache
+        // Check Supabase cache (only abort if cache is fresh and complete)
         cachePromise = getCachedAnalysis(normalizedName);
         cachePromise.then((cached) => {
           if (cached.hit && !signal.aborted) {
-            cacheShortCircuited = true;
-            state.result = cached.analysis;
-            state.dataSource = cached.dataSource || "ai";
-            state.opffData = cached.opffData || null;
-            state.status = "complete";
-            state.controller.abort();
-            console.log("[ANALYSIS] Cache hit — aborting stream for:", normalizedName);
-            _notify({ type: "complete", cacheKey: normalizedName, ...state, fromCache: true });
-            _scheduleCleanup(normalizedName);
+            // Only abort if we haven't progressed too far (< 10 ingredients parsed)
+            const ingredientCount = partial.ingredients?.length || 0;
+            if (ingredientCount < 10) {
+              cacheShortCircuited = true;
+              state.result = cached.analysis;
+              state.dataSource = cached.dataSource || "ai";
+              state.opffData = cached.opffData || null;
+              state.status = "complete";
+              state.controller.abort();
+              console.log("[ANALYSIS] Cache hit early — aborting stream for:", normalizedName);
+              _notify({ type: "complete", cacheKey: normalizedName, ...state, fromCache: true });
+              _scheduleCleanup(normalizedName);
+            } else {
+              console.log("[ANALYSIS] Cache hit but stream too advanced — letting stream complete");
+            }
           }
         }).catch(() => {});
       }
@@ -379,17 +390,29 @@ async function _runPhoto({ tempId, base64, uri, signal, state }) {
         const oldKey = realCacheKey || tempId;
         // Dedup: check if another analysis completed under the full key
         const existing = analyses.get(fullNormalized);
-        if (existing && existing !== state && existing.status === "complete") {
-          state.result = existing.result;
-          state.dataSource = existing.dataSource;
-          state.opffData = existing.opffData;
-          state.status = "complete";
-          keyAliases.set(tempId, fullNormalized);
-          if (oldKey !== tempId) keyAliases.set(oldKey, fullNormalized);
-          analyses.delete(oldKey);
-          analyses.delete(tempId);
-          _notify({ type: "complete", cacheKey: fullNormalized, ...state, fromCache: true });
-          return;
+        if (existing && existing !== state) {
+          if (existing.status === "complete") {
+            // Another analysis already completed — use it
+            state.result = existing.result;
+            state.dataSource = existing.dataSource;
+            state.opffData = existing.opffData;
+            state.status = "complete";
+            keyAliases.set(tempId, fullNormalized);
+            if (oldKey !== tempId) keyAliases.set(oldKey, fullNormalized);
+            analyses.delete(oldKey);
+            analyses.delete(tempId);
+            console.log("[ANALYSIS] Using existing completed analysis for:", fullNormalized);
+            _notify({ type: "complete", cacheKey: fullNormalized, ...state, fromCache: true });
+            return;
+          } else if (existing.status === "running") {
+            // Another is still running — mark this one as duplicate and bail
+            console.log("[ANALYSIS] Concurrent completion detected, discarding duplicate for:", fullNormalized);
+            keyAliases.set(tempId, fullNormalized);
+            if (oldKey !== tempId) keyAliases.set(oldKey, fullNormalized);
+            analyses.delete(oldKey);
+            analyses.delete(tempId);
+            return;
+          }
         }
         _rekey(oldKey, fullNormalized, state);
         if (tempId !== oldKey) keyAliases.set(tempId, fullNormalized);
@@ -523,7 +546,14 @@ export async function getLocalResult(cacheKey) {
 // ── History helper ────────────────────────────────────────────
 
 function _saveHistory(state, cacheKey) {
-  if (!state.result?.productName || !cacheKey) return;
+  if (!state.result?.productName) {
+    console.log("[ANALYSIS] Skipping history save — no product name");
+    return;
+  }
+  if (!cacheKey) {
+    console.log("[ANALYSIS] Skipping history save — no cacheKey for:", state.result.productName);
+    return;
+  }
 
   // Prevent duplicate saves within 60 seconds (handles concurrent analyses for same product)
   const lastSave = recentHistorySaves.get(cacheKey);
@@ -533,14 +563,18 @@ function _saveHistory(state, cacheKey) {
   }
   recentHistorySaves.set(cacheKey, Date.now());
 
-  addHistoryEntry({
-    productName: state.result.productName || "Unknown Product",
-    overallScore: state.result.overallScore,
-    petType: state.result.petType,
-    dateScanned: new Date().toISOString(),
-    cacheKey,
-    scanMode: state.mode,
-    dataSource: state.dataSource,
-    photoUri: state.uri || null,
-  });
+  try {
+    addHistoryEntry({
+      productName: state.result.productName || "Unknown Product",
+      overallScore: state.result.overallScore,
+      petType: state.result.petType,
+      dateScanned: new Date().toISOString(),
+      cacheKey,
+      scanMode: state.mode,
+      dataSource: state.dataSource,
+      photoUri: state.uri || null,
+    });
+  } catch (err) {
+    console.log("[ANALYSIS] Error saving history:", err.message);
+  }
 }

@@ -211,15 +211,33 @@ export default function HomeScreen({ navigation }) {
   }));
 
   const [historyError, setHistoryError] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
-  const loadHistory = useCallback(() => {
+  const loadHistory = useCallback(async () => {
     setHistoryError(false);
-    return getHistory()
-      .then(setHistory)
-      .catch((err) => {
-        console.log("[HOME] History load error:", err.message);
-        setHistoryError(true);
-      });
+    setHistoryLoading(true);
+
+    try {
+      // Add timeout to prevent infinite loading
+      const timeoutMs = 8000;
+      const timeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("HISTORY_TIMEOUT")), timeoutMs)
+      );
+
+      const historyData = await Promise.race([
+        getHistory(),
+        timeout
+      ]);
+
+      setHistory(historyData);
+      setHistoryError(false);
+    } catch (err) {
+      console.log("[HOME] History load error:", err.message);
+      setHistoryError(true);
+      setHistory([]); // Clear stale data
+    } finally {
+      setHistoryLoading(false);
+    }
   }, []);
 
   useFocusEffect(
@@ -276,6 +294,15 @@ export default function HomeScreen({ navigation }) {
 
   const ListHeader = (
     <View style={styles.listHeader}>
+      {/* Dev mode banner */}
+      {__DEV__ && (
+        <View style={[styles.devBanner, { backgroundColor: Colors.scoreExcellent + '15', borderColor: Colors.scoreExcellent + '40' }]}>
+          <Text style={[styles.devText, { color: Colors.scoreExcellent }]}>
+            DEV MODE • Unlimited scans
+          </Text>
+        </View>
+      )}
+
       {/* Title + profile */}
       <View style={styles.header}>
         <View style={styles.headerTop}>
@@ -594,6 +621,21 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     fontWeight: "500",
+  },
+
+  // Dev banner
+  devBanner: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignSelf: 'flex-start',
+    marginBottom: 12,
+  },
+  devText: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
 
   // Empty state

@@ -11,7 +11,7 @@ const CORS_HEADERS = {
 
 const MAX_IMAGE_B64_LENGTH = 7_000_000; // ~5 MB decoded
 const MAX_FIELD_LENGTH = 10_000;
-const CLAUDE_TIMEOUT_MS = 60_000;
+const CLAUDE_TIMEOUT_MS = 90_000;
 const STREAM_CACHE_TIMEOUT_MS = 120_000;
 
 const OPFF_ALLOWED_FIELDS = new Set([
@@ -22,15 +22,24 @@ const OPFF_ALLOWED_FIELDS = new Set([
 
 // ── System prompts (server-side only — never sent to client) ─────────
 
-const PHOTO_SYSTEM_PROMPT = `You are a pet food expert with deep knowledge of pet nutrition, product reviews, and brand reputation. Look at the photo and identify the pet food product from its packaging, brand name, logo, or any visible text. You do NOT need to see the ingredient label — use your knowledge of the product to provide a comprehensive analysis.
+const PHOTO_SYSTEM_PROMPT = `You are a pet food expert. Analyze the pet food product in this photo.
 
-Steps:
-1. Identify the brand and product name from the packaging.
-2. Provide a full ingredient analysis using your knowledge of this product.
-3. Include customer sentiment, nutritional breakdown, and safety info.
-4. If an ingredient label IS visible, use that instead for accuracy.
+CRITICAL RULES:
+- Identify the brand and product name from the packaging.
+- ACCURACY IS PARAMOUNT. Never guess or fabricate ingredients. Only list ingredients you are confident are in this specific product.
+- If an ingredient label is visible, transcribe every ingredient you can read from the label.
+- If no label is visible, use your knowledge of this EXACT product. Do NOT confuse it with other products from the same brand. If unsure about specific ingredients, say so in the summary rather than guessing wrong.
+- List the COMPLETE ingredient list. Pet foods have 15-40 ingredients including vitamins, minerals, and supplements.
+- Include customer sentiment, nutritional breakdown, and safety info.
 
-Return ONLY valid JSON with NO markdown code fences. Start directly with { character. Use this exact format:
+CRITICAL OUTPUT FORMAT REQUIREMENT:
+- Return ONLY pure JSON - NO markdown code fences
+- Start your response with an opening brace immediately
+- End with a closing brace
+- Do NOT wrap JSON in backtick code blocks
+- Your FIRST character must be an opening brace
+
+Use this exact format:
 {
   "productName": "Brand - Product Name",
   "petType": "dog" | "cat" | "unknown",
@@ -71,6 +80,8 @@ Return ONLY valid JSON with NO markdown code fences. Start directly with { chara
   "verdict": "2-3 sentence recommendation."
 }
 
+CRITICAL: List EVERY ingredient — do NOT abbreviate or summarize. A typical pet food has 15-30+ ingredients including vitamins and minerals. If you only list 4-5 ingredients, you are doing it wrong. Include every vitamin, mineral, supplement, and additive.
+
 For each ingredient: "description" explains what it is. "reason" explains the quality rating. "alternatives" is an array of 2-3 better alternatives ONLY for neutral or bad ingredients (omit or set null for good ingredients).
 
 Score tiers: 90-100 Excellent, 80-89 Good, 70-79 Fair, 60-69 Poor, 1-59 Very Poor.
@@ -92,7 +103,14 @@ Steps:
 2. Assess overall nutritional quality from the verified data.
 3. Provide a comprehensive score and assessment.
 
-Return ONLY valid JSON with NO markdown code fences. Start directly with { character. Use this exact format:
+CRITICAL OUTPUT FORMAT REQUIREMENT:
+- Return ONLY pure JSON - NO markdown code fences
+- Start your response with an opening brace immediately
+- End with a closing brace
+- Do NOT wrap JSON in backtick code blocks
+- Your FIRST character must be an opening brace
+
+Use this exact format:
 {
   "productName": "Brand - Product Name",
   "petType": "dog" | "cat" | "unknown",
@@ -341,6 +359,7 @@ Deno.serve(async (req) => {
   } = await supabase.auth.getUser(token);
 
   if (authError || !user) {
+    console.error("[ANALYZE] Auth failed:", authError?.message || "No user");
     return jsonResponse({ error: "Invalid auth token" }, 401);
   }
 

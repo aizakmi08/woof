@@ -21,6 +21,7 @@ import { Check, X, Star, ChevronRight, ChevronDown, Utensils, Wheat, Calendar, F
 import * as Haptics from "expo-haptics";
 import { useTheme, getScoreConfig, Colors, Animation, Spacing, Shadows, Typography } from "../../theme";
 import { useStyles } from "./styles";
+import { supabase } from "../../services/supabase";
 
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -176,6 +177,21 @@ export function ProGateOverlay({ onUpgrade, remainingScans }) {
         pointerEvents="none"
       />
 
+      {/* Ghost quality bars (recognizable shapes above gate text) */}
+      <View style={gateStyles.ghostContainer}>
+        {[80, 65, 55, 72, 45].map((w, i) => (
+          <View key={i} style={gateStyles.ghostBarRow}>
+            <View style={[gateStyles.ghostLabel, { backgroundColor: theme.textTertiary }]} />
+            <View style={[gateStyles.ghostTrack, { backgroundColor: Colors.divider }]}>
+              <View style={[gateStyles.ghostFill, { width: `${w}%`, backgroundColor: theme.textTertiary }]} />
+            </View>
+          </View>
+        ))}
+        {/* Ghost card shapes */}
+        <View style={[gateStyles.ghostCard, { backgroundColor: theme.textTertiary }]} />
+        <View style={[gateStyles.ghostCard, { backgroundColor: theme.textTertiary }]} />
+      </View>
+
       {/* Lock icon with pulse */}
       <Animated.View style={lockAnimStyle}>
         <Lock size={24} color={theme.textTertiary} strokeWidth={2} />
@@ -222,21 +238,6 @@ export function ProGateOverlay({ onUpgrade, remainingScans }) {
       <Text style={[gateStyles.scanCount, { color: theme.textTertiary }]}>
         {scanText}
       </Text>
-
-      {/* Ghost quality bars (recognizable shapes) */}
-      <View style={gateStyles.ghostContainer}>
-        {[80, 65, 55, 72, 45].map((w, i) => (
-          <View key={i} style={gateStyles.ghostBarRow}>
-            <View style={[gateStyles.ghostLabel, { backgroundColor: theme.textTertiary }]} />
-            <View style={[gateStyles.ghostTrack, { backgroundColor: Colors.divider }]}>
-              <View style={[gateStyles.ghostFill, { width: `${w}%`, backgroundColor: theme.textTertiary }]} />
-            </View>
-          </View>
-        ))}
-        {/* Ghost card shapes */}
-        <View style={[gateStyles.ghostCard, { backgroundColor: theme.textTertiary }]} />
-        <View style={[gateStyles.ghostCard, { backgroundColor: theme.textTertiary }]} />
-      </View>
     </View>
   );
 }
@@ -244,7 +245,7 @@ export function ProGateOverlay({ onUpgrade, remainingScans }) {
 const gateStyles = RNStyleSheet.create({
   container: {
     alignItems: "center",
-    paddingTop: 20,
+    paddingTop: 8,
   },
   gradient: {
     position: "absolute",
@@ -291,7 +292,7 @@ const gateStyles = RNStyleSheet.create({
     marginTop: 10,
   },
   ghostContainer: {
-    marginTop: 24,
+    marginBottom: 20,
     width: "100%",
     paddingHorizontal: 20,
     gap: 10,
@@ -305,13 +306,13 @@ const gateStyles = RNStyleSheet.create({
     width: 60,
     height: 8,
     borderRadius: 4,
-    opacity: 0.05,
+    opacity: 0.08,
   },
   ghostTrack: {
     flex: 1,
     height: 6,
     borderRadius: 3,
-    opacity: 0.06,
+    opacity: 0.10,
     overflow: "hidden",
   },
   ghostFill: {
@@ -321,7 +322,7 @@ const gateStyles = RNStyleSheet.create({
   ghostCard: {
     height: 56,
     borderRadius: 14,
-    opacity: 0.05,
+    opacity: 0.08,
     marginTop: 2,
   },
 });
@@ -857,6 +858,7 @@ export function CategoryBar({ name, score, detail, index = 0, isLast = false }) 
   const animWidth = useSharedValue(0);
   const fadeAnim = useSharedValue(0);
   const [expanded, setExpanded] = useState(false);
+  const [needsTruncation, setNeedsTruncation] = useState(false);
 
   useEffect(() => {
     const stagger = 200 + index * 150;
@@ -909,20 +911,25 @@ export function CategoryBar({ name, score, detail, index = 0, isLast = false }) 
           />
         </View>
 
-        {/* Description + more/less toggle */}
+        {/* Description + more/less */}
         {detail && (
           <View style={styles.categoryDetailRow}>
             <Text
               style={styles.categoryDetail}
               numberOfLines={expanded ? undefined : 1}
+              onTextLayout={(e) => {
+                if (!needsTruncation && e.nativeEvent.lines.length > 1) setNeedsTruncation(true);
+              }}
             >
               {detail}
             </Text>
-            <TouchableOpacity onPress={toggleExpand} hitSlop={8}>
-              <Text style={styles.categoryMoreLink}>
-                {expanded ? "less" : "more"}
-              </Text>
-            </TouchableOpacity>
+            {needsTruncation && (
+              <TouchableOpacity onPress={toggleExpand} hitSlop={8}>
+                <Text style={styles.categoryMoreLink}>
+                  {expanded ? "less" : "more"}
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
 
@@ -1220,8 +1227,11 @@ function IngredientRow({ ingredient, isFirst, isLast, index, onPress }) {
 
 // --- IngredientsSection (summary bar + flat list, taps open sheet) ---
 
+const COLLAPSED_COUNT = 5;
+
 export function IngredientsSection({ ingredients, onIngredientPress, totalCount, fadeLastItem }) {
   const { styles, theme } = useStyles();
+  const [expanded, setExpanded] = useState(false);
 
   if (!ingredients || ingredients.length === 0) return null;
 
@@ -1236,9 +1246,24 @@ export function IngredientsSection({ ingredients, onIngredientPress, totalCount,
   if (neutral > 0) segments.push({ color: Colors.ingredientNeutral, opacity: 0.4, flex: neutral / total, label: `${neutral} Neutral` });
   if (bad > 0) segments.push({ color: Colors.ingredientBad, opacity: 0.85, flex: bad / total, label: `${bad} Concerning` });
 
+  // Free users: show all passed ingredients (caller slices to 3 with fadeLastItem)
+  // Pro users: show first 5 collapsed, all when expanded
+  const canExpand = !fadeLastItem && total > COLLAPSED_COUNT;
+  const visibleIngredients = canExpand && !expanded
+    ? ingredients.slice(0, COLLAPSED_COUNT)
+    : ingredients;
+
+  const toggleExpand = () => {
+    Haptics.selectionAsync();
+    LayoutAnimation.configureNext(
+      LayoutAnimation.create(250, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity)
+    );
+    setExpanded(!expanded);
+  };
+
   return (
     <View style={styles.ingredientsSection}>
-      <Text style={styles.ingredientsTitle}>Ingredients ({displayTotal})</Text>
+      <Text style={styles.ingredientsTitle}>{`Ingredients (${displayTotal})`}</Text>
 
       {/* Summary bar */}
       <View style={styles.ingSummaryBar}>
@@ -1265,12 +1290,15 @@ export function IngredientsSection({ ingredients, onIngredientPress, totalCount,
             <Text style={styles.ingSummaryLabelText}>{seg.label}</Text>
           </View>
         ))}
+        {totalCount != null && totalCount > total && (
+          <Text style={styles.ingSummaryLabelText}>· {totalCount - total} more</Text>
+        )}
       </View>
 
       {/* Rows (natural order — not reordered) */}
-      {ingredients.map((ing, i) => {
-        const isLast = i === ingredients.length - 1;
-        const isFadedLast = fadeLastItem && isLast;
+      {visibleIngredients.map((ing, i) => {
+        const isLast = i === visibleIngredients.length - 1 && !canExpand;
+        const isFadedLast = fadeLastItem && i === visibleIngredients.length - 1;
 
         if (isFadedLast) {
           return (
@@ -1303,6 +1331,17 @@ export function IngredientsSection({ ingredients, onIngredientPress, totalCount,
           />
         );
       })}
+
+      {/* Expand / collapse toggle (pro users only, >5 ingredients) */}
+      {canExpand && (
+        <TouchableOpacity onPress={toggleExpand} activeOpacity={0.7}>
+          <View style={styles.ingExpandButton}>
+            <Text style={styles.ingExpandText}>
+              {expanded ? "Show less" : `Show all ${total} ingredients`}
+            </Text>
+          </View>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -1325,18 +1364,24 @@ export function IngredientSheet({ ingredient, onDismiss, isPro = true, onUpgrade
   const { styles, theme } = useStyles();
   const { height: screenHeight } = useWindowDimensions();
   const maxSheetHeight = screenHeight * 0.6;
+  const offScreenY = screenHeight;
 
   const [modalVisible, setModalVisible] = useState(false);
   const ingredientRef = useRef(null);
+  const dismissingRef = useRef(false);
 
-  const translateY = useSharedValue(500);
+  const translateY = useSharedValue(offScreenY);
   const backdropOpacity = useSharedValue(0);
   const contentOpacity = useSharedValue(0);
 
   // Open when ingredient changes to non-null
   useEffect(() => {
-    if (ingredient) {
+    if (ingredient && !dismissingRef.current) {
       ingredientRef.current = ingredient;
+      // Reset to off-screen before showing modal to prevent flash
+      translateY.value = offScreenY;
+      backdropOpacity.value = 0;
+      contentOpacity.value = 0;
       setModalVisible(true);
     }
   }, [ingredient]);
@@ -1344,41 +1389,48 @@ export function IngredientSheet({ ingredient, onDismiss, isPro = true, onUpgrade
   // Animate in once modal is visible
   useEffect(() => {
     if (modalVisible && ingredientRef.current) {
-      translateY.value = withSpring(0, { damping: 15, stiffness: 120 });
-      backdropOpacity.value = withTiming(0.3, { duration: 200 });
-      contentOpacity.value = withDelay(100, withTiming(1, { duration: 200 }));
+      // Use requestAnimationFrame to ensure Modal is rendered before animating
+      requestAnimationFrame(() => {
+        translateY.value = withTiming(0, { duration: 300, easing: Easing.out(Easing.cubic) });
+        backdropOpacity.value = withTiming(0.3, { duration: 250 });
+        contentOpacity.value = withDelay(100, withTiming(1, { duration: 200 }));
+      });
     }
   }, [modalVisible]);
 
   const dismissRef = useRef(null);
   const dismiss = useCallback(() => {
+    if (dismissingRef.current) return;
+    dismissingRef.current = true;
     Haptics.selectionAsync();
     backdropOpacity.value = withTiming(0, { duration: 200 });
     contentOpacity.value = withTiming(0, { duration: 100 });
-    translateY.value = withTiming(500, { duration: 300 });
+    translateY.value = withTiming(offScreenY, { duration: 250, easing: Easing.in(Easing.cubic) });
     setTimeout(() => {
       setModalVisible(false);
-      translateY.value = 500;
+      translateY.value = offScreenY;
       backdropOpacity.value = 0;
       contentOpacity.value = 0;
+      dismissingRef.current = false;
       onDismiss();
-    }, 300);
-  }, [onDismiss]);
+    }, 280);
+  }, [onDismiss, offScreenY]);
   dismissRef.current = dismiss;
 
   // PanResponder on handle for swipe-to-dismiss
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_, { dy }) => dy > 8,
+      onMoveShouldSetPanResponder: (_, { dy }) => !dismissingRef.current && dy > 8,
       onPanResponderMove: (_, { dy }) => {
-        if (dy > 0) translateY.value = dy;
+        if (dy > 0 && !dismissingRef.current) translateY.value = dy;
       },
       onPanResponderRelease: (_, { dy, vy }) => {
+        if (dismissingRef.current) return;
         if (dy > 80 || vy > 0.5) {
           dismissRef.current?.();
         } else {
-          translateY.value = withSpring(0, { damping: 15, stiffness: 120 });
+          translateY.value = withTiming(0, { duration: 200, easing: Easing.out(Easing.cubic) });
         }
       },
     })
@@ -1816,14 +1868,9 @@ export function RecallCard({ recallHistory }) {
 export function ScanAnotherButton({ onPress }) {
   const { styles } = useStyles();
   const scale = useSharedValue(1);
-  const fillOpacity = useSharedValue(0);
 
   const scaleStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
-  }));
-
-  const fillStyle = useAnimatedStyle(() => ({
-    opacity: fillOpacity.value,
   }));
 
   return (
@@ -1831,11 +1878,9 @@ export function ScanAnotherButton({ onPress }) {
       activeOpacity={1}
       onPressIn={() => {
         scale.value = withSpring(0.97, { damping: 20, stiffness: 300 });
-        fillOpacity.value = withTiming(1, { duration: 100 });
       }}
       onPressOut={() => {
         scale.value = withSpring(1, { damping: 15, stiffness: 150 });
-        fillOpacity.value = withTiming(0, { duration: 150 });
       }}
       onPress={() => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -1843,7 +1888,6 @@ export function ScanAnotherButton({ onPress }) {
       }}
     >
       <Animated.View style={[styles.scanAnotherButton, scaleStyle]}>
-        <Animated.View style={[styles.scanAnotherFill, fillStyle]} />
         <Text style={styles.scanAnotherText}>Scan Another Product</Text>
       </Animated.View>
     </TouchableOpacity>
@@ -2236,19 +2280,33 @@ export function LoadingSkeleton({ loadingStatus, isSlowLoading }) {
 export function ErrorState({ error, mode, onRetry, onScanAnother }) {
   const { styles, theme } = useStyles();
 
-  const title = mode === "history"
+  // Check if this is a session expiry error
+  const isSessionError = error?.includes("Session expired") || error?.includes("session expired");
+
+  const title = isSessionError
+    ? "Session Expired"
+    : mode === "history"
     ? "Result Expired"
     : mode === "barcode"
     ? "Barcode Not Found"
     : "Couldn't analyze this label";
 
-  const buttonLabel = mode === "history"
+  const buttonLabel = isSessionError
+    ? "Sign In Again"
+    : mode === "history"
     ? "Back to Home"
     : mode === "barcode"
     ? "Take Photo Instead"
     : "Try Again";
 
-  const onPress = mode === "history" || mode === "barcode"
+  const onPress = isSessionError
+    ? () => {
+        // Force sign out when session is expired
+        supabase.auth.signOut().catch((err) => {
+          console.log("[ERROR_STATE] Sign out failed:", err.message);
+        });
+      }
+    : mode === "history" || mode === "barcode"
     ? onScanAnother
     : onRetry;
 

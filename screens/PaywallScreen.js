@@ -13,9 +13,9 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withSpring,
+  withTiming,
+  Easing,
   FadeIn,
-  FadeInDown,
-  FadeInUp,
 } from "react-native-reanimated";
 import Svg, { Circle } from "react-native-svg";
 import { LinearGradient } from "expo-linear-gradient";
@@ -48,8 +48,8 @@ const FEATURES = [
 ];
 
 const PLANS = [
-  { key: "weekly", label: "Weekly", hasTrial: true, flex: 0.28 },
-  { key: "monthly", label: "Monthly", hasTrial: true, flex: 0.28 },
+  { key: "weekly", label: "Weekly", hasTrial: true, flex: 0.26 },
+  { key: "monthly", label: "Monthly", hasTrial: true, flex: 0.30 },
   { key: "annual", label: "Annual", hasTrial: true, flex: 0.44, popular: true },
 ];
 
@@ -128,7 +128,7 @@ function TrialTimeline({ theme }) {
 
 export default function PaywallScreen({ route, navigation }) {
   const theme = useTheme();
-  const { refreshProStatus } = useAuth();
+  const { refreshProStatus, isPro } = useAuth();
   const { source, productName, score } = route.params || {};
 
   const [offerings, setOfferings] = useState(null);
@@ -136,10 +136,33 @@ export default function PaywallScreen({ route, navigation }) {
   const [purchasing, setPurchasing] = useState(false);
   const [restoring, setRestoring] = useState(false);
 
+  // Auto-dismiss if user is already pro
+  useEffect(() => {
+    if (isPro) {
+      console.log("[PAYWALL] User is already pro, dismissing");
+      navigation.goBack();
+    }
+  }, [isPro, navigation]);
+
   const ctaScale = useSharedValue(1);
+  // Grok-style morph: full width → compact circle on purchase
+  const ctaWidthPercent = useSharedValue(100);
   const ctaAnimStyle = useAnimatedStyle(() => ({
     transform: [{ scale: ctaScale.value }],
+    width: `${ctaWidthPercent.value}%`,
+    alignSelf: "center",
+    borderRadius: ctaWidthPercent.value < 100 ? 27 : 14,
   }));
+
+  // Unified subtle content fade — Apple-style
+  const contentOpacity = useSharedValue(0.85);
+  const contentAnimStyle = useAnimatedStyle(() => ({
+    opacity: contentOpacity.value,
+  }));
+
+  useEffect(() => {
+    contentOpacity.value = withTiming(1, { duration: 200 });
+  }, []);
 
   useEffect(() => {
     console.log("[PAYWALL] viewed", { source, productName, score });
@@ -159,7 +182,7 @@ export default function PaywallScreen({ route, navigation }) {
 
   const weeklyPrice = weeklyPkg?.product?.priceString || "$4.99";
   const monthlyPrice = monthlyPkg?.product?.priceString || "$7.99";
-  const annualPrice = annualPkg?.product?.priceString || "$39.99";
+  const annualPrice = annualPkg?.product?.priceString || "$29.99";
 
   const scoreConfig = score ? getScoreConfig(score) : null;
   const headlineText = getContextualHeadline(source, productName);
@@ -179,8 +202,10 @@ export default function PaywallScreen({ route, navigation }) {
     }
     console.log("[PAYWALL] purchase_started", { plan: selectedPlan.key });
     setPurchasing(true);
+    ctaWidthPercent.value = withTiming(18, { duration: 400, easing: Easing.out(Easing.cubic) });
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const result = await purchasePackage(selectedPkg);
+    ctaWidthPercent.value = withTiming(100, { duration: 300, easing: Easing.out(Easing.cubic) });
     setPurchasing(false);
 
     if (result.success) {
@@ -231,63 +256,58 @@ export default function PaywallScreen({ route, navigation }) {
         pointerEvents="none"
       />
 
-      {/* Close button */}
-      <View style={styles.closeRow}>
-        <Pressable
-          onPress={handleDismiss}
-          hitSlop={12}
-          style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
-          accessibilityRole="button"
-          accessibilityLabel="Close"
-        >
-          <View style={[styles.closeButton, { backgroundColor: theme.fill }]}>
-            <X size={18} color={theme.textSecondary} strokeWidth={2} />
-          </View>
-        </Pressable>
-      </View>
+      {/* Close button — Apple-style, no background circle */}
+      <Pressable
+        onPress={handleDismiss}
+        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        style={({ pressed }) => [styles.closeButtonApple, { opacity: pressed ? 0.85 : 1 }]}
+        accessibilityRole="button"
+        accessibilityLabel="Close"
+      >
+        <X size={20} color={theme.textTertiary} strokeWidth={2.5} />
+      </Pressable>
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         bounces={false}
       >
+        {/* Drag handle */}
+        <View style={[styles.dragHandle, { backgroundColor: Colors.divider }]} />
+
+        {/* Unified content fade */}
+        <Animated.View style={contentAnimStyle}>
+
         {/* ═══════════ ZONE 1: THE PITCH ═══════════ */}
 
         {/* Headline */}
-        <Animated.View
-          entering={FadeInDown.delay(100).duration(350).damping(18).stiffness(200)}
-          style={styles.headerSection}
-        >
+        <View style={styles.headerSection}>
           <Text style={[styles.headerTitle, { color: theme.textPrimary }]}>
             {headlineText}
           </Text>
           {source === "results_gate" && scoreConfig && (
             <MiniScoreRing score={score} color={scoreConfig.color} />
           )}
-        </Animated.View>
+        </View>
 
         {/* Social proof */}
-        <Animated.View entering={FadeIn.delay(250).duration(300)} style={styles.socialProofSection}>
+        <View style={styles.socialProofSection}>
           <Text style={[styles.positioningText, { color: theme.textTertiary }]}>
             Built for pet parents who care about ingredients
           </Text>
-        </Animated.View>
+        </View>
 
         {/* Features — inline rows */}
         <View style={styles.featuresList}>
           {FEATURES.map((feature, i) => {
             const Icon = feature.icon;
             return (
-              <Animated.View
-                key={i}
-                entering={FadeInUp.delay(300 + i * 50).duration(250)}
-                style={styles.featureRow}
-              >
-                <Icon size={16} color={Colors.scoreExcellent} strokeWidth={2} />
+              <View key={i} style={styles.featureRow}>
+                <Icon size={20} color={Colors.scoreExcellent} strokeWidth={1.8} />
                 <Text style={[styles.featureRowText, { color: theme.textPrimary }]}>
                   {feature.text}
                 </Text>
-              </Animated.View>
+              </View>
             );
           })}
         </View>
@@ -295,24 +315,20 @@ export default function PaywallScreen({ route, navigation }) {
         {/* ═══════════ ZONE 2: THE CHOICE ═══════════ */}
 
         {/* Pricing cards */}
-        <Animated.View
-          entering={FadeInUp.delay(700).duration(350).springify().damping(16).stiffness(140)}
-          style={styles.cardsRow}
-        >
+        <View style={styles.cardsRow}>
           {PLANS.map((plan, i) => {
             const isSelected = selectedIndex === i;
-            const showBadge = plan.popular && isSelected;
 
             return (
               <View key={plan.key} style={{ flex: plan.flex }}>
-                {/* BEST VALUE badge — only visible when annual is selected */}
-                {showBadge && (
-                  <Animated.View entering={FadeIn.duration(200)} style={styles.bestValueBadge}>
+                {/* Fixed-height spacer for all cards — badge overlaps into it for popular plan */}
+                {plan.popular ? (
+                  <View style={[styles.bestValueBadge, { opacity: isSelected ? 1 : 0 }]}>
                     <Text style={styles.bestValueText}>BEST VALUE</Text>
-                  </Animated.View>
+                  </View>
+                ) : (
+                  <View style={styles.badgeSpacer} />
                 )}
-                {/* Invisible spacer when badge is hidden to keep card alignment */}
-                {plan.popular && !showBadge && <View style={styles.badgeSpacer} />}
 
                 <Pressable
                   onPress={() => handlePlanSelect(i)}
@@ -323,7 +339,7 @@ export default function PaywallScreen({ route, navigation }) {
                       { backgroundColor: theme.card },
                     ] : [
                       styles.pricingCardDefault,
-                      { backgroundColor: theme.card, borderColor: Colors.divider },
+                      { backgroundColor: theme.card },
                     ],
                     pressed && { transform: [{ scale: 0.97 }] },
                   ]}
@@ -332,11 +348,13 @@ export default function PaywallScreen({ route, navigation }) {
                     {plan.label}
                   </Text>
 
-                  {/* Annual: crossed-out anchor price */}
-                  {plan.key === "annual" && (
+                  {/* Annual: crossed-out anchor price; others get spacer to align prices */}
+                  {plan.key === "annual" ? (
                     <Text style={[styles.planStrikethrough, { color: theme.textTertiary }]}>
-                      $95.88
+                      $95.88/yr
                     </Text>
+                  ) : (
+                    <View style={styles.strikethroughSpacer} />
                   )}
 
                   {/* Price */}
@@ -365,9 +383,9 @@ export default function PaywallScreen({ route, navigation }) {
                   {/* Annual extras */}
                   {plan.key === "annual" && (
                     <>
-                      <Text style={styles.planMonthly}>$3.33/mo</Text>
+                      <Text style={styles.planMonthly}>$2.50/mo</Text>
                       <View style={styles.saveBadge}>
-                        <Text style={styles.saveText}>Save 58%</Text>
+                        <Text style={styles.saveText}>Save 69%</Text>
                       </View>
                     </>
                   )}
@@ -375,16 +393,16 @@ export default function PaywallScreen({ route, navigation }) {
               </View>
             );
           })}
-        </Animated.View>
+        </View>
 
         {/* ═══════════ ZONE 3: THE ACTION ═══════════ */}
 
-        {/* CTA button */}
-        <Animated.View entering={FadeInUp.delay(850).duration(350)} style={styles.ctaSection}>
+        {/* CTA button — Grok-style morph animation */}
+        <View style={styles.ctaSection}>
           <Pressable
             onPress={handlePurchase}
-            onPressIn={() => { ctaScale.value = withSpring(0.97, { damping: 20, stiffness: 300 }); }}
-            onPressOut={() => { ctaScale.value = withSpring(1, { damping: 15, stiffness: 150 }); }}
+            onPressIn={() => { if (!purchasing) ctaScale.value = withSpring(0.97, { damping: 20, stiffness: 300 }); }}
+            onPressOut={() => { if (!purchasing) ctaScale.value = withSpring(1, { damping: 15, stiffness: 150 }); }}
             disabled={isLoading}
             accessibilityRole="button"
             accessibilityLabel={isTrialPlan ? "Try free for 3 days" : "Subscribe now"}
@@ -393,28 +411,35 @@ export default function PaywallScreen({ route, navigation }) {
             <Animated.View
               style={[
                 styles.ctaButton,
-                { backgroundColor: theme.buttonPrimary },
+                { backgroundColor: theme.buttonPrimary, overflow: "hidden" },
                 ctaAnimStyle,
               ]}
             >
               {purchasing ? (
-                <ActivityIndicator color={theme.buttonText} />
+                <Animated.View key="loader" entering={FadeIn.duration(200)}>
+                  <ActivityIndicator color={theme.buttonText} />
+                </Animated.View>
               ) : (
-                <Text style={[styles.ctaText, { color: theme.buttonText }]}>
+                <Animated.Text
+                  key="text"
+                  entering={FadeIn.duration(200)}
+                  style={[styles.ctaText, { color: theme.buttonText }]}
+                  numberOfLines={1}
+                >
                   {isTrialPlan ? "Try Free for 3 Days" : "Subscribe Now"}
-                </Text>
+                </Animated.Text>
               )}
             </Animated.View>
           </Pressable>
-        </Animated.View>
+        </View>
 
         {/* Timeline + trust text */}
-        <Animated.View entering={FadeIn.delay(1100).duration(300)}>
+        <View>
           {isTrialPlan ? (
             <>
               <TrialTimeline theme={theme} />
               <View style={styles.trustRow}>
-                <Lock size={10} color={theme.textTertiary} strokeWidth={2} />
+                <Lock size={11} color={theme.textTertiary} strokeWidth={1.5} />
                 <Text style={[styles.trustText, { color: theme.textTertiary }]}>
                   Cancel before day 3 and you won't be charged
                 </Text>
@@ -425,13 +450,10 @@ export default function PaywallScreen({ route, navigation }) {
               $7.99/month. Cancel anytime.
             </Text>
           )}
-        </Animated.View>
+        </View>
 
         {/* Footer */}
-        <Animated.View
-          entering={FadeIn.delay(1100).duration(300)}
-          style={styles.footer}
-        >
+        <View style={styles.footer}>
           <Pressable
             onPress={handleRestore}
             disabled={isLoading}
@@ -442,7 +464,7 @@ export default function PaywallScreen({ route, navigation }) {
             {restoring ? (
               <ActivityIndicator size="small" color={theme.textTertiary} />
             ) : (
-              <Text style={[styles.restoreText, { color: theme.textTertiary }]}>
+              <Text style={[styles.restoreText, { color: theme.textSecondary }]}>
                 Restore Purchases
               </Text>
             )}
@@ -469,6 +491,8 @@ export default function PaywallScreen({ route, navigation }) {
               <Text style={[styles.legalText, { color: theme.textTertiary }]}>Privacy</Text>
             </Pressable>
           </View>
+        </View>
+
         </Animated.View>
       </ScrollView>
     </SafeAreaView>
@@ -486,30 +510,35 @@ const styles = StyleSheet.create({
     right: 0,
     height: 200,
   },
-  closeRow: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    paddingHorizontal: Spacing.screenPadding,
-    paddingTop: Spacing.xs,
-  },
-  closeButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+  closeButtonApple: {
+    position: "absolute",
+    top: 14,
+    right: 16,
+    width: 30,
+    height: 30,
     alignItems: "center",
     justifyContent: "center",
+    zIndex: 10,
+  },
+  dragHandle: {
+    width: 36,
+    height: 5,
+    borderRadius: 2.5,
+    alignSelf: "center",
+    marginTop: 8,
+    marginBottom: 20,
   },
   scrollContent: {
     flexGrow: 1,
     justifyContent: "center",
-    paddingBottom: 12,
+    paddingBottom: 24,
   },
 
   // --- Zone 1: Pitch ---
 
   headerSection: {
-    marginTop: 10,
-    marginBottom: 4,
+    marginTop: 4,
+    marginBottom: 12,
     alignItems: "center",
   },
   headerTitle: {
@@ -533,28 +562,29 @@ const styles = StyleSheet.create({
   },
   socialProofSection: {
     alignItems: "center",
-    marginBottom: 10,
+    marginBottom: 20,
   },
   positioningText: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: "400",
     textAlign: "center",
   },
 
   // Features — inline rows
   featuresList: {
-    paddingHorizontal: 32,
-    marginBottom: 16,
+    paddingHorizontal: 36,
+    marginBottom: 0,
   },
   featureRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    marginBottom: 8,
+    gap: 14,
+    marginBottom: 14,
   },
   featureRowText: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: "500",
+    letterSpacing: -0.2,
   },
 
   // --- Zone 2: Choice ---
@@ -564,54 +594,56 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     gap: 10,
     alignItems: "stretch",
+    marginTop: 24,
   },
   pricingCard: {
     flex: 1,
     borderRadius: 14,
-    paddingVertical: 14,
-    paddingHorizontal: 8,
+    paddingVertical: 16,
+    paddingHorizontal: 10,
     alignItems: "center",
-    justifyContent: "center",
+    justifyContent: "flex-start",
   },
   pricingCardDefault: {
-    borderWidth: 1.5,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
   },
   pricingCardSelected: {
-    borderWidth: 2,
+    borderWidth: 1.5,
     borderColor: Colors.scoreExcellent,
     shadowColor: Colors.scoreExcellent,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
-    elevation: 4,
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 0,
   },
   bestValueBadge: {
     alignSelf: "center",
     backgroundColor: Colors.scoreExcellent,
     paddingHorizontal: 12,
-    paddingVertical: 3,
-    borderRadius: 10,
-    marginBottom: -12,
+    paddingVertical: 4,
+    borderRadius: 8,
+    marginBottom: -11,
     zIndex: 1,
     shadowColor: Colors.scoreExcellent,
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.25,
     shadowRadius: 4,
     elevation: 3,
   },
   bestValueText: {
     color: "#FFFFFF",
-    fontSize: 9,
+    fontSize: 10,
     fontWeight: "700",
-    letterSpacing: 1.5,
+    letterSpacing: 1.2,
   },
   badgeSpacer: {
-    height: 15,
+    height: 11,
   },
   planLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    letterSpacing: 0.5,
+    fontSize: 12,
+    fontWeight: "500",
+    letterSpacing: 0.3,
     marginBottom: 4,
   },
   planPrice: {
@@ -620,20 +652,23 @@ const styles = StyleSheet.create({
     letterSpacing: -0.5,
   },
   planPriceHero: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: "700",
     letterSpacing: -0.5,
   },
   planPeriod: {
     fontSize: 11,
     fontWeight: "400",
-    marginTop: -2,
+    marginTop: -1,
   },
   planStrikethrough: {
     fontSize: 12,
     fontWeight: "400",
     textDecorationLine: "line-through",
     marginBottom: 2,
+  },
+  strikethroughSpacer: {
+    height: 18, // matches strikethrough text (fontSize 12 lineHeight ~16 + marginBottom 2)
   },
   planMonthly: {
     fontSize: 12,
@@ -651,14 +686,14 @@ const styles = StyleSheet.create({
     marginVertical: 6,
   },
   saveBadge: {
-    marginTop: 4,
-    backgroundColor: "rgba(52, 199, 89, 0.1)",
-    paddingVertical: 2,
-    paddingHorizontal: 8,
+    marginTop: 6,
+    backgroundColor: "rgba(52, 199, 89, 0.08)",
+    paddingVertical: 3,
+    paddingHorizontal: 10,
     borderRadius: 6,
   },
   saveText: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: "600",
     color: Colors.scoreExcellent,
   },
@@ -666,29 +701,29 @@ const styles = StyleSheet.create({
   // --- Zone 3: Action ---
 
   ctaSection: {
-    marginTop: 16,
+    marginTop: 22,
+    paddingHorizontal: 20,
   },
   ctaButton: {
     height: 54,
     borderRadius: 14,
-    marginHorizontal: 20,
     alignItems: "center",
     justifyContent: "center",
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
     elevation: 6,
   },
   ctaText: {
     fontSize: 17,
     fontWeight: "600",
-    letterSpacing: 0.3,
+    letterSpacing: -0.2,
   },
 
   // Timeline
   timelineContainer: {
-    marginTop: 10,
+    marginTop: 16,
     paddingHorizontal: 24,
   },
   timelineTrack: {
@@ -731,38 +766,40 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 4,
-    marginTop: 6,
+    marginTop: 10,
   },
   trustText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: "400",
+    letterSpacing: -0.1,
   },
   trustTextStandalone: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: "400",
     textAlign: "center",
-    marginTop: 6,
+    marginTop: 10,
+    letterSpacing: -0.1,
   },
 
   // Footer
   footer: {
     alignItems: "center",
-    marginTop: 10,
-    gap: 6,
+    marginTop: 16,
+    gap: 8,
   },
   restoreText: {
-    fontSize: 12,
-    fontWeight: "500",
+    fontSize: 13,
+    fontWeight: "400",
   },
   legalRow: {
     flexDirection: "row",
     alignItems: "center",
   },
   legalText: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: "400",
   },
   legalDot: {
-    fontSize: 10,
+    fontSize: 11,
   },
 });

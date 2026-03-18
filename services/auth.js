@@ -13,11 +13,14 @@ WebBrowser.maybeCompleteAuthSession();
 
 const AuthContext = createContext(null);
 
-const redirectUri = makeRedirectUri();
+const redirectUri = makeRedirectUri({ native: "woof://auth/callback" });
 console.log("[AUTH] Redirect URI:", redirectUri);
 
 const FREE_SCAN_LIMIT = 3;
 const SCAN_COUNT_KEY = "@woof_scan_count";
+
+// DEV MODE: Set to true to bypass scan limits and paywall (NEVER ship with this enabled!)
+const DEV_MODE = __DEV__; // Automatically true in dev, false in production
 
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
@@ -67,6 +70,32 @@ export function AuthProvider({ children }) {
     }
   }, [user?.id]);
 
+  const checkSession = useCallback(async () => {
+    try {
+      const { data: { session }, error } = await supabase.auth.getSession();
+      if (error || !session) {
+        console.log("[AUTH] Session check failed:", error?.message || "No session");
+        return false;
+      }
+
+      // Check if token is expired or expiring soon
+      if (session.expires_at && Date.now() / 1000 > session.expires_at - 60) {
+        console.log("[AUTH] Token expiring, refreshing...");
+        const { data, error: refreshError } = await supabase.auth.refreshSession();
+        if (refreshError || !data.session) {
+          console.log("[AUTH] Token refresh failed:", refreshError?.message);
+          return false;
+        }
+        console.log("[AUTH] Token refreshed successfully");
+      }
+
+      return true;
+    } catch (err) {
+      console.log("[AUTH] Session check error:", err.message);
+      return false;
+    }
+  }, []);
+
   const incrementScanCount = useCallback(async () => {
     // Use functional update to avoid race conditions with concurrent calls
     setScanCount((prev) => {
@@ -85,52 +114,85 @@ export function AuthProvider({ children }) {
   }, [user?.id]);
 
   const canScan = useCallback(() => {
+    if (DEV_MODE) return true; // Always allow scans in dev mode
     return isPro || scanCount < FREE_SCAN_LIMIT;
   }, [isPro, scanCount]);
 
   const remainingScans = useCallback(() => {
-    if (isPro) return Infinity;
+    if (DEV_MODE || isPro) return Infinity;
     return Math.max(0, FREE_SCAN_LIMIT - scanCount);
   }, [isPro, scanCount]);
 
   useEffect(() => {
+    let mounted = true;
+
     // Load scan count from local storage immediately
     AsyncStorage.getItem(SCAN_COUNT_KEY).then((val) => {
-      if (val != null) setScanCount(parseInt(val, 10) || 0);
+      if (val != null && mounted) setScanCount(parseInt(val, 10) || 0);
     });
 
     // Get initial session
     supabase.auth.getSession().then(async ({ data: { session: s } }) => {
+      if (!mounted) return;
+
       setSession(s);
       setUser(s?.user ?? null);
+
       if (s?.user) {
-        await fetchProfile(s.user.id);
-        await initializePurchases(s.user.id);
+        // Run profile and purchases in parallel with timeout
+        const timeoutMs = 5000;
+        const timeout = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("AUTH_TIMEOUT")), timeoutMs)
+        );
+
         try {
-          const pro = await checkProStatus();
-          setIsPro(pro);
+          await Promise.race([
+            Promise.all([
+              fetchProfile(s.user.id),
+              initializePurchases(s.user.id).then(() => checkProStatus().then(pro => {
+                if (mounted) setIsPro(pro);
+              }))
+            ]),
+            timeout
+          ]);
         } catch (err) {
-          console.log("[AUTH] Error checking pro status on init:", err.message);
+          console.log("[AUTH] Init timeout or error:", err.message);
+          // Continue anyway — user can retry
         }
       }
-      setLoading(false);
+
+      if (mounted) setLoading(false);
     });
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, s) => {
+        if (!mounted) return;
+
         setSession(s);
         setUser(s?.user ?? null);
 
         if (event === "SIGNED_IN" && s?.user) {
-          await fetchProfile(s.user.id);
-          await initializePurchases(s.user.id);
+          // Run in parallel with timeout
+          const timeoutMs = 5000;
+          const timeout = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("AUTH_TIMEOUT")), timeoutMs)
+          );
+
           try {
-            const pro = await checkProStatus();
-            setIsPro(pro);
+            await Promise.race([
+              Promise.all([
+                fetchProfile(s.user.id),
+                initializePurchases(s.user.id).then(() => checkProStatus().then(pro => {
+                  if (mounted) setIsPro(pro);
+                }))
+              ]),
+              timeout
+            ]);
           } catch (err) {
-            console.log("[AUTH] Error checking pro status on sign-in:", err.message);
+            console.log("[AUTH] Sign-in timeout or error:", err.message);
           }
+
           migrateLocalHistoryToSupabase(s.user.id).catch((err) =>
             console.log("[AUTH] Migration error:", err.message)
           );
@@ -145,7 +207,10 @@ export function AuthProvider({ children }) {
       }
     );
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, [fetchProfile]);
 
   // --- Apple Sign-In ---
@@ -232,6 +297,7 @@ export function AuthProvider({ children }) {
         signInWithGoogle,
         signOut,
         refreshProStatus,
+        checkSession,
         incrementScanCount,
         canScan,
         remainingScans,
