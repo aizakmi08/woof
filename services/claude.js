@@ -1,16 +1,12 @@
 import { parse as parsePartialJson } from "partial-json";
 import { supabase } from "./supabase";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../config/env";
-import { fetch as rnFetch, polyfill } from "react-native-fetch-api";
-
-// Polyfill ReadableStream for production builds
-polyfill();
 
 const ANALYZE_URL = `${SUPABASE_URL}/functions/v1/analyze`;
 
-// Use react-native-fetch-api for proper streaming support in production
-const streamFetch = rnFetch;
-console.log("[CLAUDE] Using react-native-fetch-api for streaming support");
+// Use global fetch - works in both dev and production
+const streamFetch = global.fetch;
+console.log("[CLAUDE] Using global fetch");
 
 async function _getAuthHeaders() {
   let { data: { session }, error: sessionError } = await supabase.auth.getSession();
