@@ -143,7 +143,10 @@ export default function PaywallScreen({ route, navigation }) {
 
   useEffect(() => {
     console.log("[PAYWALL] viewed", { source, productName, score });
-    getOfferings().then(setOfferings);
+    getOfferings().then((o) => {
+      console.log("[PAYWALL] offerings:", o ? `${o.availablePackages?.length} packages` : "NULL - check RevenueCat config & Paid Apps agreement");
+      setOfferings(o);
+    });
   }, []);
 
   const weeklyPkg = getWeeklyPackage(offerings);
@@ -170,7 +173,10 @@ export default function PaywallScreen({ route, navigation }) {
   };
 
   const handlePurchase = async () => {
-    if (!selectedPkg) return;
+    if (!selectedPkg) {
+      Alert.alert("Not Available", "Subscriptions are loading. Please wait a moment and try again.\n\nIf this persists, check that your Paid Apps agreement is active in App Store Connect.");
+      return;
+    }
     console.log("[PAYWALL] purchase_started", { plan: selectedPlan.key });
     setPurchasing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
