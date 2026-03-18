@@ -4,9 +4,19 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../config/env";
 
 const ANALYZE_URL = `${SUPABASE_URL}/functions/v1/analyze`;
 
-// Use global fetch - works in both dev and production
-const streamFetch = global.fetch;
-console.log("[CLAUDE] Using global fetch");
+// Try expo/fetch for ReadableStream support, fall back to global fetch
+let streamFetch = global.fetch;
+try {
+  const expoFetch = require("expo/fetch");
+  if (expoFetch?.fetch) {
+    streamFetch = expoFetch.fetch;
+    console.log("[CLAUDE] Using expo/fetch for streaming support");
+  } else {
+    console.log("[CLAUDE] expo/fetch found but no fetch export, using global fetch");
+  }
+} catch {
+  console.log("[CLAUDE] expo/fetch not available, using global fetch");
+}
 
 async function _getAuthHeaders() {
   let { data: { session }, error: sessionError } = await supabase.auth.getSession();
