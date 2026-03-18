@@ -1,11 +1,10 @@
 import { parse as parsePartialJson } from "partial-json";
 import { supabase } from "./supabase";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../config/env";
-import { fetch as rnFetch } from "react-native-fetch-api";
-import { polyfill as polyfillReadableStream } from "react-native-fetch-api/src/polyfill";
+import { fetch as rnFetch, polyfill } from "react-native-fetch-api";
 
 // Polyfill ReadableStream for production builds
-polyfillReadableStream();
+polyfill();
 
 const ANALYZE_URL = `${SUPABASE_URL}/functions/v1/analyze`;
 
