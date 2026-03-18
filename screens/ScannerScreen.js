@@ -25,6 +25,7 @@ import Animated, {
 import { BlurView } from "expo-blur";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { ChevronLeft, HelpCircle, CameraOff, X } from "lucide-react-native";
+import { useIsFocused } from "@react-navigation/native";
 import { useTheme, Colors, Spacing, Shadows } from "../theme";
 import { useAuth } from "../services/auth";
 import * as Haptics from "expo-haptics";
@@ -106,6 +107,7 @@ export default function ScannerScreen({ navigation, route }) {
   const [barcodeEnabled, setBarcodeEnabled] = useState(true);
   const theme = useTheme();
   const { checkSession } = useAuth();
+  const isFocused = useIsFocused(); // Only show camera when screen is focused
 
   // Proactively refresh auth session when scanner mounts
   useEffect(() => {
@@ -311,15 +313,18 @@ export default function ScannerScreen({ navigation, route }) {
   // --- Camera UI ---
   return (
     <View style={styles.container}>
-      <CameraView
-        ref={cameraRef}
-        style={StyleSheet.absoluteFill}
-        facing="back"
-        onBarcodeScanned={barcodeEnabled ? handleBarcodeScanned : undefined}
-        barcodeScannerSettings={{
-          barcodeTypes: ["ean13", "ean8", "upc_a", "upc_e"],
-        }}
-      />
+      {/* Only render camera when screen is focused (turns off during results screen) */}
+      {isFocused && (
+        <CameraView
+          ref={cameraRef}
+          style={StyleSheet.absoluteFill}
+          facing="back"
+          onBarcodeScanned={barcodeEnabled ? handleBarcodeScanned : undefined}
+          barcodeScannerSettings={{
+            barcodeTypes: ["ean13", "ean8", "upc_a", "upc_e"],
+          }}
+        />
+      )}
 
       {/* Dark mask overlay with cutout */}
       <View style={StyleSheet.absoluteFill} pointerEvents="none">
