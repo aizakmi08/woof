@@ -4,18 +4,22 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../config/env";
 
 const ANALYZE_URL = `${SUPABASE_URL}/functions/v1/analyze`;
 
-// Try expo/fetch for ReadableStream support, fall back to global fetch
+// Detect streaming capability at module load
+// expo/fetch provides ReadableStream; without it, streaming SSE gets truncated
 let streamFetch = global.fetch;
+let canStream = false;
 try {
   const expoFetch = require("expo/fetch");
   if (expoFetch?.fetch) {
     streamFetch = expoFetch.fetch;
-    console.log("[CLAUDE] Using expo/fetch for streaming support");
-  } else {
-    console.log("[CLAUDE] expo/fetch found but no fetch export, using global fetch");
+    canStream = true;
+    console.log("[CLAUDE] Streaming enabled (expo/fetch)");
   }
 } catch {
-  console.log("[CLAUDE] expo/fetch not available, using global fetch");
+  // expo/fetch not available (production builds)
+}
+if (!canStream) {
+  console.log("[CLAUDE] Streaming disabled — will use non-streaming mode for complete responses");
 }
 
 async function _getAuthHeaders() {
@@ -311,14 +315,14 @@ async function _callNonStreaming({ mode, payload, signal }) {
 }
 
 export async function analyzeIngredients(base64Image, { onUpdate, signal, cacheKey } = {}) {
-  console.log("[CLAUDE] analyzeIngredients called (photo-only mode)");
+  console.log("[CLAUDE] analyzeIngredients called (photo-only mode) | canStream:", canStream);
   const t0 = Date.now();
 
   const payload = { imageBase64: base64Image };
   if (cacheKey) payload.cacheKey = cacheKey;
 
-  // Streaming path with retry
-  if (onUpdate) {
+  // Streaming path — only when ReadableStream is available
+  if (onUpdate && canStream) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         return await _callStreaming({
@@ -338,7 +342,7 @@ export async function analyzeIngredients(base64Image, { onUpdate, signal, cacheK
     }
   }
 
-  // Non-streaming path (fallback or no onUpdate)
+  // Non-streaming path — guaranteed complete response
   const controller = new AbortController();
   const elapsed = Date.now() - t0;
   const remainingMs = Math.max(10000, 90000 - elapsed);
@@ -359,6 +363,8 @@ export async function analyzeIngredients(base64Image, { onUpdate, signal, cacheK
       signal: controller.signal,
     });
     console.log("[CLAUDE] analyzeIngredients result:", result.productName, "| score:", result.overallScore);
+    // Deliver complete result to subscriber
+    if (onUpdate) onUpdate(result);
     return result;
   } finally {
     clearTimeout(timeout);
@@ -366,15 +372,15 @@ export async function analyzeIngredients(base64Image, { onUpdate, signal, cacheK
 }
 
 export async function analyzeWithData(opffProduct, base64Image, { onUpdate, signal, cacheKey } = {}) {
-  console.log("[CLAUDE] analyzeWithData called (verified data mode) | product:", opffProduct.productName, "| hasImage:", !!base64Image);
+  console.log("[CLAUDE] analyzeWithData called (verified data mode) | product:", opffProduct.productName, "| hasImage:", !!base64Image, "| canStream:", canStream);
   const t0 = Date.now();
 
   const payload = { opffProduct };
   if (base64Image) payload.imageBase64 = base64Image;
   if (cacheKey) payload.cacheKey = cacheKey;
 
-  // Streaming path with retry
-  if (onUpdate) {
+  // Streaming path — only when ReadableStream is available
+  if (onUpdate && canStream) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         return await _callStreaming({
@@ -394,7 +400,7 @@ export async function analyzeWithData(opffProduct, base64Image, { onUpdate, sign
     }
   }
 
-  // Non-streaming path (fallback or no onUpdate)
+  // Non-streaming path — guaranteed complete response
   const controller = new AbortController();
   const elapsed = Date.now() - t0;
   const remainingMs = Math.max(10000, 90000 - elapsed);
@@ -415,6 +421,8 @@ export async function analyzeWithData(opffProduct, base64Image, { onUpdate, sign
       signal: controller.signal,
     });
     console.log("[CLAUDE] analyzeWithData result:", result.productName, "| score:", result.overallScore);
+    // Deliver complete result to subscriber
+    if (onUpdate) onUpdate(result);
     return result;
   } finally {
     clearTimeout(timeout);
