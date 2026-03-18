@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Woof - Pet Food Scanner</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #FAFAFA;
+      color: #1C1C1E;
+      line-height: 1.6;
+    }
+    .container {
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 60px 24px;
+    }
+    .hero {
+      text-align: center;
+      margin-bottom: 48px;
+    }
+    .logo {
+      font-size: 48px;
+      margin-bottom: 8px;
+    }
+    h1 {
+      font-size: 36px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      margin-bottom: 8px;
+    }
+    .subtitle {
+      font-size: 18px;
+      color: #6B7280;
+      margin-bottom: 32px;
+    }
+    .badge {
+      display: inline-block;
+      background: #1C1C1E;
+      color: #FAFAFA;
+      padding: 14px 28px;
+      border-radius: 14px;
+      font-size: 16px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: opacity 0.2s;
+    }
+    .badge:hover { opacity: 0.85; }
+    .features {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 48px;
+    }
+    @media (max-width: 480px) {
+      .features { grid-template-columns: 1fr; }
+    }
+    .feature {
+      background: #FFFFFF;
+      border-radius: 14px;
+      padding: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    }
+    .feature-icon { font-size: 24px; margin-bottom: 8px; }
+    .feature h3 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .feature p {
+      font-size: 14px;
+      color: #6B7280;
+    }
+    .footer {
+      text-align: center;
+      padding-top: 32px;
+      border-top: 1px solid #E5E7EB;
+      color: #9CA3AF;
+      font-size: 14px;
+    }
+    .footer a {
+      color: #6B7280;
+      text-decoration: none;
+      margin: 0 12px;
+    }
+    .footer a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="hero">
+      <div class="logo">&#128062;</div>
+      <h1>Woof</h1>
+      <p class="subtitle">Know what's really in your pet's food</p>
+      <a href="https://apps.apple.com/app/id6760733995" class="badge">Download on the App Store</a>
+    </div>
+
+    <div class="features">
+      <div class="feature">
+        <div class="feature-icon">&#128247;</div>
+        <h3>Scan Any Label</h3>
+        <p>Point your camera at any pet food ingredient list</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">&#9989;</div>
+        <h3>Ingredient Scores</h3>
+        <p>Every ingredient rated good, neutral, or concerning</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">&#128202;</div>
+        <h3>Quality Score</h3>
+        <p>0-100 overall score so you can compare brands</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">&#128680;</div>
+        <h3>Recall Alerts</h3>
+        <p>Know if a product has been recalled</p>
+      </div>
+    </div>
+
+    <div class="footer">
+      <p>
+        <a href="support.html">Support</a>
+        <a href="privacy.html">Privacy Policy</a>
+      </p>
+      <p style="margin-top: 12px;">&copy; 2025 Woof</p>
+    </div>
+  </div>
+</body>
+</html>
