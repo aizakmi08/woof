@@ -428,3 +428,57 @@ export async function analyzeWithData(opffProduct, base64Image, { onUpdate, sign
     clearTimeout(timeout);
   }
 }
+
+export async function analyzeHumanFood(base64Image, petType, { onUpdate, signal } = {}) {
+  console.log("[CLAUDE] analyzeHumanFood called | petType:", petType, "| canStream:", canStream);
+  const t0 = Date.now();
+
+  const payload = { imageBase64: base64Image, petType };
+
+  if (onUpdate && canStream) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await _callStreaming({
+          mode: "human_food",
+          payload,
+          onUpdate,
+          signal,
+        });
+      } catch (err) {
+        if (err.name === "AbortError" || signal?.aborted) throw err;
+        if (attempt === 0) {
+          console.log("[CLAUDE] Human food streaming attempt 1 failed, retrying:", err.message);
+          continue;
+        }
+        console.log("[CLAUDE] Human food streaming failed after 2 attempts:", err.message);
+      }
+    }
+  }
+
+  // Non-streaming fallback
+  const controller = new AbortController();
+  const elapsed = Date.now() - t0;
+  const remainingMs = Math.max(10000, 60000 - elapsed);
+  const timeout = setTimeout(() => controller.abort(), remainingMs);
+
+  if (signal) {
+    if (signal.aborted) {
+      clearTimeout(timeout);
+      throw new DOMException("Aborted", "AbortError");
+    }
+    signal.addEventListener("abort", () => controller.abort(), { once: true });
+  }
+
+  try {
+    const result = await _callNonStreaming({
+      mode: "human_food",
+      payload,
+      signal: controller.signal,
+    });
+    console.log("[CLAUDE] analyzeHumanFood result:", result.foodName, "| safety:", result.safetyLevel);
+    if (onUpdate) onUpdate(result);
+    return result;
+  } finally {
+    clearTimeout(timeout);
+  }
+}

@@ -9,10 +9,11 @@ import {
   Pressable,
   Alert,
   RefreshControl,
+  Modal,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { User, Shield, X } from "lucide-react-native";
+import { User, Shield, X, Utensils, Dog, Cat } from "lucide-react-native";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -109,6 +110,14 @@ function MiniScoreRing({ score, delay = 0 }) {
   );
 }
 
+// --- Safety color for human food entries ---
+
+function safetyColor(level) {
+  if (level === "safe") return Colors.scoreExcellent;
+  if (level === "caution") return Colors.scoreDecent;
+  return Colors.scoreConcerning;
+}
+
 // --- History Row ---
 
 function HistoryRow({ item, onPress, theme, index }) {
@@ -146,7 +155,16 @@ function HistoryRow({ item, onPress, theme, index }) {
           </Text>
         </View>
         <View style={styles.historyRowRight}>
-          <MiniScoreRing score={item.overallScore} delay={index * 100} />
+          {item.overallScore == null && item.scanMode === "human_food" ? (
+            <View
+              style={[
+                styles.safetyDot,
+                { backgroundColor: safetyColor(item.safetyLevel) },
+              ]}
+            />
+          ) : (
+            <MiniScoreRing score={item.overallScore} delay={index * 100} />
+          )}
           <ChevronRight size={14} color={theme.textTertiary} strokeWidth={2} />
         </View>
       </View>
@@ -181,6 +199,7 @@ export default function HomeScreen({ navigation }) {
   const [history, setHistory] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [showBanner, setShowBanner] = useState(false);
+  const [showPetPicker, setShowPetPicker] = useState(false);
   const theme = useTheme();
   const { profile, canScan, isPro } = useAuth();
 
@@ -271,7 +290,11 @@ export default function HomeScreen({ navigation }) {
   };
 
   const handleHistoryPress = (item) => {
-    navigation.navigate("Results", { mode: "history", cacheKey: item.cacheKey });
+    navigation.navigate("Results", {
+      mode: "history",
+      cacheKey: item.cacheKey,
+      ...(item.scanMode === "human_food" && { scanMode: "human_food", petType: item.petType }),
+    });
   };
 
   const handleClearHistory = () => {
@@ -356,6 +379,27 @@ export default function HomeScreen({ navigation }) {
             Scan a Product
           </Text>
         </Animated.View>
+      </Pressable>
+
+      {/* Human food safety check */}
+      <Pressable
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          if (!canScan()) {
+            navigation.navigate("Paywall", { source: "scan_limit" });
+            return;
+          }
+          setShowPetPicker(true);
+        }}
+        accessibilityRole="button"
+        accessibilityLabel="Check if human food is safe for your pet"
+      >
+        <View style={[styles.humanFoodButton, { borderColor: theme.separator }]}>
+          <Utensils size={18} color={theme.textSecondary} strokeWidth={2} />
+          <Text style={[styles.humanFoodButtonText, { color: theme.textPrimary }]}>
+            Is This Safe for My Pet?
+          </Text>
+        </View>
       </Pressable>
 
       {/* Upgrade banner (free users, 7-day cooldown) */}
@@ -458,6 +502,39 @@ export default function HomeScreen({ navigation }) {
           />
         }
       />
+      <Modal visible={showPetPicker} transparent animationType="fade">
+        <Pressable style={styles.modalBackdrop} onPress={() => setShowPetPicker(false)}>
+          <View style={[styles.petPickerCard, { backgroundColor: theme.card }]} onStartShouldSetResponder={() => true}>
+            <Text style={[styles.petPickerTitle, { color: theme.textPrimary }]}>
+              Who is this for?
+            </Text>
+            <View style={styles.petPickerRow}>
+              <Pressable
+                style={({ pressed }) => [styles.petPickerOption, { backgroundColor: pressed ? theme.surface : theme.bg }]}
+                onPress={() => {
+                  setShowPetPicker(false);
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  navigation.navigate("Scanner", { mode: "human_food", petType: "dog" });
+                }}
+              >
+                <Dog size={36} color={theme.textPrimary} strokeWidth={1.5} />
+                <Text style={[styles.petPickerLabel, { color: theme.textPrimary }]}>Dog</Text>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.petPickerOption, { backgroundColor: pressed ? theme.surface : theme.bg }]}
+                onPress={() => {
+                  setShowPetPicker(false);
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  navigation.navigate("Scanner", { mode: "human_food", petType: "cat" });
+                }}
+              >
+                <Cat size={36} color={theme.textPrimary} strokeWidth={1.5} />
+                <Text style={[styles.petPickerLabel, { color: theme.textPrimary }]}>Cat</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -528,6 +605,22 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: "600",
     letterSpacing: 0.5,
+  },
+
+  // Human food button
+  humanFoodButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    height: 54,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    gap: 8,
+    marginTop: 12,
+  },
+  humanFoodButtonText: {
+    fontSize: 16,
+    fontWeight: "600",
   },
 
   // Section header
@@ -659,5 +752,51 @@ const styles = StyleSheet.create({
     fontWeight: "400",
     lineHeight: 22,
     textAlign: "center",
+  },
+
+  // Safety dot for human food entries
+  safetyDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+
+  // Pet picker modal
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.3)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  petPickerCard: {
+    width: 280,
+    borderRadius: 14,
+    padding: 24,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 24,
+    elevation: 8,
+  },
+  petPickerTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  petPickerRow: {
+    flexDirection: "row",
+    gap: 16,
+  },
+  petPickerOption: {
+    flex: 1,
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 20,
+    borderRadius: 12,
+  },
+  petPickerLabel: {
+    fontSize: 16,
+    fontWeight: "600",
   },
 });

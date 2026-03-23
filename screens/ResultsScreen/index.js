@@ -17,7 +17,7 @@ import Animated, {
   Extrapolation,
   FadeInUp,
 } from "react-native-reanimated";
-import { ChevronLeft, Share2 } from "lucide-react-native";
+import { ChevronLeft, Share2, Utensils, X, AlertTriangle, CheckCircle2, AlertCircle, ShieldCheck, Calendar } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { captureRef } from "react-native-view-shot";
 import * as Sharing from "expo-sharing";
@@ -25,7 +25,7 @@ import * as FileSystem from "expo-file-system";
 import { getCachedAnalysis } from "../../services/cache";
 import * as analysisService from "../../services/analysisService";
 import { useAuth } from "../../services/auth";
-import { getScoreConfig, Colors } from "../../theme";
+import { getScoreConfig, Colors, Spacing, Shadows } from "../../theme";
 import {
   StreamSection,
   StreamingText,
@@ -52,11 +52,14 @@ import {
   ProGateOverlay,
   PostScanPrompt,
   FirstScanToast,
+  SafetyBadge,
 } from "./components";
 import { useStyles } from "./styles";
 
 export default function ResultsScreen({ route, navigation }) {
-  const { mode, barcode, base64, uri, cacheKey } = route.params;
+  const { mode, barcode, base64, uri, cacheKey, petType: routePetType, scanMode } = route.params;
+  const isHumanFood = mode === "human_food" || scanMode === "human_food";
+  const petType = routePetType; // May also come from result.petType for history
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [streaming, setStreaming] = useState(false);
@@ -192,11 +195,11 @@ export default function ResultsScreen({ route, navigation }) {
     }
 
     // Photo / barcode mode: delegate to analysis service
-    setLoadingStatus(mode === "barcode" ? "Looking up barcode..." : "Analyzing product...");
+    setLoadingStatus(isHumanFood ? "Checking food safety..." : (mode === "barcode" ? "Looking up barcode..." : "Analyzing product..."));
     setStreaming(true);
     setResult({});
 
-    const key = analysisService.startAnalysis({ mode, base64, barcode, uri });
+    const key = analysisService.startAnalysis({ mode, base64, barcode, uri, petType });
     serviceKeyRef.current = key;
 
     // If service already had a completed result (re-scan dedup), apply immediately
@@ -277,7 +280,7 @@ export default function ResultsScreen({ route, navigation }) {
         setIsSlowLoading(true);
       }, 15000),
       setTimeout(() => setLoadingStatus("Almost there..."), 25000),
-      // Hard timeout after 90 seconds
+      // Hard timeout after 120 seconds
       setTimeout(() => {
         if (!done) {
           console.log("[RESULTS] Analysis timeout — showing error");
@@ -285,7 +288,7 @@ export default function ResultsScreen({ route, navigation }) {
           setStreaming(false);
           setDone(true);
         }
-      }, 90000),
+      }, 120000),
     ];
     return () => timers.forEach(clearTimeout);
   }, [streaming, done]);
@@ -501,7 +504,7 @@ export default function ResultsScreen({ route, navigation }) {
           <ChevronLeft size={24} color={theme.textPrimary} strokeWidth={2} />
         </TouchableOpacity>
 
-        {hasScore ? (
+        {!isHumanFood && hasScore ? (
           <Animated.View style={[styles.headerCenter, headerStyle]}>
             <Animated.View
               style={[
@@ -522,17 +525,19 @@ export default function ResultsScreen({ route, navigation }) {
           <View style={{ flex: 1 }} />
         )}
 
-        <TouchableOpacity
-          style={[styles.shareButton, !(done && hasScore) && { opacity: 0.3 }]}
-          onPress={handleShare}
-          activeOpacity={0.7}
-          disabled={!(done && hasScore)}
-          accessibilityRole="button"
-          accessibilityLabel="Share results"
-          accessibilityState={{ disabled: !(done && hasScore) }}
-        >
-          <Share2 size={24} color={theme.textPrimary} strokeWidth={2} />
-        </TouchableOpacity>
+        {!isHumanFood && (
+          <TouchableOpacity
+            style={[styles.shareButton, !(done && hasScore) && { opacity: 0.3 }]}
+            onPress={handleShare}
+            activeOpacity={0.7}
+            disabled={!(done && hasScore)}
+            accessibilityRole="button"
+            accessibilityLabel="Share results"
+            accessibilityState={{ disabled: !(done && hasScore) }}
+          >
+            <Share2 size={24} color={theme.textPrimary} strokeWidth={2} />
+          </TouchableOpacity>
+        )}
       </Animated.View>
 
       <Animated.ScrollView
@@ -542,154 +547,343 @@ export default function ResultsScreen({ route, navigation }) {
         onScroll={scrollHandler}
         scrollEventThrottle={16}
       >
-        {/* 1. Product Name */}
-        {result.productName ? (
-          <Animated.View entering={FadeInUp.delay(200).duration(400).damping(20).stiffness(300)}>
-            <Text style={styles.productName} numberOfLines={2}>
-              {streaming && !hasScore ? (
-                <StreamingText
-                  text={result.productName}
-                  streaming
-                  done={done}
-                  style={styles.productName}
-                />
-              ) : (
-                result.productName
-              )}
-            </Text>
-          </Animated.View>
-        ) : streaming ? (
-          <View style={{ alignItems: "center", paddingVertical: 8 }}>
-            <SkeletonBar width="65%" height={22} />
-          </View>
-        ) : null}
-
-        {/* 2. Score Ring (hero) */}
-        {hasScore ? (
-          <StreamSection visible delay={50}>
-            <View style={styles.heroSection}>
-              <CircularScore score={result.overallScore} />
-            </View>
-          </StreamSection>
-        ) : streaming ? (
-          <View style={styles.heroSection}>
-            <SkeletonCircle size={180} strokeWidth={12} />
-          </View>
-        ) : null}
-
-        {/* Scan limit banner (free users, new scans only) */}
-        {done && !isPro && mode !== "history" && hasScore && (
-          <ScanLimitBanner remaining={remainingScans()} />
-        )}
-
-        {/* 3. Quick Stats */}
-        <StreamSection visible={!!nutritionAnalysis} delay={100}>
-          <QuickStatsGrid nutrition={nutritionAnalysis} />
-        </StreamSection>
-
-        {/* 4. AI Verdict */}
-        <StreamSection visible={!!result.verdict} delay={200}>
-          <VerdictCard
-            verdict={result.verdict}
-            score={result.overallScore}
-            streaming={streaming}
-            done={done}
-            isPro={isPro}
-          />
-        </StreamSection>
-
-        {/* 5. Ingredients (pro: 5 + expand, free: 3 + fade) */}
-        <StreamSection visible={result.ingredients?.length > 0} delay={250}>
-          <IngredientsSection
-            ingredients={isPro ? result.ingredients : result.ingredients?.slice(0, 3)}
-            onIngredientPress={setSelectedIngredient}
-            totalCount={!isPro ? result.ingredients?.length : undefined}
-            fadeLastItem={!isPro && result.ingredients?.length > 3}
-          />
-        </StreamSection>
-
-        {/* First scan toast (free users only) */}
-        <FirstScanToast visible={showFirstScanToast} />
-
-        {/* ProGateOverlay — shown for free users when analysis is done */}
-        {!isPro && done && hasScore && (
-          <ProGateOverlay
-            onUpgrade={() => navigatePaywall("results_gate")}
-            remainingScans={remainingScans()}
-          />
-        )}
-
-        {/* Scan Another — below gate for free users */}
-        {done && !isPro && (
-          <StreamSection visible delay={300}>
-            <ScanAnotherButton onPress={handleScanAnother} />
-          </StreamSection>
-        )}
-
-        {/* Pro-only sections */}
-        {isPro && (
+        {/* === Human Food Safety Layout === */}
+        {isHumanFood && (
           <>
-            {/* 6. Quality Breakdown */}
-            <StreamSection visible={categories?.length > 0} delay={200}>
-              {categories?.length > 0 && (
-                <View style={styles.qualitySection}>
-                  <Text style={styles.qualityTitle}>Quality Breakdown</Text>
-                  <View style={styles.qualityHeaderDivider} />
-                  {categories.map((cat, i) => (
-                    <CategoryBar
-                      key={i}
-                      name={cat.name}
-                      score={cat.score}
-                      detail={cat.detail}
-                      index={i}
-                      isLast={i === categories.length - 1}
-                    />
-                  ))}
+            {/* Safety badge — hero */}
+            {result.safetyLevel ? (
+              <StreamSection visible delay={50}>
+                <SafetyBadge safetyLevel={result.safetyLevel} petType={petType || result.petType} />
+              </StreamSection>
+            ) : streaming ? (
+              <View style={styles.heroSection}>
+                <SkeletonCircle size={180} strokeWidth={12} />
+              </View>
+            ) : null}
+
+            {/* Food name */}
+            {result.foodName ? (
+              <Animated.View entering={FadeInUp.delay(200).duration(400).damping(20).stiffness(300)}>
+                <Text style={[styles.productName, { marginTop: 0, marginBottom: 4 }]} numberOfLines={2}>
+                  {result.foodName}
+                </Text>
+              </Animated.View>
+            ) : streaming ? (
+              <View style={{ alignItems: "center", paddingVertical: 8 }}>
+                <SkeletonBar width="65%" height={22} />
+              </View>
+            ) : null}
+
+            {/* Summary */}
+            {result.summary ? (
+              <StreamSection visible delay={100}>
+                <Text style={{ color: theme.textSecondary, fontSize: 15, lineHeight: 22, textAlign: "center", paddingHorizontal: 20, marginBottom: 20 }}>
+                  {result.summary}
+                </Text>
+              </StreamSection>
+            ) : null}
+
+            {/* Quick stats row — 3 columns */}
+            {done && (
+              <StreamSection visible delay={150}>
+                <View style={{ flexDirection: "row", gap: 10, marginBottom: 20 }}>
+                  {/* Portions */}
+                  <View style={{ flex: 1, backgroundColor: theme.card, borderRadius: 12, padding: 14, alignItems: "center", ...Shadows.card }}>
+                    <Utensils size={18} color={result.portions === "Do not feed" ? Colors.scoreConcerning : Colors.scoreExcellent} strokeWidth={1.8} />
+                    <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "600", marginTop: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>Portion</Text>
+                    <Text style={{ color: theme.textPrimary, fontSize: 13, fontWeight: "500", marginTop: 4, textAlign: "center" }} numberOfLines={2}>
+                      {result.portions || "N/A"}
+                    </Text>
+                  </View>
+                  {/* Preparation */}
+                  <View style={{ flex: 1, backgroundColor: theme.card, borderRadius: 12, padding: 14, alignItems: "center", ...Shadows.card }}>
+                    <ShieldCheck size={18} color={Colors.blue} strokeWidth={1.8} />
+                    <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "600", marginTop: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>Prep</Text>
+                    <Text style={{ color: theme.textPrimary, fontSize: 13, fontWeight: "500", marginTop: 4, textAlign: "center" }} numberOfLines={2}>
+                      {result.preparation || "N/A"}
+                    </Text>
+                  </View>
+                  {/* Age */}
+                  <View style={{ flex: 1, backgroundColor: theme.card, borderRadius: 12, padding: 14, alignItems: "center", ...Shadows.card }}>
+                    <Calendar size={18} color={Colors.amber} strokeWidth={1.8} />
+                    <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "600", marginTop: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>Ages</Text>
+                    <Text style={{ color: theme.textPrimary, fontSize: 13, fontWeight: "500", marginTop: 4, textAlign: "center" }} numberOfLines={2}>
+                      {result.ageGuidance?.note || "All ages"}
+                    </Text>
+                  </View>
                 </View>
-              )}
-            </StreamSection>
+              </StreamSection>
+            )}
 
-            {/* 7. Nutrition Facts */}
-            <StreamSection visible={!!nutritionAnalysis} delay={300}>
-              <NutritionFacts nutrition={nutritionAnalysis} />
-            </StreamSection>
+            {/* Age guidance detail — visual row */}
+            {done && result.ageGuidance && (
+              <StreamSection visible delay={200}>
+                <View style={{ backgroundColor: theme.card, borderRadius: Spacing.cardRadius, padding: 16, marginBottom: 12, ...Shadows.card }}>
+                  <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "600", letterSpacing: 1, textTransform: "uppercase", marginBottom: 12 }}>
+                    Age Suitability
+                  </Text>
+                  {[
+                    { label: (petType || result.petType) === "dog" ? "Puppies" : "Kittens", value: result.ageGuidance.puppiesOrKittens },
+                    { label: "Adults", value: result.ageGuidance.adults },
+                    { label: "Seniors", value: result.ageGuidance.seniors },
+                  ].map((row) => {
+                    const ageColor = row.value === "safe" ? Colors.scoreExcellent : row.value === "caution" ? Colors.scoreDecent : Colors.scoreConcerning;
+                    const ageLabel = row.value === "safe" ? "Safe" : row.value === "caution" ? "Caution" : "Avoid";
+                    return (
+                      <View key={row.label} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, borderTopWidth: row.label !== (petType === "dog" ? "Puppies" : "Kittens") ? 0.5 : 0, borderTopColor: theme.divider }}>
+                        <Text style={{ color: theme.textPrimary, fontSize: 15, fontWeight: "500" }}>{row.label}</Text>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: ageColor }} />
+                          <Text style={{ color: ageColor, fontSize: 14, fontWeight: "600" }}>{ageLabel}</Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              </StreamSection>
+            )}
 
-            {/* 9. Customer Reviews */}
-            <StreamSection visible={!!customerRating} delay={350}>
-              <ReviewsSection customerRating={customerRating} />
-            </StreamSection>
+            {/* Benefits & risks pills */}
+            {done && (
+              <StreamSection visible delay={250}>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+                  {result.toxicCompounds && result.toxicCompounds.length > 0 && result.toxicCompounds[0] !== "None" && (
+                    result.toxicCompounds.map((c, i) => (
+                      <View key={`t${i}`} style={{ flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: Colors.recallBackground, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16 }}>
+                        <AlertTriangle size={12} color={Colors.scoreConcerning} strokeWidth={2} />
+                        <Text style={{ color: Colors.scoreConcerning, fontSize: 12, fontWeight: "600" }}>{c}</Text>
+                      </View>
+                    ))
+                  )}
+                  {result.benefits && result.benefits.length > 0 && result.safetyLevel !== "dangerous" && (
+                    result.benefits.slice(0, 4).map((b, i) => (
+                      <View key={`b${i}`} style={{ flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(52,199,89,0.08)", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16 }}>
+                        <CheckCircle2 size={12} color={Colors.scoreExcellent} strokeWidth={2} />
+                        <Text style={{ color: Colors.scoreExcellent, fontSize: 12, fontWeight: "600" }}>{b}</Text>
+                      </View>
+                    ))
+                  )}
+                </View>
+              </StreamSection>
+            )}
 
-            {/* 10. Recall History */}
-            <StreamSection visible={!!result.recallHistory} delay={400}>
-              <RecallCard recallHistory={result.recallHistory} />
-            </StreamSection>
+            {/* Explanation */}
+            {done && result.explanation ? (
+              <StreamSection visible delay={300}>
+                <View style={{ backgroundColor: theme.card, borderRadius: Spacing.cardRadius, padding: 16, ...Shadows.card }}>
+                  <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "600", letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 }}>
+                    Why?
+                  </Text>
+                  <Text style={{ color: theme.textPrimary, fontSize: 15, lineHeight: 23 }}>
+                    {result.explanation}
+                  </Text>
+                </View>
+              </StreamSection>
+            ) : null}
+
+            {/* Symptoms warning */}
+            {done && result.symptoms && result.symptoms !== "N/A" ? (
+              <StreamSection visible delay={350}>
+                <View style={{ backgroundColor: Colors.recallBackground, borderRadius: Spacing.cardRadius, padding: 16, marginTop: 12, borderLeftWidth: 3, borderLeftColor: Colors.scoreConcerning }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                    <AlertCircle size={16} color={Colors.scoreConcerning} strokeWidth={2} />
+                    <Text style={{ color: Colors.scoreConcerning, fontSize: 11, fontWeight: "700", letterSpacing: 1, textTransform: "uppercase" }}>
+                      Symptoms to Watch
+                    </Text>
+                  </View>
+                  <Text style={{ color: theme.textPrimary, fontSize: 15, lineHeight: 23 }}>
+                    {result.symptoms}
+                  </Text>
+                </View>
+              </StreamSection>
+            ) : null}
+
+            {/* Disclaimer */}
+            {done && (
+              <StreamSection visible delay={400}>
+                <Text style={{ color: theme.textTertiary, fontSize: 12, lineHeight: 18, textAlign: "center", marginTop: 24, paddingHorizontal: 20 }}>
+                  AI-powered analysis may contain errors. Not veterinary advice. Pets may have individual allergies. Consult your vet.
+                </Text>
+              </StreamSection>
+            )}
+
+            {/* Streaming footer */}
+            {streaming && (
+              <View style={styles.streamingFooter}>
+                <StreamingDots />
+                <Text style={styles.streamingFooterText}>Checking...</Text>
+              </View>
+            )}
+
+            {/* Scan Another */}
+            {done && (
+              <StreamSection visible delay={450}>
+                <ScanAnotherButton onPress={handleScanAnother} />
+              </StreamSection>
+            )}
           </>
         )}
 
-        {/* Streaming footer */}
-        {streaming && (
-          <View style={styles.streamingFooter}>
-            <StreamingDots />
-            <Text style={styles.streamingFooterText}>Analyzing...</Text>
-          </View>
-        )}
+        {/* === Pet Food Analysis Layout === */}
+        {!isHumanFood && (
+          <>
+            {/* 1. Product Name */}
+            {result.productName ? (
+              <Animated.View entering={FadeInUp.delay(200).duration(400).damping(20).stiffness(300)}>
+                <Text style={styles.productName} numberOfLines={2}>
+                  {streaming && !hasScore ? (
+                    <StreamingText
+                      text={result.productName}
+                      streaming
+                      done={done}
+                      style={styles.productName}
+                    />
+                  ) : (
+                    result.productName
+                  )}
+                </Text>
+              </Animated.View>
+            ) : streaming ? (
+              <View style={{ alignItems: "center", paddingVertical: 8 }}>
+                <SkeletonBar width="65%" height={22} />
+              </View>
+            ) : null}
 
-        {/* Scan Another — for Pro users (free users have it above the gate) */}
-        {done && isPro && (
-          <StreamSection visible delay={450}>
-            <ScanAnotherButton onPress={handleScanAnother} />
-          </StreamSection>
-        )}
+            {/* 2. Score Ring (hero) */}
+            {hasScore ? (
+              <StreamSection visible delay={50}>
+                <View style={styles.heroSection}>
+                  <CircularScore score={result.overallScore} />
+                </View>
+              </StreamSection>
+            ) : streaming ? (
+              <View style={styles.heroSection}>
+                <SkeletonCircle size={180} strokeWidth={12} />
+              </View>
+            ) : null}
 
-        {/* Post-scan upgrade prompt (once, after 2+ scans) */}
-        {showPostScanPrompt && (
-          <PostScanPrompt
-            onUpgrade={() => {
-              dismissPostScanPrompt();
-              navigatePaywall("post_scan_prompt");
-            }}
-            onDismiss={dismissPostScanPrompt}
-          />
+            {/* Scan limit banner (free users, new scans only) */}
+            {done && !isPro && mode !== "history" && hasScore && (
+              <ScanLimitBanner remaining={remainingScans()} />
+            )}
+
+            {/* 3. Quick Stats */}
+            <StreamSection visible={!!nutritionAnalysis} delay={100}>
+              <QuickStatsGrid nutrition={nutritionAnalysis} />
+            </StreamSection>
+
+            {/* 4. AI Verdict */}
+            <StreamSection visible={!!result.verdict} delay={200}>
+              <VerdictCard
+                verdict={result.verdict}
+                score={result.overallScore}
+                streaming={streaming}
+                done={done}
+                isPro={isPro}
+              />
+            </StreamSection>
+
+            {/* 5. Ingredients (pro: 5 + expand, free: 3 + fade) */}
+            <StreamSection visible={result.ingredients?.length > 0} delay={250}>
+              <IngredientsSection
+                ingredients={isPro ? result.ingredients : result.ingredients?.slice(0, 3)}
+                onIngredientPress={setSelectedIngredient}
+                totalCount={!isPro ? result.ingredients?.length : undefined}
+                fadeLastItem={!isPro && result.ingredients?.length > 3}
+              />
+            </StreamSection>
+
+            {/* First scan toast (free users only) */}
+            <FirstScanToast visible={showFirstScanToast} />
+
+            {/* ProGateOverlay — shown for free users when analysis is done */}
+            {!isPro && done && hasScore && (
+              <ProGateOverlay
+                onUpgrade={() => navigatePaywall("results_gate")}
+                remainingScans={remainingScans()}
+              />
+            )}
+
+            {/* Scan Another — below gate for free users */}
+            {done && !isPro && (
+              <StreamSection visible delay={300}>
+                <ScanAnotherButton onPress={handleScanAnother} />
+              </StreamSection>
+            )}
+
+            {/* Pro-only sections */}
+            {isPro && (
+              <>
+                {/* 6. Quality Breakdown */}
+                <StreamSection visible={categories?.length > 0} delay={200}>
+                  {categories?.length > 0 && (
+                    <View style={styles.qualitySection}>
+                      <Text style={styles.qualityTitle}>Quality Breakdown</Text>
+                      <View style={styles.qualityHeaderDivider} />
+                      {categories.map((cat, i) => (
+                        <CategoryBar
+                          key={i}
+                          name={cat.name}
+                          score={cat.score}
+                          detail={cat.detail}
+                          index={i}
+                          isLast={i === categories.length - 1}
+                        />
+                      ))}
+                    </View>
+                  )}
+                </StreamSection>
+
+                {/* 7. Nutrition Facts */}
+                <StreamSection visible={!!nutritionAnalysis} delay={300}>
+                  <NutritionFacts nutrition={nutritionAnalysis} />
+                </StreamSection>
+
+                {/* 9. Customer Reviews */}
+                <StreamSection visible={!!customerRating} delay={350}>
+                  <ReviewsSection customerRating={customerRating} />
+                </StreamSection>
+
+                {/* 10. Recall History */}
+                <StreamSection visible={!!result.recallHistory} delay={400}>
+                  <RecallCard recallHistory={result.recallHistory} />
+                </StreamSection>
+              </>
+            )}
+
+            {/* Streaming footer */}
+            {streaming && (
+              <View style={styles.streamingFooter}>
+                <StreamingDots />
+                <Text style={styles.streamingFooterText}>Analyzing...</Text>
+              </View>
+            )}
+
+            {/* Scan Another — for Pro users (free users have it above the gate) */}
+            {done && isPro && (
+              <StreamSection visible delay={450}>
+                <ScanAnotherButton onPress={handleScanAnother} />
+              </StreamSection>
+            )}
+
+            {/* Post-scan upgrade prompt (once, after 2+ scans) */}
+            {showPostScanPrompt && (
+              <PostScanPrompt
+                onUpgrade={() => {
+                  dismissPostScanPrompt();
+                  navigatePaywall("post_scan_prompt");
+                }}
+                onDismiss={dismissPostScanPrompt}
+              />
+            )}
+
+            {/* AI disclaimer */}
+            {done && (
+              <Text style={{ color: theme.textTertiary, fontSize: 12, lineHeight: 18, textAlign: "center", marginTop: 24, marginBottom: 8, paddingHorizontal: 20 }}>
+                AI-powered analysis may contain errors. Not a substitute for professional veterinary advice.
+              </Text>
+            )}
+          </>
         )}
       </Animated.ScrollView>
 

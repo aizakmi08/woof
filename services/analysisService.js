@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { analyzeIngredients, analyzeWithData } from "./claude";
+import { analyzeIngredients, analyzeWithData, analyzeHumanFood } from "./claude";
 import { lookupBarcode, searchByName } from "./opff";
 import { getCachedAnalysis, normalizeCacheKey } from "./cache";
 import { addHistoryEntry } from "./history";
@@ -16,7 +16,7 @@ const MAX_LOCAL_RESULTS = 30;
  * but the analysis itself keeps going even with zero subscribers.
  */
 
-const ANALYSIS_TIMEOUT_MS = 90000;
+const ANALYSIS_TIMEOUT_MS = 120000;
 
 // Map<cacheKey, { status, result, error, dataSource, opffData, uri, mode, controller }>
 const analyses = new Map();
@@ -146,13 +146,17 @@ export function resolveKey(key) {
  * If an analysis for this key is already running, returns the existing key
  * so the caller can subscribe without duplicating API calls.
  */
-export function startAnalysis({ mode, base64, barcode, uri }) {
+export function startAnalysis({ mode, base64, barcode, uri, petType }) {
   if (mode === "barcode" && !barcode) {
     console.log("[ANALYSIS] startAnalysis called with barcode mode but no barcode");
     return null;
   }
   if (mode === "photo" && !base64) {
     console.log("[ANALYSIS] startAnalysis called with photo mode but no base64");
+    return null;
+  }
+  if (mode === "human_food" && (!base64 || !petType)) {
+    console.log("[ANALYSIS] startAnalysis called with human_food mode but missing base64 or petType");
     return null;
   }
 
@@ -187,6 +191,11 @@ export function startAnalysis({ mode, base64, barcode, uri }) {
   if (mode === "barcode") {
     _withTimeout(
       _runBarcode({ cacheKey: tempId, barcode, signal, state }),
+      state, tempId
+    );
+  } else if (mode === "human_food") {
+    _withTimeout(
+      _runHumanFood({ tempId, base64, petType, uri, signal, state }),
       state, tempId
     );
   } else {
@@ -265,6 +274,48 @@ async function _runBarcode({ cacheKey, barcode, signal, state }) {
     _notify({ type: "error", cacheKey, error: state.error });
     _scheduleCleanup(cacheKey);
     console.log("[ANALYSIS] Barcode analysis error:", err.message);
+  }
+}
+
+// ── Human food flow ──────────────────────────────────────────
+
+async function _runHumanFood({ tempId, base64, petType, uri, signal, state }) {
+  const onUpdate = (partial) => {
+    if (signal.aborted) return;
+    state.result = partial;
+    _notify({ type: "update", cacheKey: tempId, result: partial });
+  };
+
+  try {
+    const analysis = await analyzeHumanFood(base64, petType, { onUpdate, signal });
+    if (signal.aborted) return;
+
+    if (analysis.error) {
+      state.error = analysis.error;
+      state.status = "error";
+      _notify({ type: "error", cacheKey: tempId, error: analysis.error });
+      _scheduleCleanup(tempId);
+      return;
+    }
+
+    state.result = analysis;
+    state.dataSource = "ai";
+    state.status = "complete";
+
+    // Save locally for history playback
+    _saveLocalResult(tempId, { result: analysis, dataSource: "ai", opffData: null });
+
+    _saveHistory(state, tempId);
+    _notify({ type: "complete", cacheKey: tempId, result: analysis, dataSource: "ai", opffData: null, fromCache: false });
+    _scheduleCleanup(tempId);
+    console.log("[ANALYSIS] Human food check complete:", analysis.foodName, "| safety:", analysis.safetyLevel);
+  } catch (err) {
+    if (err.name === "AbortError" || signal.aborted) return;
+    state.error = err.message || "Something went wrong.";
+    state.status = "error";
+    _notify({ type: "error", cacheKey: tempId, error: state.error });
+    _scheduleCleanup(tempId);
+    console.log("[ANALYSIS] Human food check error:", err.message);
   }
 }
 
@@ -546,8 +597,9 @@ export async function getLocalResult(cacheKey) {
 // ── History helper ────────────────────────────────────────────
 
 function _saveHistory(state, cacheKey) {
-  if (!state.result?.productName) {
-    console.log("[ANALYSIS] Skipping history save — no product name");
+  const name = state.result?.productName || state.result?.foodName;
+  if (!name) {
+    console.log("[ANALYSIS] Skipping history save — no product/food name");
     return;
   }
   if (!cacheKey) {
@@ -563,16 +615,18 @@ function _saveHistory(state, cacheKey) {
   }
   recentHistorySaves.set(cacheKey, Date.now());
 
+  const isHumanFood = state.mode === "human_food";
   try {
     addHistoryEntry({
-      productName: state.result.productName || "Unknown Product",
-      overallScore: state.result.overallScore,
+      productName: name,
+      overallScore: isHumanFood ? null : state.result.overallScore,
       petType: state.result.petType,
       dateScanned: new Date().toISOString(),
       cacheKey,
       scanMode: state.mode,
       dataSource: state.dataSource,
       photoUri: state.uri || null,
+      ...(isHumanFood && { safetyLevel: state.result.safetyLevel }),
     });
   } catch (err) {
     console.log("[ANALYSIS] Error saving history:", err.message);

@@ -168,11 +168,11 @@ export const Animation = {
 // --- Score Config ---
 
 export function getScoreConfig(score) {
-  if (score >= 90) return { label: "EXCELLENT", color: Colors.scoreExcellent, bg: "rgba(52,199,89,0.08)" };
-  if (score >= 80) return { label: "GREAT", color: Colors.scoreGreat, bg: "rgba(52,199,89,0.08)" };
-  if (score >= 70) return { label: "DECENT", color: Colors.scoreDecent, bg: "rgba(232,163,23,0.08)" };
-  if (score >= 55) return { label: "FAIR", color: Colors.scoreFair, bg: "rgba(249,115,22,0.08)" };
-  return { label: "CONCERNING", color: Colors.scoreConcerning, bg: "rgba(239,68,68,0.08)" };
+  if (score >= 85) return { label: "EXCELLENT", color: Colors.scoreExcellent, bg: "rgba(52,199,89,0.08)" };
+  if (score >= 70) return { label: "GOOD", color: Colors.scoreGreat, bg: "rgba(52,199,89,0.08)" };
+  if (score >= 50) return { label: "AVERAGE", color: Colors.scoreDecent, bg: "rgba(232,163,23,0.08)" };
+  if (score >= 30) return { label: "BELOW AVERAGE", color: Colors.scoreFair, bg: "rgba(249,115,22,0.08)" };
+  return { label: "POOR", color: Colors.scoreConcerning, bg: "rgba(239,68,68,0.08)" };
 }
 
 // --- Theme Hook ---

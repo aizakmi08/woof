@@ -11,7 +11,7 @@ const CORS_HEADERS = {
 
 const MAX_IMAGE_B64_LENGTH = 7_000_000; // ~5 MB decoded
 const MAX_FIELD_LENGTH = 10_000;
-const CLAUDE_TIMEOUT_MS = 90_000;
+const CLAUDE_TIMEOUT_MS = 120_000;
 const STREAM_CACHE_TIMEOUT_MS = 120_000;
 
 const OPFF_ALLOWED_FIELDS = new Set([
@@ -27,6 +27,8 @@ const PHOTO_SYSTEM_PROMPT = `You are a pet food expert. Analyze the pet food pro
 CRITICAL RULES:
 - Identify the brand and product name from the packaging.
 - ACCURACY IS PARAMOUNT. Never guess or fabricate ingredients. Only list ingredients you are confident are in this specific product.
+- NEVER inflate scores to make products seem better than they are. Accuracy over optimism.
+- If uncertain about any data point, say so in your assessment rather than guessing.
 - If an ingredient label is visible, transcribe every ingredient you can read from the label.
 - If no label is visible, use your knowledge of this EXACT product. Do NOT confuse it with other products from the same brand. If unsure about specific ingredients, say so in the summary rather than guessing wrong.
 - List the COMPLETE ingredient list. Pet foods have 15-40 ingredients including vitamins, minerals, and supplements.
@@ -84,10 +86,27 @@ CRITICAL: List EVERY ingredient — do NOT abbreviate or summarize. A typical pe
 
 For each ingredient: "description" explains what it is. "reason" explains the quality rating. "alternatives" is an array of 2-3 better alternatives ONLY for neutral or bad ingredients (omit or set null for good ingredients).
 
-Score tiers: 90-100 Excellent, 80-89 Good, 70-79 Fair, 60-69 Poor, 1-59 Very Poor.
-Good: wholesome proteins, healthy fats, named meat sources, probiotics, omega fatty acids.
-Bad: BHA/BHT/ethoxyquin, by-products, excessive fillers, sugar, artificial colors, propylene glycol.
-Neutral: common fillers that aren't harmful but aren't remarkable.
+SCORING RUBRIC (be strict and evidence-based):
+
+Overall Score = weighted average of 5 categories:
+- Protein Quality (25%): Named whole meat as first ingredient = baseline 70+. Meat meal acceptable = 50-69. By-products anywhere = cap at 50. No named protein source = cap at 30.
+- Ingredient Safety (20%): BHA/BHT/ethoxyquin present = auto-cap OVERALL score at 35. Propylene glycol = cap overall at 40. Menadione = penalty of -15 on this category.
+- Nutritional Balance (20%): Evaluate protein/fat/fiber ratios against AAFCO standards. Missing key nutrients = penalty.
+- Filler Content (20%): Corn, wheat, or soy in top 3 ingredients = cap this category at 40. Multiple unnamed grains = cap at 30. Excessive legumes/potatoes in grain-free = cap at 55.
+- Additives & Preservatives (15%): Artificial colors (Red 40, Yellow 5, Blue 2) = cap at 30. Artificial flavors = cap at 40. Natural preservatives (mixed tocopherols, rosemary) = 80+.
+
+Score tier labels: 85-100 Excellent, 70-84 Good, 50-69 Average, 30-49 Below Average, 1-29 Poor.
+
+CRITICAL SCORING RULES:
+- NEVER inflate scores. A grocery store brand with corn as the first ingredient should score 35-50, NOT 65-75.
+- By-products as a primary protein source = maximum overall score of 50.
+- The overallScore MUST be mathematically consistent with category scores. If categories average to 55, overallScore must NOT be 70+.
+- Justify each category score by citing specific ingredients.
+- Multiple bonus ingredients (probiotics, omega-3s, named organ meats, chelated minerals) can raise score.
+
+Good: wholesome proteins, healthy fats, named meat sources, probiotics, omega fatty acids, chelated minerals.
+Bad: BHA/BHT/ethoxyquin, by-products, excessive fillers, sugar, artificial colors, propylene glycol, menadione.
+Neutral: common fillers that aren't harmful but aren't remarkable (rice, barley, oats).
 
 IMPORTANT formatting rules:
 - commonPraises and commonComplaints MUST be short pill tags of 2-4 words max. Examples: "Great taste", "Affordable price", "Coat improvement", "Contains by-products", "Picky eater approved". NEVER use full sentences.
@@ -97,6 +116,10 @@ IMPORTANT formatting rules:
 If not pet food: { "error": "Could not identify this as a pet food product. Try getting the brand name in the shot." }`;
 
 const VERIFIED_DATA_PROMPT = `You are a pet food expert. You have been given REAL, VERIFIED ingredient and nutrition data from a product database. Do NOT guess or make up any data — analyze ONLY what is provided.
+
+CRITICAL RULES:
+- NEVER inflate scores to make products seem better than they are. Accuracy over optimism.
+- If uncertain about any data point, say so in your assessment rather than guessing.
 
 Steps:
 1. Analyze each ingredient and rate it (good/bad/neutral) based on pet nutrition science.
@@ -153,15 +176,85 @@ Use this exact format:
 
 For each ingredient: "description" explains what it is. "reason" explains the quality rating. "alternatives" is an array of 2-3 better alternatives ONLY for neutral or bad ingredients (omit or set null for good ingredients).
 
-Score tiers: 90-100 Excellent, 80-89 Good, 70-79 Fair, 60-69 Poor, 1-59 Very Poor.
-Good: wholesome proteins, healthy fats, named meat sources, probiotics, omega fatty acids.
-Bad: BHA/BHT/ethoxyquin, by-products, excessive fillers, sugar, artificial colors, propylene glycol.
-Neutral: common fillers that aren't harmful but aren't remarkable.
+SCORING RUBRIC (be strict and evidence-based):
+
+Overall Score = weighted average of 5 categories:
+- Protein Quality (25%): Named whole meat as first ingredient = baseline 70+. Meat meal acceptable = 50-69. By-products anywhere = cap at 50. No named protein source = cap at 30.
+- Ingredient Safety (20%): BHA/BHT/ethoxyquin present = auto-cap OVERALL score at 35. Propylene glycol = cap overall at 40. Menadione = penalty of -15 on this category.
+- Nutritional Balance (20%): Evaluate protein/fat/fiber ratios against AAFCO standards. Missing key nutrients = penalty.
+- Filler Content (20%): Corn, wheat, or soy in top 3 ingredients = cap this category at 40. Multiple unnamed grains = cap at 30. Excessive legumes/potatoes in grain-free = cap at 55.
+- Additives & Preservatives (15%): Artificial colors (Red 40, Yellow 5, Blue 2) = cap at 30. Artificial flavors = cap at 40. Natural preservatives (mixed tocopherols, rosemary) = 80+.
+
+Score tier labels: 85-100 Excellent, 70-84 Good, 50-69 Average, 30-49 Below Average, 1-29 Poor.
+
+CRITICAL SCORING RULES:
+- NEVER inflate scores. A grocery store brand with corn as the first ingredient should score 35-50, NOT 65-75.
+- By-products as a primary protein source = maximum overall score of 50.
+- The overallScore MUST be mathematically consistent with category scores. If categories average to 55, overallScore must NOT be 70+.
+- Justify each category score by citing specific ingredients.
+
+Good: wholesome proteins, healthy fats, named meat sources, probiotics, omega fatty acids, chelated minerals.
+Bad: BHA/BHT/ethoxyquin, by-products, excessive fillers, sugar, artificial colors, propylene glycol, menadione.
+Neutral: common fillers that aren't harmful but aren't remarkable (rice, barley, oats).
 
 IMPORTANT formatting rules:
 - commonPraises and commonComplaints MUST be short pill tags of 2-4 words max. Examples: "Great taste", "Affordable price", "Coat improvement", "Contains by-products", "Picky eater approved". NEVER use full sentences.
 - primaryProteinSource: use just the protein name (e.g. "Chicken", "Salmon Meal", "Deboned Chicken"). Do NOT include "By-Products" or long qualifiers.
 - lifestage: keep concise (e.g. "All Life Stages", "Adult", "Puppy", "Senior"). Do NOT write "Adult Dogs (1+ years)" — just "Adult".`;
+
+const HUMAN_FOOD_PROMPT = `You are a veterinary nutrition expert. A pet owner is showing you a HUMAN food item and wants to know if it is safe for their pet to eat.
+
+CRITICAL IDENTIFICATION RULES:
+- Look VERY carefully at the image. Describe what you actually see — color, texture, shape, packaging, labels.
+- If you see a label or packaging, read it and use that to identify the food. The label is ALWAYS more reliable than visual appearance.
+- Do NOT confuse similar-looking meats: chicken is light pink/white when raw, pale white when cooked. Pork is light pink. Beef is dark red. Shrimp is pink/orange and curved. Look at the ACTUAL colors and shapes.
+- If you cannot confidently identify the food from the image, set foodName to "Unidentified food" and safetyLevel to "caution" with a note to verify.
+- NEVER guess between similar foods. If it looks like chicken but you aren't sure, say "Appears to be chicken (verify before feeding)".
+- ACCURACY IS PARAMOUNT. A wrong identification could be dangerous.
+
+CRITICAL OUTPUT FORMAT REQUIREMENT:
+- Return ONLY pure JSON - NO markdown code fences
+- Start your response with an opening brace immediately
+- Your FIRST character must be an opening brace
+
+Use this exact format:
+{
+  "foodName": "Name of the food identified",
+  "petType": "dog" | "cat",
+  "safetyLevel": "safe" | "caution" | "dangerous",
+  "summary": "1 short sentence, max 15 words",
+  "explanation": "2-3 sentences explaining why, citing specific compounds or nutrients",
+  "toxicCompounds": ["compound name"] or [],
+  "symptoms": "What symptoms to watch for, or 'N/A' if safe",
+  "portions": "Specific portion guidance (e.g. '1-2 small pieces, no bones or skin') or 'Do not feed'",
+  "benefits": ["short benefit phrase"] or [],
+  "alternatives": ["safer alternative"] or [],
+  "ageGuidance": {
+    "puppiesOrKittens": "safe" | "caution" | "avoid",
+    "adults": "safe" | "caution" | "avoid",
+    "seniors": "safe" | "caution" | "avoid",
+    "note": "Brief age-specific note (e.g. 'Too hard for puppies under 12 weeks' or 'Safe for all ages in moderation')"
+  },
+  "preparation": "How to prepare safely (e.g. 'Must be cooked, plain, no seasoning, bones removed') or 'N/A'",
+  "disclaimer": "Individual pets may have allergies. Always consult your veterinarian."
+}
+
+Safety classifications:
+- "safe": Pet can eat this in moderation with no known risks
+- "caution": Risks or conditions apply (e.g., lactose, bones, seasoning)
+- "dangerous": Toxic or harmful — do not feed
+
+KNOWN TOXIC FOODS (always classify as "dangerous"):
+- Dogs: grapes, raisins, chocolate, xylitol/birch sugar, onions, garlic (large amounts), macadamia nuts, alcohol, caffeine, avocado pit/skin, raw yeast dough, nutmeg
+- Cats: onions, garlic, chocolate, caffeine, alcohol, grapes, raisins, xylitol, raw eggs, lilies
+
+IMPORTANT:
+- The "summary" must be SHORT — a quick verdict like "Plain cooked chicken is safe for dogs" or "Chocolate is toxic to dogs". Not a paragraph.
+- "portions" must be SPECIFIC — say "2-3 small cubes" not "small amounts".
+- "preparation" must explain HOW to serve safely — "cooked, plain, no bones, no skin, no seasoning".
+- "ageGuidance" is REQUIRED — puppies/kittens have different tolerances than adults.
+
+If not food: { "error": "Could not identify this as a food item. Please try again with a clearer photo." }`;
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -395,11 +488,12 @@ Deno.serve(async (req) => {
     opffProduct,
     stream = true,
     cacheKey = null,
+    petType = null,
   } = body;
 
-  if (!mode || (mode !== "photo" && mode !== "verified")) {
+  if (!mode || !["photo", "verified", "human_food"].includes(mode)) {
     return jsonResponse(
-      { error: 'Invalid mode. Expected "photo" or "verified".' },
+      { error: 'Invalid mode. Expected "photo", "verified", or "human_food".' },
       400,
     );
   }
@@ -435,8 +529,7 @@ Deno.serve(async (req) => {
       type: "text",
       text: "Identify this pet food product and analyze it.",
     });
-  } else {
-    // verified mode
+  } else if (mode === "verified") {
     systemPrompt = VERIFIED_DATA_PROMPT;
 
     if (!opffProduct || typeof opffProduct !== "object") {
@@ -472,6 +565,36 @@ Deno.serve(async (req) => {
       type: "text",
       text: `Here is VERIFIED data from Open Pet Food Facts. Analyze and rate this product using ONLY this real data:\n\n${buildVerifiedDataText(safeProduct)}`,
     });
+  } else if (mode === "human_food") {
+    systemPrompt = HUMAN_FOOD_PROMPT;
+
+    if (!imageBase64) {
+      return jsonResponse(
+        { error: "imageBase64 is required for human_food mode" },
+        400,
+      );
+    }
+    if (!petType || (petType !== "dog" && petType !== "cat")) {
+      return jsonResponse(
+        { error: 'petType ("dog" or "cat") is required for human_food mode' },
+        400,
+      );
+    }
+    if (typeof imageBase64 !== "string" || imageBase64.length > MAX_IMAGE_B64_LENGTH) {
+      return jsonResponse(
+        { error: "Image too large. Please use a smaller image." },
+        413,
+      );
+    }
+
+    userContent.push({
+      type: "image",
+      source: { type: "base64", media_type: "image/jpeg", data: imageBase64 },
+    });
+    userContent.push({
+      type: "text",
+      text: `Identify this human food and assess whether it is safe for a ${petType} to eat.`,
+    });
   }
 
   // ── 5. Call Claude API (with timeout) ──────────────────────────
@@ -496,7 +619,7 @@ Deno.serve(async (req) => {
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-5-20250929",
-        max_tokens: 4096,
+        max_tokens: mode === "human_food" ? 2048 : 8192,
         stream,
         system: systemPrompt,
         messages: [{ role: "user", content: userContent }],

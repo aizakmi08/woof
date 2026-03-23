@@ -99,12 +99,16 @@ function StreamingDots() {
 }
 
 export default function ScannerScreen({ navigation, route }) {
+  // Extract mode params for human food scanning
+  const { fallbackToPhoto, mode: scanMode, petType } = route.params || {};
+  const isHumanFood = scanMode === "human_food";
+
   const cameraRef = useRef(null);
   const scannedRef = useRef(false);
   const [permission, requestPermission] = useCameraPermissions();
   const [capturing, setCapturing] = useState(false);
   const [showFallbackBanner, setShowFallbackBanner] = useState(false);
-  const [barcodeEnabled, setBarcodeEnabled] = useState(true);
+  const [barcodeEnabled, setBarcodeEnabled] = useState(!isHumanFood);
   const theme = useTheme();
   const { checkSession } = useAuth();
   const isFocused = useIsFocused(); // Only show camera when screen is focused
@@ -118,11 +122,10 @@ export default function ScannerScreen({ navigation, route }) {
 
   // Barcode-not-found fallback: show banner and briefly disable barcode scanning
   useEffect(() => {
-    const { fallbackToPhoto } = route.params || {};
     if (!fallbackToPhoto) return;
     setShowFallbackBanner(true);
     setBarcodeEnabled(false);
-    const enableTimer = setTimeout(() => setBarcodeEnabled(true), 3000);
+    const enableTimer = setTimeout(() => !isHumanFood && setBarcodeEnabled(true), 3000);
     const bannerTimer = setTimeout(() => setShowFallbackBanner(false), 5000);
     return () => {
       clearTimeout(enableTimer);
@@ -248,9 +251,10 @@ export default function ScannerScreen({ navigation, route }) {
         { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }
       );
       navigation.push("Results", {
-        mode: "photo",
+        mode: isHumanFood ? "human_food" : "photo",
         base64: resized.base64,
         uri: photo.uri,
+        ...(isHumanFood && { petType }),
       });
     } catch (err) {
       console.log("[SCANNER] Capture error:", err.message);
@@ -358,7 +362,7 @@ export default function ScannerScreen({ navigation, route }) {
       <View style={styles.instructionWrap} pointerEvents="none">
         <BlurView intensity={25} tint="light" style={styles.instructionBlur}>
           <Text style={styles.instructionLight}>
-            {showFallbackBanner ? "Point at the ingredient label" : "Point at the product packaging"}
+            {showFallbackBanner ? "Point at the ingredient label" : isHumanFood ? "Point at the food item" : "Point at the product packaging"}
           </Text>
         </BlurView>
       </View>
@@ -380,7 +384,7 @@ export default function ScannerScreen({ navigation, route }) {
           >
             <ChevronLeft size={24} color="#F5F5F5" strokeWidth={2.5} />
           </TouchableOpacity>
-          <Text style={styles.topTitle}>Scan</Text>
+          <Text style={styles.topTitle}>{isHumanFood ? "Food Safety" : "Scan"}</Text>
           <TouchableOpacity
             style={styles.helpBtn}
             onPress={showHelp}
@@ -410,9 +414,11 @@ export default function ScannerScreen({ navigation, route }) {
 
         {/* Bottom: barcode note + capture button + label */}
         <View style={styles.bottomArea}>
-          <Text style={styles.barcodeHint}>
-            Barcodes detected automatically
-          </Text>
+          {!isHumanFood && (
+            <Text style={styles.barcodeHint}>
+              Barcodes detected automatically
+            </Text>
+          )}
           <View style={{ height: 20 }} />
           <Pressable
             onPress={handleCapture}

@@ -2373,3 +2373,35 @@ export function StreamingDots() {
     </View>
   );
 }
+
+// --- Safety Badge (human food mode) ---
+
+export function SafetyBadge({ safetyLevel, petType }) {
+  const theme = useTheme();
+  const config = {
+    safe: { label: "SAFE", sublabel: "to feed", color: Colors.scoreExcellent, bg: "rgba(52,199,89,0.08)", Icon: CheckCircle2 },
+    caution: { label: "CAUTION", sublabel: "feed with care", color: Colors.scoreDecent, bg: "rgba(232,163,23,0.08)", Icon: AlertTriangle },
+    dangerous: { label: "DANGEROUS", sublabel: "do not feed", color: Colors.scoreConcerning, bg: "rgba(239,68,68,0.08)", Icon: AlertCircle },
+  }[safetyLevel] || { label: "UNKNOWN", sublabel: "", color: theme.textTertiary, bg: theme.surface, Icon: AlertCircle };
+
+  const petLabel = petType === "dog" ? "dogs" : "cats";
+
+  return (
+    <View style={{ alignItems: "center", paddingVertical: 28 }}>
+      <View style={{
+        width: 120, height: 120, borderRadius: 60,
+        backgroundColor: config.bg,
+        alignItems: "center", justifyContent: "center",
+        marginBottom: 16,
+      }}>
+        <config.Icon size={52} color={config.color} strokeWidth={1.5} />
+      </View>
+      <Text style={{ fontSize: 32, fontWeight: "800", color: config.color, letterSpacing: 1.5 }}>
+        {config.label}
+      </Text>
+      <Text style={{ fontSize: 14, fontWeight: "500", color: theme.textTertiary, marginTop: 4, textTransform: "uppercase", letterSpacing: 0.5 }}>
+        {config.sublabel} for {petLabel}
+      </Text>
+    </View>
+  );
+}
