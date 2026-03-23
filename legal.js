@@ -64,7 +64,7 @@ export const PRIVACY_HTML = `<!DOCTYPE html>
 </ul>
 
 <h2>Data Retention</h2>
-<p>Your scan history and cached analyses are retained while your account is active. You can delete your account by contacting us at <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.</p>
+<p>Your scan history and cached analyses are retained while your account is active. You can delete your account and all associated data at any time from the Profile screen in the app.</p>
 
 <h2>Data Security</h2>
 <p>We use industry-standard security measures including encrypted connections (HTTPS), server-side API key management, and row-level security policies on our database.</p>
@@ -103,8 +103,9 @@ export const TERMS_HTML = `<!DOCTYPE html>
 <ul>
   <li>${APP_NAME} provides 3 free scans with limited results. Free scans show the overall score, quick stats, a summary verdict, and the first 3 ingredients. Full ingredient details, quality breakdown, reviews, and recall history require a paid subscription.</li>
   <li>Some features require a paid subscription (Woof Pro).</li>
-  <li>Subscriptions are billed through Apple's App Store or Google Play. There are no free trials — you are charged immediately upon subscribing.</li>
-  <li>You can manage or cancel subscriptions in your device's subscription settings.</li>
+  <li>Subscriptions are billed through Apple's App Store or Google Play. Some plans include a free trial period. If you cancel before the trial ends, you will not be charged. After the trial, your subscription renews automatically at the plan price until you cancel.</li>
+  <li>Payment is charged to your Apple ID or Google Play account at confirmation of purchase, or at the end of the free trial period if applicable.</li>
+  <li>You can manage or cancel subscriptions in your device's subscription settings at any time.</li>
   <li>Refunds are handled by Apple or Google per their respective policies.</li>
 </ul>
 

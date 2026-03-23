@@ -284,6 +284,23 @@ export function AuthProvider({ children }) {
     if (error) throw error;
   }, []);
 
+  // --- Delete Account ---
+  const deleteAccount = useCallback(async () => {
+    // Call server-side RPC that deletes all user data + auth record
+    const { error } = await supabase.rpc("delete_own_account");
+    if (error) throw error;
+    // Clear local state
+    await AsyncStorage.removeItem(SCAN_COUNT_KEY);
+    resetPurchases();
+    setSession(null);
+    setUser(null);
+    setProfile(null);
+    setIsPro(false);
+    setScanCount(0);
+    // Sign out locally (session is already invalid server-side)
+    await supabase.auth.signOut().catch(() => {});
+  }, []);
+
   return (
     <AuthContext.Provider
       value={{
@@ -296,6 +313,7 @@ export function AuthProvider({ children }) {
         signInWithApple,
         signInWithGoogle,
         signOut,
+        deleteAccount,
         refreshProStatus,
         checkSession,
         incrementScanCount,

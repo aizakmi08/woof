@@ -1,4 +1,5 @@
-import { StyleSheet, Text, View, Image, Pressable, Alert } from "react-native";
+import { useState } from "react";
+import { StyleSheet, Text, View, Image, Pressable, Alert, ActivityIndicator, Platform, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Animated, {
   useSharedValue,
@@ -6,7 +7,7 @@ import Animated, {
   withSpring,
   FadeInDown,
 } from "react-native-reanimated";
-import { ChevronLeft, LogOut, ChevronRight } from "lucide-react-native";
+import { ChevronLeft, LogOut, ChevronRight, Trash2, CreditCard } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import Constants from "expo-constants";
 import { useAuth } from "../services/auth";
@@ -15,7 +16,8 @@ import { PRIVACY_HTML, TERMS_HTML } from "../legal";
 
 export default function ProfileScreen({ navigation }) {
   const theme = useTheme();
-  const { profile, user, signOut } = useAuth();
+  const { profile, user, signOut, deleteAccount, isPro } = useAuth();
+  const [deleting, setDeleting] = useState(false);
 
   const signOutScale = useSharedValue(1);
   const signOutAnimStyle = useAnimatedStyle(() => ({
@@ -49,6 +51,44 @@ export default function ProfileScreen({ navigation }) {
         },
       },
     ]);
+  };
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      "Delete Account",
+      "This will permanently delete your account, scan history, and all associated data. This action cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete Account",
+          style: "destructive",
+          onPress: () => {
+            // Second confirmation
+            Alert.alert(
+              "Are you sure?",
+              "Your account and all data will be permanently deleted.",
+              [
+                { text: "Cancel", style: "cancel" },
+                {
+                  text: "Delete Permanently",
+                  style: "destructive",
+                  onPress: async () => {
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                    setDeleting(true);
+                    try {
+                      await deleteAccount();
+                    } catch (err) {
+                      setDeleting(false);
+                      Alert.alert("Error", "Failed to delete account. Please try again.");
+                    }
+                  },
+                },
+              ]
+            );
+          },
+        },
+      ]
+    );
   };
 
   const appVersion = Constants.expoConfig?.version ?? "1.0.0";
@@ -105,9 +145,47 @@ export default function ProfileScreen({ navigation }) {
         ) : null}
       </Animated.View>
 
-      {/* Legal Links */}
+      {/* Subscription */}
       <Animated.View
         entering={FadeInDown.delay(200).duration(400).springify()}
+        style={[styles.legalSection, { backgroundColor: theme.surface }, Shadows.card]}
+      >
+        <Pressable
+          onPress={() => {
+            Haptics.selectionAsync();
+            if (isPro) {
+              // Deep-link to system subscription management
+              const url = Platform.select({
+                ios: "https://apps.apple.com/account/subscriptions",
+                android: "https://play.google.com/store/account/subscriptions",
+              });
+              Linking.openURL(url);
+            } else {
+              navigation.navigate("Paywall", { source: "profile" });
+            }
+          }}
+          style={({ pressed }) => [styles.subscriptionPressable, { opacity: pressed ? 0.5 : 1 }]}
+          accessibilityRole="button"
+          accessibilityLabel={isPro ? "Manage subscription" : "Upgrade to Pro"}
+        >
+          <View style={styles.subscriptionRow}>
+            <CreditCard size={18} color={isPro ? Colors.scoreExcellent : theme.textSecondary} strokeWidth={1.8} />
+            <View>
+              <Text style={[styles.legalRowText, { color: theme.textPrimary }]}>
+                {isPro ? "Manage Subscription" : "Upgrade to Woof Pro"}
+              </Text>
+              <Text style={[styles.subscriptionStatus, { color: isPro ? Colors.scoreExcellent : theme.textTertiary }]}>
+                {isPro ? "Active" : "Free plan"}
+              </Text>
+            </View>
+          </View>
+          <ChevronRight size={18} color={theme.textTertiary} strokeWidth={2} />
+        </Pressable>
+      </Animated.View>
+
+      {/* Legal Links */}
+      <Animated.View
+        entering={FadeInDown.delay(300).duration(400).springify()}
         style={[styles.legalSection, { backgroundColor: theme.surface }, Shadows.card]}
       >
         <Pressable
@@ -143,7 +221,7 @@ export default function ProfileScreen({ navigation }) {
 
       {/* Sign Out */}
       <Animated.View
-        entering={FadeInDown.delay(300).duration(400).springify()}
+        entering={FadeInDown.delay(400).duration(400).springify()}
         style={styles.signOutSection}
       >
         <Pressable
@@ -165,6 +243,36 @@ export default function ProfileScreen({ navigation }) {
               Sign Out
             </Text>
           </Animated.View>
+        </Pressable>
+      </Animated.View>
+
+      {/* Delete Account */}
+      <Animated.View
+        entering={FadeInDown.delay(500).duration(400).springify()}
+        style={styles.deleteSection}
+      >
+        <Pressable
+          onPress={handleDeleteAccount}
+          disabled={deleting}
+          style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
+          accessibilityRole="button"
+          accessibilityLabel="Delete account"
+        >
+          {deleting ? (
+            <View style={styles.deleteRow}>
+              <ActivityIndicator size="small" color={Colors.scoreConcerning} />
+              <Text style={[styles.deleteText, { color: Colors.scoreConcerning }]}>
+                Deleting...
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.deleteRow}>
+              <Trash2 size={14} color={Colors.scoreConcerning} strokeWidth={1.5} />
+              <Text style={[styles.deleteText, { color: Colors.scoreConcerning }]}>
+                Delete Account
+              </Text>
+            </View>
+          )}
         </Pressable>
       </Animated.View>
 
@@ -227,6 +335,23 @@ const styles = StyleSheet.create({
     borderRadius: Spacing.cardRadius,
     marginBottom: 24,
   },
+  subscriptionPressable: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  subscriptionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  subscriptionStatus: {
+    fontSize: 12,
+    fontWeight: "400",
+    marginTop: 1,
+  },
   legalRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -256,6 +381,19 @@ const styles = StyleSheet.create({
   },
   signOutText: {
     ...Typography.button,
+  },
+  deleteSection: {
+    alignItems: "center",
+    marginTop: 24,
+  },
+  deleteRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  deleteText: {
+    fontSize: 13,
+    fontWeight: "400",
   },
   footer: {
     flex: 1,

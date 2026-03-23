@@ -92,7 +92,19 @@ export async function purchasePackage(pkg) {
     if (err.userCancelled) {
       return { success: false, cancelled: true, error: null };
     }
-    return { success: false, cancelled: false, error: err.message || "Purchase failed" };
+    console.log("[PURCHASES] Purchase error:", err.code, err.message);
+    // Provide user-friendly messages for common StoreKit errors
+    let message = err.message || "Purchase failed";
+    if (err.code === "STORE_PROBLEM" || err.code === 2 || /store/i.test(err.message)) {
+      message = "There was a problem connecting to the App Store. Please check your internet connection and try again. If the issue persists, go to Settings > App Store and make sure you're signed in.";
+    } else if (err.code === "NETWORK_ERROR" || err.code === 1) {
+      message = "Network error. Please check your internet connection and try again.";
+    } else if (err.code === "PRODUCT_NOT_AVAILABLE" || err.code === 7) {
+      message = "This subscription is temporarily unavailable. Please try again later.";
+    } else if (err.code === "PAYMENT_PENDING" || err.code === 4) {
+      message = "Your payment is pending approval. You'll get access once it's confirmed.";
+    }
+    return { success: false, cancelled: false, error: message };
   }
 }
 
