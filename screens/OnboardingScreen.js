@@ -3,6 +3,7 @@ import {
   StyleSheet,
   Text,
   View,
+  Image,
   FlatList,
   Pressable,
   useWindowDimensions,
@@ -12,152 +13,352 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withSpring,
-  withTiming,
   FadeIn,
-  FadeOut,
 } from "react-native-reanimated";
 import Svg, { Circle } from "react-native-svg";
-import { ScanLine } from "lucide-react-native";
+import {
+  Camera,
+  Search,
+  Heart,
+  ChevronRight,
+  Check,
+  ArrowRight,
+  Type,
+  PawPrint,
+} from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useTheme, getScoreConfig, Colors, Spacing, Shadows, Typography } from "../theme";
+import { useTheme, Colors, Spacing, Shadows } from "../theme";
 
 const ONBOARDING_KEY = "@woof_onboarding_complete";
 
-// --- Score Ring Illustration (static, screen 2) ---
+// ── Image assets ─────────────────────────────────────────────────────
+const IMG = {
+  bag: require("../assets/onboarding/scan-bag.png"),
+  grapes: require("../assets/onboarding/safety-grapes.png"),
+  banana: require("../assets/onboarding/safety-banana.png"),
+};
 
-function ScoreRingIllustration({ theme }) {
-  const score = 85;
-  const config = getScoreConfig(score);
-  const size = 140;
-  const strokeWidth = 10;
-  const radius = (size - strokeWidth) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const fillOffset = circumference * (1 - score / 100);
+// Deep, sophisticated green used for the step labels + accents. Pulled from
+// the Paper palette so the app visuals match the onboarding design comps.
+const ACCENT = "#1F7A45";
+const AVOID = "#C94E3B";
 
+// ═══════════════════════════════════════════════════════════════════
+// Screen 1 — Welcome
+// ═══════════════════════════════════════════════════════════════════
+
+function WelcomePage({ theme }) {
   return (
-    <View style={styles.illustrationContainer}>
-      <View style={[styles.ringWrapper, Shadows.scoreGlow(config.color)]}>
-        <Svg width={size} height={size}>
-          <Circle
-            cx={size / 2}
-            cy={size / 2}
-            r={radius}
-            stroke={Colors.divider}
-            strokeWidth={strokeWidth}
-            fill="none"
-          />
-          <Circle
-            cx={size / 2}
-            cy={size / 2}
-            r={radius}
-            stroke={config.color}
-            strokeWidth={strokeWidth}
-            fill="none"
-            strokeDasharray={circumference}
-            strokeDashoffset={fillOffset}
-            strokeLinecap="round"
-            rotation={-90}
-            origin={`${size / 2}, ${size / 2}`}
-          />
-        </Svg>
-        <View style={StyleSheet.absoluteFill}>
-          <View style={styles.ringLabelContainer}>
-            <Text style={[styles.ringScore, { color: config.color }]}>
-              {score}
-            </Text>
-            <Text style={[styles.ringGrade, { color: config.color }]}>
-              {config.label}
+    <View style={styles.pageInner}>
+      {/* Brand mark */}
+      <View style={styles.brandRow}>
+        <View style={[styles.brandIcon, { backgroundColor: theme.textPrimary }]}>
+          <PawPrint size={18} color={theme.bg} strokeWidth={2.2} />
+        </View>
+        <Text style={[styles.brandName, { color: theme.textPrimary }]}>Woof</Text>
+      </View>
+
+      {/* Headline block */}
+      <Text style={[styles.stepLabel, { color: ACCENT }]}>WELCOME</Text>
+      <Text style={[styles.displayHeadline, { color: theme.textPrimary }]}>
+        Know what's in{"\n"}your pet's bowl.
+      </Text>
+        <Text style={[styles.bodyCopy, { color: theme.textSecondary }]}>
+          Woof rates every ingredient in your dog or cat's food — and tells you what's actually safe to share from your plate.
+        </Text>
+        <Text style={[styles.bodyCopy, { color: theme.textTertiary }]}>
+          AI estimates are informational and are not veterinary advice.
+        </Text>
+
+      {/* Made for dogs & cats pill */}
+      <View style={[styles.petBadge, { backgroundColor: theme.card }, Shadows.card]}>
+        <Text style={[styles.petBadgeText, { color: theme.textPrimary }]}>
+          🐕  🐈  Made for dogs & cats
+        </Text>
+      </View>
+
+      {/* Three-way preview cards */}
+      <View style={styles.waysList}>
+        <WayCard
+          theme={theme}
+          Icon={Camera}
+          title="Scan the bag"
+          subtitle="Point, shoot, get a score in seconds."
+        />
+        <WayCard
+          theme={theme}
+          Icon={Search}
+          title="Search the catalog"
+          subtitle="Type a brand — 9,000+ products indexed."
+        />
+        <WayCard
+          theme={theme}
+          Icon={Heart}
+          title="Check human food"
+          subtitle="Can they eat that strawberry? Find out."
+        />
+      </View>
+    </View>
+  );
+}
+
+function WayCard({ theme, Icon, title, subtitle }) {
+  return (
+    <View style={[styles.wayCard, { backgroundColor: theme.card }, Shadows.card]}>
+      <View style={[styles.wayIcon, { backgroundColor: theme.surface }]}>
+        <Icon size={20} color={theme.textPrimary} strokeWidth={1.8} />
+      </View>
+      <View style={styles.wayText}>
+        <Text style={[styles.wayTitle, { color: theme.textPrimary }]}>{title}</Text>
+        <Text style={[styles.waySubtitle, { color: theme.textSecondary }]} numberOfLines={2}>
+          {subtitle}
+        </Text>
+      </View>
+      <ChevronRight size={14} color={theme.textTertiary} strokeWidth={2.2} />
+    </View>
+  );
+}
+
+// Small SVG score ring used in the Scan preview card
+function MiniScore({ score, theme }) {
+  const size = 50;
+  const stroke = 4;
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const progress = Math.max(0, Math.min(1, score / 100));
+  return (
+    <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
+      <Svg width={size} height={size} style={{ position: "absolute" }}>
+        <Circle cx={size / 2} cy={size / 2} r={r} stroke={theme.divider} strokeWidth={stroke} fill="none" />
+        <Circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          stroke={ACCENT}
+          strokeWidth={stroke}
+          fill="none"
+          strokeDasharray={`${c * progress} ${c}`}
+          strokeDashoffset={0}
+          strokeLinecap="round"
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        />
+      </Svg>
+      <Text style={{ fontSize: 16, fontWeight: "800", letterSpacing: -0.4, color: theme.textPrimary }}>
+        {score}
+      </Text>
+    </View>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Screen 2 — Scan
+// ═══════════════════════════════════════════════════════════════════
+
+function ScanPage({ theme }) {
+  return (
+    <View style={styles.pageInner}>
+      {/* Scanner mock with bag + corners */}
+      <View style={styles.scannerMock}>
+        <Image source={IMG.bag} style={styles.scannerBag} resizeMode="contain" accessible={false} accessibilityElementsHidden />
+        <View style={[styles.scanCorner, styles.scanCornerTL, { borderColor: ACCENT }]} />
+        <View style={[styles.scanCorner, styles.scanCornerTR, { borderColor: ACCENT }]} />
+        <View style={[styles.scanCorner, styles.scanCornerBL, { borderColor: ACCENT }]} />
+        <View style={[styles.scanCorner, styles.scanCornerBR, { borderColor: ACCENT }]} />
+      </View>
+
+      {/* Result preview card */}
+      <View style={[styles.resultCard, { backgroundColor: theme.card }, Shadows.card]}>
+        <MiniScore score={78} theme={theme} />
+        <View style={styles.resultTextBlock}>
+          <Text style={[styles.resultTitle, { color: theme.textPrimary }]} numberOfLines={1}>
+            Canidae All Life Stages
+          </Text>
+          <Text style={[styles.resultMeta, { color: theme.textSecondary }]}>
+            Good · 51 ingredients analyzed
+          </Text>
+        </View>
+      </View>
+
+      {/* Copy */}
+      <View style={styles.copyBlock}>
+        <Text style={[styles.stepLabel, { color: ACCENT }]}>STEP 1 · SCAN</Text>
+        <Text style={[styles.headlineMedium, { color: theme.textPrimary }]}>
+          Point at the bag.{"\n"}That's it.
+        </Text>
+        <Text style={[styles.bodyCopy, { color: theme.textSecondary }]}>
+          Make sure the <Text style={{ color: theme.textPrimary, fontWeight: "600" }}>brand, product name, and flavor</Text> are all visible. We'll identify the product and pull its real ingredient list from our database.
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Screen 3 — Search
+// ═══════════════════════════════════════════════════════════════════
+
+function SearchPage({ theme }) {
+  return (
+    <View style={styles.pageInner}>
+      {/* Search bar mock */}
+      <View style={[styles.searchBarMock, { backgroundColor: theme.card, borderColor: theme.textPrimary }, Shadows.card]}>
+        <Search size={16} color={theme.textTertiary} strokeWidth={2} style={{ marginRight: 10 }} />
+        <Text style={[styles.searchBarText, { color: theme.textPrimary }]}>blue buffalo</Text>
+        <View style={[styles.searchCursor, { backgroundColor: ACCENT }]} />
+      </View>
+
+      {/* Results card */}
+      <View style={[styles.resultsCard, { backgroundColor: theme.card }, Shadows.card]}>
+        <SearchRow theme={theme} title="Life Protection Formula — Chicken" brand="Blue Buffalo" ingredients={42} verified />
+        <View style={[styles.resultsDivider, { backgroundColor: theme.divider }]} />
+        <SearchRow theme={theme} title="Wilderness — Salmon Recipe" brand="Blue Buffalo" ingredients={38} verified />
+        <View style={[styles.resultsDivider, { backgroundColor: theme.divider }]} />
+        <SearchRow theme={theme} title="Basics — Limited Ingredient Turkey" brand="Blue Buffalo" ingredients={28} />
+      </View>
+
+      {/* Copy */}
+      <View style={styles.copyBlock}>
+        <Text style={[styles.stepLabel, { color: ACCENT }]}>STEP 2 · SEARCH</Text>
+        <Text style={[styles.headlineMedium, { color: theme.textPrimary }]}>
+          Don't have{"\n"}the bag? Search.
+        </Text>
+        <Text style={[styles.bodyCopy, { color: theme.textSecondary }]}>
+          Type a brand or product name. We've indexed <Text style={{ color: theme.textPrimary, fontWeight: "600" }}>9,000+ pet food recipes</Text> with source labels — the score appears instantly.
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function SearchRow({ theme, title, brand, ingredients, verified }) {
+  return (
+    <View style={styles.searchRow}>
+      <View style={styles.searchBrandMark}>
+        <Text style={styles.searchBrandMarkText}>BB</Text>
+      </View>
+      <View style={styles.searchRowContent}>
+        <Text style={[styles.searchRowTitle, { color: theme.textPrimary }]} numberOfLines={1}>
+          {title}
+        </Text>
+        <View style={styles.searchRowMetaRow}>
+          <Text style={[styles.searchRowMeta, { color: theme.textSecondary }]}>{brand}</Text>
+          <View style={[styles.searchRowDot, { backgroundColor: theme.textTertiary }]} />
+          <Text style={[styles.searchRowMeta, { color: theme.textTertiary }]}>
+            {ingredients} ingredients
+          </Text>
+          {verified ? (
+            <View style={[styles.verifiedPill, { backgroundColor: theme.surface }]}>
+              <Text style={[styles.verifiedPillText, { color: theme.textSecondary }]}>verified</Text>
+            </View>
+          ) : null}
+        </View>
+      </View>
+      <ChevronRight size={14} color={theme.textTertiary} strokeWidth={2.2} />
+    </View>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Screen 4 — Is This Safe? (photo OR text)
+// ═══════════════════════════════════════════════════════════════════
+
+function SafetyPage({ theme }) {
+  return (
+    <View style={styles.pageInner}>
+      {/* Option A — Photo */}
+      <View style={[styles.safetyOption, { backgroundColor: theme.card }, Shadows.card]}>
+        <View style={styles.safetyOptionHeader}>
+          <View style={[styles.safetyOptionIcon, { backgroundColor: theme.textPrimary }]}>
+            <Camera size={14} color={theme.bg} strokeWidth={2} />
+          </View>
+          <Text style={[styles.safetyOptionLabel, { color: theme.textPrimary }]}>
+            SNAP A PHOTO
+          </Text>
+        </View>
+        <View style={styles.safetyOptionBody}>
+          <Image source={IMG.grapes} style={styles.safetyFoodImage} resizeMode="contain" accessible={false} accessibilityElementsHidden />
+          <View style={styles.safetyOptionText}>
+            <Text style={[styles.safetyFoodName, { color: theme.textPrimary }]}>Grapes</Text>
+            <View style={styles.safetyStatusRow}>
+              <View style={[styles.safetyStatusDot, { backgroundColor: AVOID }]} />
+              <Text style={[styles.safetyStatusText, { color: AVOID }]}>Toxic for dogs</Text>
+            </View>
+          </View>
+        </View>
+      </View>
+
+      {/* OR divider */}
+      <View style={styles.orRow}>
+        <View style={[styles.orLine, { backgroundColor: theme.divider }]} />
+        <Text style={[styles.orText, { color: theme.textTertiary }]}>OR</Text>
+        <View style={[styles.orLine, { backgroundColor: theme.divider }]} />
+      </View>
+
+      {/* Option B — Text */}
+      <View style={[styles.safetyOption, { backgroundColor: theme.card }, Shadows.card]}>
+        <View style={styles.safetyOptionHeader}>
+          <View style={[styles.safetyOptionIcon, { backgroundColor: theme.textPrimary }]}>
+            <Type size={14} color={theme.bg} strokeWidth={2} />
+          </View>
+          <Text style={[styles.safetyOptionLabel, { color: theme.textPrimary }]}>
+            TYPE THE FOOD
+          </Text>
+        </View>
+        <View style={[styles.safetyTextInput, { backgroundColor: theme.bg, borderColor: theme.textPrimary }]}>
+          <Search size={14} color={theme.textTertiary} strokeWidth={2} style={{ marginRight: 10 }} />
+          <Text style={[styles.safetyTextInputText, { color: theme.textPrimary }]}>banana</Text>
+          <View style={[styles.searchCursor, { backgroundColor: ACCENT }]} />
+        </View>
+        <View style={styles.safetyResultRow}>
+          <View style={[styles.safetyResultIcon, { backgroundColor: "#E4F0E8" }]}>
+            <Check size={16} color={ACCENT} strokeWidth={2.4} />
+          </View>
+          <View style={styles.safetyOptionText}>
+            <Text style={[styles.safetyFoodName, { color: theme.textPrimary }]}>Safe in moderation</Text>
+            <Text style={[styles.safetyResultBody, { color: theme.textSecondary }]}>
+              Plain banana is safe — rich in potassium. Small pieces only.
             </Text>
           </View>
         </View>
       </View>
-    </View>
-  );
-}
 
-// --- Ingredient List Illustration (static, screen 3) ---
-
-const SAMPLE_INGREDIENTS = [
-  { name: "Deboned Chicken", rating: "good" },
-  { name: "Brown Rice", rating: "good" },
-  { name: "Chicken Meal", rating: "good" },
-  { name: "BHA (Preservative)", rating: "bad" },
-];
-
-const DOT_COLORS = {
-  good: Colors.ingredientGood,
-  neutral: Colors.ingredientNeutral,
-  bad: Colors.ingredientBad,
-};
-
-function IngredientIllustration({ theme }) {
-  return (
-    <View style={styles.illustrationContainer}>
-      <View style={[styles.ingredientCard, { backgroundColor: theme.card }, Shadows.card]}>
-        {SAMPLE_INGREDIENTS.map((ing, i) => (
-          <View key={i}>
-            <View style={styles.ingredientRow}>
-              <View
-                style={[
-                  styles.ingredientDot,
-                  { backgroundColor: DOT_COLORS[ing.rating] },
-                ]}
-              />
-              <Text
-                style={[styles.ingredientName, { color: theme.textPrimary }]}
-                numberOfLines={1}
-              >
-                {ing.name}
-              </Text>
-              <Text
-                style={[
-                  styles.ingredientRating,
-                  { color: DOT_COLORS[ing.rating] },
-                ]}
-              >
-                {ing.rating === "good" ? "Good" : "Concerning"}
-              </Text>
-            </View>
-            {i < SAMPLE_INGREDIENTS.length - 1 && (
-              <View
-                style={[
-                  styles.ingredientDivider,
-                  { backgroundColor: Colors.divider },
-                ]}
-              />
-            )}
-          </View>
-        ))}
+      {/* Copy */}
+      <View style={styles.copyBlock}>
+        <Text style={[styles.stepLabel, { color: ACCENT }]}>STEP 3 · IS THIS SAFE?</Text>
+        <Text style={[styles.headlineMedium, { color: theme.textPrimary }]}>
+          Can my pet{"\n"}eat that?
+        </Text>
+        <Text style={[styles.bodyCopy, { color: theme.textSecondary }]}>
+          <Text style={{ color: theme.textPrimary, fontWeight: "600" }}>Snap a photo</Text> of anything on your plate — or just <Text style={{ color: theme.textPrimary, fontWeight: "600" }}>type the name</Text>. Instant verdict with portion guidance.
+        </Text>
+        <Text style={[styles.bodyCopy, { color: theme.textTertiary }]}>
+          For ingestion concerns, contact your veterinarian or pet poison control.
+        </Text>
       </View>
     </View>
   );
 }
 
-// --- Scan Illustration (screen 1) ---
-
-function ScanIllustration({ theme }) {
-  return (
-    <View style={styles.illustrationContainer}>
-      <ScanLine size={80} color={theme.textTertiary} strokeWidth={1.2} />
-    </View>
-  );
-}
-
-// --- Page Dots ---
+// ═══════════════════════════════════════════════════════════════════
+// Pagination dots
+// ═══════════════════════════════════════════════════════════════════
 
 function PageDots({ count, current, theme }) {
   return (
-    <View style={styles.dotsRow}>
+    <View
+      style={styles.dotsRow}
+      accessible
+      accessibilityRole="progressbar"
+      accessibilityLabel={`Step ${current + 1} of ${count}`}
+    >
       {Array.from({ length: count }).map((_, i) => (
-        <Animated.View
+        <View
           key={i}
           style={[
             styles.dot,
-            {
-              backgroundColor:
-                i === current ? theme.textPrimary : Colors.divider,
-            },
+            i === current && styles.dotActive,
+            { backgroundColor: i === current ? theme.textPrimary : theme.divider },
           ]}
         />
       ))}
@@ -165,33 +366,20 @@ function PageDots({ count, current, theme }) {
   );
 }
 
-// --- Page Data ---
+// ═══════════════════════════════════════════════════════════════════
+// Pages config
+// ═══════════════════════════════════════════════════════════════════
 
 const PAGES = [
-  {
-    key: "scan",
-    title: "Scan any pet food",
-    body: "Point your camera at the ingredient label and we'll do the rest",
-    Illustration: ScanIllustration,
-    button: "Continue",
-  },
-  {
-    key: "score",
-    title: "Get an instant health score",
-    body: "AI analyzes every ingredient and rates the food from 0 to 100",
-    Illustration: ScoreRingIllustration,
-    button: "Continue",
-  },
-  {
-    key: "ingredients",
-    title: "Know what's in the bowl",
-    body: "See exactly which ingredients are good, neutral, or concerning for your pet",
-    Illustration: IngredientIllustration,
-    button: "Get Started",
-  },
+  { key: "welcome", Component: WelcomePage, button: "Continue", showSkip: true },
+  { key: "scan", Component: ScanPage, button: "Continue", showSkip: true },
+  { key: "search", Component: SearchPage, button: "Continue", showSkip: true },
+  { key: "safety", Component: SafetyPage, button: "Get Started", showSkip: false, withArrow: true },
 ];
 
-// --- Onboarding Screen ---
+// ═══════════════════════════════════════════════════════════════════
+// Main screen
+// ═══════════════════════════════════════════════════════════════════
 
 export default function OnboardingScreen({ onComplete }) {
   const theme = useTheme();
@@ -199,66 +387,57 @@ export default function OnboardingScreen({ onComplete }) {
   const flatListRef = useRef(null);
   const [currentIndex, setCurrentIndex] = useState(0);
 
-  // Button press animation
   const btnScale = useSharedValue(1);
-  const btnStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: btnScale.value }],
-  }));
+  const btnStyle = useAnimatedStyle(() => ({ transform: [{ scale: btnScale.value }] }));
 
   const onViewableItemsChanged = useRef(({ viewableItems }) => {
-    if (viewableItems.length > 0) {
+    if (viewableItems.length > 0 && viewableItems[0].index != null) {
       setCurrentIndex(viewableItems[0].index);
     }
   }).current;
 
-  const viewabilityConfig = useRef({
-    viewAreaCoveragePercentThreshold: 50,
-  }).current;
+  const viewabilityConfig = useRef({ viewAreaCoveragePercentThreshold: 50 }).current;
+
+  const handleSkip = useCallback(() => {
+    Haptics.selectionAsync();
+    AsyncStorage.setItem(ONBOARDING_KEY, "true").catch(() => {});
+    onComplete();
+  }, [onComplete]);
 
   const handleNext = useCallback(async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
     if (currentIndex < PAGES.length - 1) {
-      flatListRef.current?.scrollToIndex({
-        index: currentIndex + 1,
-        animated: true,
-      });
+      flatListRef.current?.scrollToIndex({ index: currentIndex + 1, animated: true });
     } else {
-      // Final page — mark complete and dismiss
-      await AsyncStorage.setItem(ONBOARDING_KEY, "true");
+      await AsyncStorage.setItem(ONBOARDING_KEY, "true").catch(() => {});
       onComplete();
     }
   }, [currentIndex, onComplete]);
 
   const renderPage = useCallback(
-    ({ item }) => {
-      const { Illustration, title, body } = item;
-      return (
-        <View style={[styles.page, { width }]}>
-          <View style={styles.pageContent}>
-            <Illustration theme={theme} />
-
-            <View style={styles.textBlock}>
-              <Text style={[styles.pageTitle, { color: theme.textPrimary }]}>
-                {title}
-              </Text>
-              <Text
-                style={[styles.pageBody, { color: theme.textSecondary }]}
-              >
-                {body}
-              </Text>
-            </View>
-          </View>
-        </View>
-      );
-    },
+    ({ item }) => (
+      <View style={[styles.page, { width }]}>
+        <item.Component theme={theme} />
+      </View>
+    ),
     [width, theme]
   );
 
-  const buttonText = PAGES[currentIndex]?.button || "Continue";
+  const currentPage = PAGES[currentIndex] || PAGES[0];
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.bg }]}>
+      {/* Skip button — hidden on final page */}
+      <View style={styles.skipContainer}>
+        {currentPage.showSkip ? (
+          <Pressable onPress={handleSkip} hitSlop={12} style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })} accessibilityRole="button">
+            <Text style={[styles.skipText, { color: theme.textSecondary }]}>Skip</Text>
+          </Pressable>
+        ) : (
+          <View style={{ height: 22 }} />
+        )}
+      </View>
+
       <FlatList
         ref={flatListRef}
         data={PAGES}
@@ -266,47 +445,40 @@ export default function OnboardingScreen({ onComplete }) {
         renderItem={renderPage}
         horizontal
         pagingEnabled
+        decelerationRate="fast"
         showsHorizontalScrollIndicator={false}
         bounces={false}
+        overScrollMode="never"
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
-        getItemLayout={(_, index) => ({
-          length: width,
-          offset: width * index,
-          index,
-        })}
+        getItemLayout={(_, index) => ({ length: width, offset: width * index, index })}
       />
 
-      {/* Bottom: button + dots */}
+      {/* Bottom: dots + CTA */}
       <View style={styles.bottomArea}>
+        <PageDots count={PAGES.length} current={currentIndex} theme={theme} />
         <Pressable
           onPress={handleNext}
-          onPressIn={() => {
-            btnScale.value = withSpring(0.97, { damping: 15, stiffness: 150 });
-          }}
-          onPressOut={() => {
-            btnScale.value = withSpring(1, { damping: 15, stiffness: 150 });
-          }}
+          onPressIn={() => { btnScale.value = withSpring(0.97, { damping: 15, stiffness: 150 }); }}
+          onPressOut={() => { btnScale.value = withSpring(1, { damping: 15, stiffness: 150 }); }}
+          accessibilityRole="button"
+          accessibilityLabel={currentPage.button}
         >
           <Animated.View
-            style={[
-              styles.ctaButton,
-              { backgroundColor: theme.buttonPrimary },
-              Shadows.button,
-              btnStyle,
-            ]}
+            style={[styles.ctaButton, { backgroundColor: theme.buttonPrimary }, Shadows.button, btnStyle]}
           >
             <Animated.Text
-              key={buttonText}
+              key={currentPage.button}
               entering={FadeIn.duration(200)}
               style={[styles.ctaText, { color: theme.buttonText }]}
             >
-              {buttonText}
+              {currentPage.button}
             </Animated.Text>
+            {currentPage.withArrow ? (
+              <ArrowRight size={18} color={theme.buttonText} strokeWidth={2.2} style={{ marginLeft: 8 }} />
+            ) : null}
           </Animated.View>
         </Pressable>
-
-        <PageDots count={PAGES.length} current={currentIndex} theme={theme} />
       </View>
     </SafeAreaView>
   );
@@ -314,131 +486,313 @@ export default function OnboardingScreen({ onComplete }) {
 
 export { ONBOARDING_KEY };
 
-// --- Styles ---
+// ═══════════════════════════════════════════════════════════════════
+// Styles
+// ═══════════════════════════════════════════════════════════════════
 
 const styles = StyleSheet.create({
-  container: {
+  container: { flex: 1 },
+
+  // Skip row
+  skipContainer: {
+    alignItems: "flex-end",
+    paddingHorizontal: 24,
+    paddingTop: 4,
+    paddingBottom: 4,
+    height: 32,
+  },
+  skipText: { fontSize: 15, fontWeight: "500" },
+
+  // Page container
+  page: { flex: 1 },
+  pageInner: {
     flex: 1,
+    paddingHorizontal: 28,
+    paddingTop: 12,
+    justifyContent: "flex-start",
   },
 
-  // Page layout
-  page: {
-    flex: 1,
-    justifyContent: "center",
-    paddingHorizontal: Spacing.screenPadding,
-  },
-  pageContent: {
-    alignItems: "center",
-  },
-
-  // Illustration area
-  illustrationContainer: {
-    height: 200,
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 40,
-  },
-
-  // Score ring (screen 2)
-  ringWrapper: {
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  ringLabelContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  ringScore: {
-    fontSize: 36,
-    fontWeight: "700",
-    letterSpacing: -1,
-  },
-  ringGrade: {
-    fontSize: 11,
-    fontWeight: "600",
-    letterSpacing: 2,
-    textTransform: "uppercase",
-    marginTop: 2,
-  },
-
-  // Ingredient list (screen 3)
-  ingredientCard: {
-    width: 280,
-    borderRadius: Spacing.cardRadius,
-    paddingVertical: Spacing.cardPadding,
-    paddingHorizontal: Spacing.screenPadding,
-  },
-  ingredientRow: {
+  // Brand mark (welcome)
+  brandRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 12,
+    gap: 10,
+    marginBottom: 32,
   },
-  ingredientDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 12,
+  brandIcon: {
+    width: 34, height: 34, borderRadius: 10,
+    alignItems: "center", justifyContent: "center",
   },
-  ingredientName: {
-    fontSize: 15,
-    fontWeight: "500",
-    flex: 1,
-  },
-  ingredientRating: {
-    fontSize: 13,
-    fontWeight: "500",
-    marginLeft: 8,
-  },
-  ingredientDivider: {
-    height: StyleSheet.hairlineWidth,
-    marginLeft: Spacing.dividerIndent,
+  brandName: { fontSize: 15, fontWeight: "600", letterSpacing: -0.2 },
+
+  // Step label (tiny uppercase label above headlines)
+  stepLabel: {
+    fontSize: 12, fontWeight: "600",
+    letterSpacing: 1.4, marginBottom: 14,
   },
 
-  // Text block
-  textBlock: {
+  // Headlines
+  displayHeadline: {
+    fontSize: 34, fontWeight: "800",
+    letterSpacing: -0.8, lineHeight: 40,
+    marginBottom: 14,
+  },
+  headlineMedium: {
+    fontSize: 30, fontWeight: "800",
+    letterSpacing: -0.7, lineHeight: 34,
+    marginBottom: 14,
+  },
+  bodyCopy: {
+    fontSize: 15, fontWeight: "400",
+    lineHeight: 22, maxWidth: 340,
+  },
+
+  // "Made for dogs & cats" pill
+  petBadge: {
+    alignSelf: "flex-start",
+    paddingHorizontal: 14, paddingVertical: 8,
+    borderRadius: 999,
+    marginTop: 20,
+  },
+  petBadgeText: {
+    fontSize: 13, fontWeight: "600", letterSpacing: -0.1,
+  },
+
+  // Welcome three-way cards
+  waysList: {
+    gap: 12,
+    marginTop: 24,
+  },
+  wayCard: {
+    flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 12,
+    padding: 14,
+    borderRadius: 16,
+    gap: 14,
   },
-  pageTitle: {
-    fontSize: 28,
-    fontWeight: "700",
-    letterSpacing: -0.3,
-    textAlign: "center",
-    marginBottom: Spacing.lg,
+  wayIcon: {
+    width: 44, height: 44, borderRadius: 12,
+    alignItems: "center", justifyContent: "center",
+    flexShrink: 0,
   },
-  pageBody: {
-    ...Typography.body,
-    textAlign: "center",
-    lineHeight: 22,
-    maxWidth: 300,
+  wayText: { flex: 1, minWidth: 0, gap: 3 },
+  wayTitle: { fontSize: 15, fontWeight: "600", letterSpacing: -0.2 },
+  waySubtitle: { fontSize: 13, fontWeight: "400", lineHeight: 18 },
+
+  // Copy block (used on screens 2-4)
+  copyBlock: {
+    marginTop: 24,
   },
 
-  // Bottom area
+  // Scanner mock (screen 2)
+  scannerMock: {
+    alignSelf: "center",
+    width: 240, height: 280,
+    backgroundColor: "#1C1A17",
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 14,
+  },
+  scannerBag: { width: 160, height: 180 },
+  scanCorner: {
+    position: "absolute",
+    width: 28, height: 28,
+  },
+  scanCornerTL: {
+    top: 20, left: 20,
+    borderTopWidth: 3, borderLeftWidth: 3,
+    borderTopLeftRadius: 6,
+  },
+  scanCornerTR: {
+    top: 20, right: 20,
+    borderTopWidth: 3, borderRightWidth: 3,
+    borderTopRightRadius: 6,
+  },
+  scanCornerBL: {
+    bottom: 20, left: 20,
+    borderBottomWidth: 3, borderLeftWidth: 3,
+    borderBottomLeftRadius: 6,
+  },
+  scanCornerBR: {
+    bottom: 20, right: 20,
+    borderBottomWidth: 3, borderRightWidth: 3,
+    borderBottomRightRadius: 6,
+  },
+
+  // Result preview card (screen 2)
+  resultCard: {
+    alignSelf: "center",
+    width: 320,
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 14,
+    borderRadius: 16,
+    gap: 14,
+  },
+  resultTextBlock: { flex: 1, minWidth: 0, gap: 3 },
+  resultTitle: { fontSize: 14, fontWeight: "700", letterSpacing: -0.2 },
+  resultMeta: { fontSize: 12, fontWeight: "400" },
+
+  // Search bar mock (screen 3)
+  searchBarMock: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14, paddingVertical: 13,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    marginBottom: 8,
+  },
+  searchBarText: { fontSize: 15, fontWeight: "500", flex: 1 },
+  searchCursor: {
+    width: 2, height: 18,
+    borderRadius: 1,
+  },
+
+  // Search results (screen 3)
+  resultsCard: {
+    borderRadius: 14,
+    overflow: "hidden",
+  },
+  resultsDivider: { height: StyleSheet.hairlineWidth },
+  searchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 12,
+    gap: 12,
+  },
+  searchBrandMark: {
+    width: 36, height: 36, borderRadius: 8,
+    backgroundColor: "#2E6FB5",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  searchBrandMarkText: {
+    color: "#FFFFFF", fontSize: 10, fontWeight: "800",
+    letterSpacing: 0.5,
+  },
+  searchRowContent: { flex: 1, minWidth: 0, gap: 2 },
+  searchRowTitle: { fontSize: 14, fontWeight: "600", letterSpacing: -0.2 },
+  searchRowMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flexWrap: "wrap",
+  },
+  searchRowMeta: { fontSize: 11, fontWeight: "500" },
+  searchRowDot: {
+    width: 2, height: 2, borderRadius: 1,
+    opacity: 0.7,
+  },
+  verifiedPill: {
+    paddingHorizontal: 6, paddingVertical: 2,
+    borderRadius: 4,
+    marginLeft: 4,
+  },
+  verifiedPillText: {
+    fontSize: 9, fontWeight: "600", letterSpacing: 0.3,
+  },
+
+  // Safety options (screen 4)
+  safetyOption: {
+    padding: 16,
+    borderRadius: 18,
+  },
+  safetyOptionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 12,
+  },
+  safetyOptionIcon: {
+    width: 26, height: 26, borderRadius: 13,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  safetyOptionLabel: {
+    fontSize: 11, fontWeight: "700", letterSpacing: 0.8,
+  },
+  safetyOptionBody: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    paddingVertical: 4,
+  },
+  safetyFoodImage: { width: 48, height: 48 },
+  safetyOptionText: { flex: 1, minWidth: 0, gap: 4 },
+  safetyFoodName: { fontSize: 15, fontWeight: "700", letterSpacing: -0.2 },
+  safetyStatusRow: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+  },
+  safetyStatusDot: {
+    width: 6, height: 6, borderRadius: 3,
+  },
+  safetyStatusText: { fontSize: 12, fontWeight: "600" },
+
+  // OR divider
+  orRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginVertical: 12,
+  },
+  orLine: { flex: 1, height: StyleSheet.hairlineWidth },
+  orText: { fontSize: 11, fontWeight: "600", letterSpacing: 1.4 },
+
+  // Safety text input mock
+  safetyTextInput: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12, paddingVertical: 11,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    marginBottom: 12,
+  },
+  safetyTextInputText: { fontSize: 13, fontWeight: "500", flex: 1 },
+
+  // Safety result row (inside type option)
+  safetyResultRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    paddingVertical: 4,
+  },
+  safetyResultIcon: {
+    width: 32, height: 32, borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  safetyResultBody: { fontSize: 12, fontWeight: "400", lineHeight: 16 },
+
+  // Bottom area (dots + CTA)
   bottomArea: {
-    paddingHorizontal: Spacing.screenPadding,
-    paddingBottom: 40,
+    paddingHorizontal: 28,
+    paddingBottom: 24,
     gap: 20,
   },
+  dotsRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 6,
+  },
+  dot: {
+    width: 6, height: 6, borderRadius: 3,
+  },
+  dotActive: {
+    width: 20,
+  },
+
   ctaButton: {
-    height: Spacing.buttonHeight,
-    borderRadius: Spacing.buttonRadius,
+    flexDirection: "row",
+    height: 54,
+    borderRadius: 14,
     justifyContent: "center",
     alignItems: "center",
   },
   ctaText: {
-    ...Typography.button,
-  },
-
-  // Dots
-  dotsRow: {
-    flexDirection: "row",
-    justifyContent: "center",
-    gap: 8,
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    fontSize: 17, fontWeight: "600", letterSpacing: -0.1,
   },
 });

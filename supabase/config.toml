@@ -1,0 +1,7 @@
+[functions.analyze]
+# Allow guest/anonymous access — JWT verification is handled in function code
+verify_jwt = false
+
+[functions.product-lookup]
+# Same — guests can trigger a scrape (rate-limited by IP inside the function)
+verify_jwt = false

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, forwardRef } from "react";
+import React, { useEffect, useRef, useState, useCallback, forwardRef } from "react";
 import { Text, View, TouchableOpacity, LayoutAnimation, Platform, UIManager, StyleSheet as RNStyleSheet, Modal, PanResponder, Pressable, ScrollView, useWindowDimensions } from "react-native";
 import Animated, {
   useSharedValue,
@@ -14,14 +14,16 @@ import Animated, {
   FadeInUp,
   FadeOut,
   runOnJS,
+  cancelAnimation,
 } from "react-native-reanimated";
 import Svg, { Circle } from "react-native-svg";
 import { LinearGradient } from "expo-linear-gradient";
-import { Check, X, Star, ChevronRight, ChevronDown, Utensils, Wheat, Calendar, Flame, AlertTriangle, AlertCircle, CheckCircle2, PawPrint, Lock, Shield } from "lucide-react-native";
+import { Check, X, Star, ChevronRight, ChevronDown, Utensils, Wheat, Calendar, Flame, AlertTriangle, AlertCircle, CheckCircle2, PawPrint, Lock, Shield, ShieldCheck, Camera, Leaf, Heart, Factory, Image as ImageIcon } from "lucide-react-native";
+import { Image } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useTheme, getScoreConfig, Colors, Animation, Spacing, Shadows, Typography } from "../../theme";
 import { useStyles } from "./styles";
-import { supabase } from "../../services/supabase";
+import { classifyError } from "../../services/errors";
 
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -50,6 +52,8 @@ export function ProGate({ isPro, onUpgrade, children }) {
             Haptics.selectionAsync();
             onUpgrade();
           }}
+          accessibilityRole="button"
+          accessibilityHint="Opens the Woof Pro upgrade screen."
           style={({ pressed }) => [
             proGateStyles.button,
             { backgroundColor: theme.buttonPrimary, opacity: pressed ? 0.8 : 1 },
@@ -146,27 +150,9 @@ const scanBannerStyles = RNStyleSheet.create({
 export function ProGateOverlay({ onUpgrade, remainingScans }) {
   const theme = useTheme();
   const ctaScale = useSharedValue(1);
-  const lockOpacity = useSharedValue(0.5);
   const ctaAnimStyle = useAnimatedStyle(() => ({
     transform: [{ scale: ctaScale.value }],
   }));
-  const lockAnimStyle = useAnimatedStyle(() => ({
-    opacity: lockOpacity.value,
-  }));
-
-  useEffect(() => {
-    lockOpacity.value = withRepeat(
-      withSequence(
-        withTiming(1, { duration: 1500 }),
-        withTiming(0.5, { duration: 1500 })
-      ),
-      -1
-    );
-  }, []);
-
-  const scanText = remainingScans <= 0
-    ? "No free scans remaining"
-    : `${remainingScans} free scan${remainingScans === 1 ? "" : "s"} remaining`;
 
   return (
     <View style={gateStyles.container}>
@@ -177,9 +163,9 @@ export function ProGateOverlay({ onUpgrade, remainingScans }) {
         pointerEvents="none"
       />
 
-      {/* Ghost quality bars (recognizable shapes above gate text) */}
+      {/* Faded locked content preview */}
       <View style={gateStyles.ghostContainer}>
-        {[80, 65, 55, 72, 45].map((w, i) => (
+        {[72, 58, 65].map((w, i) => (
           <View key={i} style={gateStyles.ghostBarRow}>
             <View style={[gateStyles.ghostLabel, { backgroundColor: theme.textTertiary }]} />
             <View style={[gateStyles.ghostTrack, { backgroundColor: Colors.divider }]}>
@@ -187,57 +173,67 @@ export function ProGateOverlay({ onUpgrade, remainingScans }) {
             </View>
           </View>
         ))}
-        {/* Ghost card shapes */}
-        <View style={[gateStyles.ghostCard, { backgroundColor: theme.textTertiary }]} />
-        <View style={[gateStyles.ghostCard, { backgroundColor: theme.textTertiary }]} />
       </View>
 
-      {/* Lock icon with pulse */}
-      <Animated.View style={lockAnimStyle}>
-        <Lock size={24} color={theme.textTertiary} strokeWidth={2} />
-      </Animated.View>
-
-      {/* Title */}
-      <Text style={[gateStyles.title, { color: theme.textPrimary }]}>
-        See what's really inside
-      </Text>
-
-      {/* Subtitle */}
-      <Text style={[gateStyles.subtitle, { color: theme.textSecondary }]}>
-        {"Unlock ingredient analysis, quality scores,\nreviews, and recall alerts"}
-      </Text>
-
-      {/* Price line */}
-      <Text style={[gateStyles.price, { color: theme.textPrimary }]}>
-        From $3.33/month
-      </Text>
-
-      {/* CTA button */}
-      <Pressable
-        onPressIn={() => { ctaScale.value = withSpring(0.97, { damping: 20, stiffness: 300 }); }}
-        onPressOut={() => { ctaScale.value = withSpring(1, { damping: 15, stiffness: 150 }); }}
-        onPress={() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          onUpgrade();
-        }}
-      >
-        <Animated.View
-          style={[
-            gateStyles.cta,
-            { backgroundColor: theme.buttonPrimary },
-            ctaAnimStyle,
-          ]}
+      {/* Upgrade card */}
+      <View style={[gateStyles.upgradeCard, { backgroundColor: theme.card }, Shadows.button]}>
+        {/* Green lock icon */}
+        <LinearGradient
+          colors={["#30D158", "#34C759"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={gateStyles.lockIconBox}
         >
-          <Text style={[gateStyles.ctaText, { color: theme.buttonText }]}>
-            Unlock Full Report
-          </Text>
-        </Animated.View>
-      </Pressable>
+          <Lock size={22} color="#FFFFFF" strokeWidth={2.5} />
+        </LinearGradient>
 
-      {/* Scan count */}
-      <Text style={[gateStyles.scanCount, { color: theme.textTertiary }]}>
-        {scanText}
-      </Text>
+        <Text style={[gateStyles.title, { color: theme.textPrimary }]}>
+          {remainingScans === 0 ? "You're out of free scans" : "Unlock Full Analysis"}
+        </Text>
+
+        <Text style={[gateStyles.subtitle, { color: theme.textSecondary }]}>
+          {remainingScans === 0
+            ? "Upgrade to keep scanning — plus ingredients, recalls, and category scores."
+            : remainingScans === 1
+            ? "This is your last free scan. Upgrade for full ingredients, recalls, and unlimited scans."
+            : `${remainingScans} free scans left. Upgrade for full ingredients, recalls, and unlimited scans.`}
+        </Text>
+
+        {/* CTA button */}
+        <Pressable
+          onPressIn={() => { ctaScale.value = withSpring(0.97, { damping: 20, stiffness: 300 }); }}
+          onPressOut={() => { ctaScale.value = withSpring(1, { damping: 15, stiffness: 150 }); }}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            onUpgrade();
+          }}
+          accessibilityRole="button"
+          accessibilityHint="Opens the Woof Pro upgrade screen."
+          style={{ width: "100%" }}
+        >
+          <Animated.View
+            style={[
+              gateStyles.cta,
+              { backgroundColor: theme.buttonPrimary },
+              ctaAnimStyle,
+            ]}
+          >
+            <Text style={[gateStyles.ctaText, { color: theme.buttonText }]}>
+              Try Woof Pro Free
+            </Text>
+          </Animated.View>
+        </Pressable>
+
+        {/* Feature hints */}
+        <View style={gateStyles.featureHints}>
+          {["Full ingredients", "Recall alerts", "Unlimited scans"].map((f, i) => (
+            <View key={i} style={gateStyles.featureHint}>
+              <CheckCircle2 size={13} color={Colors.scoreExcellent} strokeWidth={2.5} />
+              <Text style={[gateStyles.featureHintText, { color: theme.textTertiary }]}>{f}</Text>
+            </View>
+          ))}
+        </View>
+      </View>
     </View>
   );
 }
@@ -254,76 +250,85 @@ const gateStyles = RNStyleSheet.create({
     right: 0,
     height: 60,
   },
-  title: {
-    fontSize: 22,
-    fontWeight: "600",
-    marginTop: 10,
-    textAlign: "center",
-  },
-  subtitle: {
-    fontSize: 15,
-    fontWeight: "400",
-    lineHeight: 22,
-    textAlign: "center",
-    marginTop: 6,
-  },
-  price: {
-    fontSize: 15,
-    fontWeight: "500",
-    marginTop: 16,
-  },
-  cta: {
-    height: Spacing.buttonHeight,
-    borderRadius: Spacing.buttonRadius,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 12,
-    marginHorizontal: 20,
-    paddingHorizontal: 32,
-    minWidth: 280,
-  },
-  ctaText: {
-    fontSize: 17,
-    fontWeight: "600",
-  },
-  scanCount: {
-    fontSize: 13,
-    fontWeight: "400",
-    marginTop: 10,
-  },
   ghostContainer: {
-    marginBottom: 20,
+    marginBottom: 16,
     width: "100%",
-    paddingHorizontal: 20,
-    gap: 10,
+    paddingHorizontal: 0,
+    gap: 8,
+    opacity: 0.3,
   },
   ghostBarRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 8,
   },
   ghostLabel: {
     width: 60,
     height: 8,
     borderRadius: 4,
-    opacity: 0.08,
+    opacity: 0.15,
   },
   ghostTrack: {
     flex: 1,
-    height: 6,
+    height: 5,
     borderRadius: 3,
-    opacity: 0.10,
+    opacity: 0.15,
     overflow: "hidden",
   },
   ghostFill: {
-    height: 6,
+    height: 5,
     borderRadius: 3,
   },
-  ghostCard: {
-    height: 56,
+  upgradeCard: {
+    width: "100%",
+    borderRadius: 20,
+    padding: 24,
+    alignItems: "center",
+  },
+  lockIconBox: {
+    width: 48,
+    height: 48,
     borderRadius: 14,
-    opacity: 0.08,
-    marginTop: 2,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 14,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: "700",
+    textAlign: "center",
+    marginBottom: 6,
+  },
+  subtitle: {
+    fontSize: 13,
+    fontWeight: "400",
+    lineHeight: 20,
+    textAlign: "center",
+    marginBottom: 18,
+  },
+  cta: {
+    height: 50,
+    borderRadius: Spacing.buttonRadius,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  ctaText: {
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  featureHints: {
+    flexDirection: "row",
+    gap: 16,
+    marginTop: 14,
+  },
+  featureHint: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  featureHintText: {
+    fontSize: 11,
+    fontWeight: "400",
   },
 });
 
@@ -346,6 +351,8 @@ export function PostScanPrompt({ onUpgrade, onDismiss }) {
         <Pressable
           onPress={onDismiss}
           hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss"
           style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1, marginLeft: "auto" })}
         >
           <X size={16} color={theme.textTertiary} strokeWidth={2} />
@@ -361,6 +368,8 @@ export function PostScanPrompt({ onUpgrade, onDismiss }) {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           onUpgrade();
         }}
+        accessibilityRole="button"
+        accessibilityHint="Opens the Woof Pro upgrade screen."
       >
         <Animated.View
           style={[
@@ -442,15 +451,6 @@ export const RATING_COLORS = {
   bad: Colors.score.bad,
   neutral: Colors.light.textSecondary,
 };
-
-export function getDataSourceConfig(theme) {
-  return {
-    verified: { label: "Verified Data", color: Colors.score.excellent, bg: Colors.score.excellent + "26" },
-    enriched: { label: "AI + Verified", color: Colors.amber, bg: Colors.amber + "26" },
-    ai: { label: "AI Estimated", color: theme.textSecondary, bg: theme.fill },
-    cached: { label: "Instant Result", color: Colors.blue, bg: Colors.blue + "26" },
-  };
-}
 
 export const NUTRISCORE_COLORS = {
   a: "#1B8C3A", b: "#85BB2F", c: "#FECB02", d: "#EE8100", e: "#E63E11",
@@ -559,7 +559,7 @@ export function BlinkingCursor() {
   }));
 
   return (
-    <Animated.Text style={[animStyle, { color: Colors.textPrimary, fontWeight: "300" }]}>
+    <Animated.Text style={[animStyle, { color: theme.textPrimary, fontWeight: "300" }]}>
       {"\u258C"}
     </Animated.Text>
   );
@@ -604,21 +604,6 @@ function StreamingBulletItem({ text, color, icon, streaming, done }) {
 
 // --- Badges ---
 
-export function DataSourceBadge({ source }) {
-  const theme = useTheme();
-  const { styles } = useStyles();
-  const configs = getDataSourceConfig(theme);
-  const config = configs[source] || configs.ai;
-  return (
-    <View style={[styles.dataSourceBadge, { backgroundColor: config.bg }]}>
-      <View style={[styles.dataSourceDot, { backgroundColor: config.color }]} />
-      <Text style={[styles.dataSourceText, { color: config.color }]}>
-        {config.label}
-      </Text>
-    </View>
-  );
-}
-
 export function NutriscoreBadge({ grade }) {
   const { styles } = useStyles();
   if (!grade) return null;
@@ -646,9 +631,9 @@ export function NovaGroupBadge({ group }) {
   );
 }
 
-// --- CircularScore (SVG, 180px hero ring with Reanimated animated fill) ---
+// --- CircularScore (SVG, 192px hero ring with Reanimated animated fill) ---
 
-export function CircularScore({ score, size = 180, strokeWidth = 12 }) {
+export function CircularScore({ score, size = 192, strokeWidth = 14, compact = false }) {
   const { styles, theme } = useStyles();
   const config = getScoreConfig(score);
   const radius = (size - strokeWidth) / 2;
@@ -715,7 +700,7 @@ export function CircularScore({ score, size = 180, strokeWidth = 12 }) {
           cx={size / 2}
           cy={size / 2}
           r={radius}
-          stroke={Colors.divider}
+          stroke={theme.isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.04)"}
           strokeWidth={strokeWidth}
           fill="none"
         />
@@ -735,66 +720,215 @@ export function CircularScore({ score, size = 180, strokeWidth = 12 }) {
         />
       </Svg>
 
-      {/* Score number + label */}
-      <View style={styles.ringLabelContainer}>
-        <Text style={[styles.heroScoreNumber, { color: config.color }]}>
-          {displayScore}
-        </Text>
-        <Text style={[styles.heroGradeLabel, { color: config.color }]}>
-          {config.label}
-        </Text>
+      {/* Score number */}
+      <View style={compact ? styles.titleRowRingLabel : styles.ringLabelContainer}>
+        {compact ? (
+          <>
+            <Text style={styles.titleRowRingScore}>
+              {displayScore}
+              <Text style={styles.titleRowRingOutOf}>/100</Text>
+            </Text>
+            <Text style={[styles.titleRowRingGrade, { color: config.color }]}>
+              {score >= 85 ? "Excellent" : score >= 70 ? "Good" : score >= 50 ? "Decent" : score >= 30 ? "Fair" : "Poor"}
+            </Text>
+          </>
+        ) : (
+          <>
+            <Text style={[styles.heroScoreNumber, { color: theme.textPrimary }]}>
+              {displayScore}
+            </Text>
+            <Text style={[styles.heroGradeLabel, { color: config.color }]}>
+              {score >= 85 ? "Excellent" : score >= 70 ? "Good" : score >= 50 ? "Decent" : score >= 30 ? "Fair" : "Poor"}
+            </Text>
+          </>
+        )}
       </View>
     </Animated.View>
   );
 }
 
-// --- QuickStatsGrid (2x2 with Lucide icons) ---
+// --- WoofWordmark (centered brand for the header) ---
 
-export function QuickStatsGrid({ nutrition }) {
+export function WoofWordmark() {
   const { styles, theme } = useStyles();
-  if (!nutrition) return null;
+  return (
+    <View style={styles.wordmarkRow}>
+      <PawPrint size={18} color={theme.textPrimary} strokeWidth={2.4} />
+      <Text style={styles.wordmarkText}>Woof</Text>
+    </View>
+  );
+}
 
-  const stats = [
-    nutrition.primaryProteinSource && {
-      Icon: Utensils,
-      label: "Protein",
-      value: nutrition.primaryProteinSource,
+// --- HeroImage (product photo, falls back to user-captured photo) ---
+
+export function HeroImage({ imageUrl, uri }) {
+  const { styles, theme } = useStyles();
+  const src = imageUrl || uri || null;
+  if (!src) {
+    return (
+      <Animated.View
+        entering={FadeInUp.duration(400).damping(20).stiffness(280)}
+        style={styles.heroImagePlaceholder}
+      >
+        <ImageIcon size={36} color={theme.textTertiary} strokeWidth={1.6} />
+      </Animated.View>
+    );
+  }
+  return (
+    <Animated.View
+      entering={FadeInUp.duration(450).damping(20).stiffness(280)}
+      style={styles.heroImageContainer}
+    >
+      <Image
+        source={{ uri: src }}
+        style={styles.heroImage}
+        resizeMode="contain"
+      />
+    </Animated.View>
+  );
+}
+
+// --- SummaryRows (5-row card: ingredient quality / red flags / beneficial / recall / made by) ---
+
+export function SummaryRows({ result }) {
+  const { styles, theme } = useStyles();
+  if (!result) return null;
+
+  const ingredients = Array.isArray(result.ingredients) ? result.ingredients : [];
+  const concerning = ingredients.filter(i => i?.quality === "concerning" || i?.rating === "bad").length;
+  const beneficial = ingredients.filter(i => i?.quality === "good" || i?.rating === "good").length;
+
+  // Map category scores by name if present (Quality Breakdown has them)
+  const categories = Array.isArray(result.categories) ? result.categories : [];
+  const ingQualityCat = categories.find(c => /ingredient/i.test(c?.name || ""));
+
+  const recallCount = result.recallCount
+    ?? (Array.isArray(result.recalls) ? result.recalls.length : null);
+  const hasRecalls = typeof recallCount === "number" ? recallCount > 0 : null;
+
+  const madeBy = result.manufacturer || result.parentCompany || result.brand || null;
+
+  // Quality label from score config (fall back to numeric)
+  const qualityLabel = ingQualityCat?.score != null
+    ? getScoreConfig(ingQualityCat.score).label
+    : ingredients.length > 0
+      ? (concerning === 0 ? "Good" : concerning <= 2 ? "Moderate" : "Low")
+      : "—";
+  const qualityColor = ingQualityCat?.score != null
+    ? getScoreConfig(ingQualityCat.score).color
+    : concerning === 0 ? Colors.scoreExcellent : concerning <= 2 ? Colors.scoreDecent : Colors.scoreConcerning;
+
+  const rows = [
+    {
+      key: "quality",
+      icon: <Leaf size={18} color={theme.textPrimary} strokeWidth={2} />,
+      label: "Ingredient quality",
+      value: qualityLabel,
+      dot: qualityColor,
     },
-    nutrition.grainFree != null && {
-      Icon: Wheat,
-      label: "Grain Free",
-      value: nutrition.grainFree ? "Yes" : "No",
+    {
+      key: "flags",
+      icon: <AlertTriangle size={18} color={theme.textPrimary} strokeWidth={2} />,
+      label: "Red flags",
+      value: concerning > 0 ? String(concerning) : "None",
+      dot: concerning === 0 ? Colors.scoreExcellent : concerning <= 2 ? Colors.scoreDecent : Colors.scoreConcerning,
     },
-    nutrition.lifestage && nutrition.lifestage !== "Unknown" && {
-      Icon: Calendar,
-      label: "Life Stage",
-      value: nutrition.lifestage,
+    {
+      key: "beneficial",
+      icon: <Heart size={18} color={theme.textPrimary} strokeWidth={2} />,
+      label: "Beneficial ingredients",
+      value: beneficial > 0 ? String(beneficial) : "—",
+      dot: beneficial >= 5 ? Colors.scoreExcellent : beneficial > 0 ? Colors.scoreDecent : Colors.textTertiary,
     },
-    nutrition.caloriesPerCup && nutrition.caloriesPerCup !== "N/A" && {
-      Icon: Flame,
-      label: "Calories",
-      value: nutrition.caloriesPerCup,
+    hasRecalls != null && {
+      key: "recall",
+      icon: <Shield size={18} color={theme.textPrimary} strokeWidth={2} />,
+      label: "Recall history",
+      value: hasRecalls ? (recallCount === 1 ? "1 recall" : `${recallCount} recalls`) : "None",
+      dot: hasRecalls ? Colors.scoreConcerning : Colors.scoreExcellent,
+    },
+    madeBy && {
+      key: "made-by",
+      icon: <Factory size={18} color={theme.textPrimary} strokeWidth={2} />,
+      label: "Made by",
+      value: madeBy,
+      dot: null,
     },
   ].filter(Boolean);
 
-  if (stats.length === 0) return null;
+  if (rows.length === 0) return null;
 
   return (
-    <View style={styles.statsGrid}>
-      {stats.map((s, i) => (
-        <View key={i} style={styles.statCell}>
-          <s.Icon size={20} color={theme.textTertiary} strokeWidth={1.8} style={styles.statCellIcon} />
-          <Text style={styles.statCellLabel}>{s.label.toUpperCase()}</Text>
-          <Text style={styles.statCellValue} numberOfLines={1}>
-            {shortenDisplayValue(s.value)}
-          </Text>
+    <View style={styles.summaryRowsCard}>
+      {rows.map((r, i) => (
+        <React.Fragment key={r.key}>
+          {i > 0 && <View style={styles.summaryRowDivider} />}
+          <View style={styles.summaryRow}>
+            <View style={styles.summaryRowIconSlot}>{r.icon}</View>
+            <Text style={styles.summaryRowLabel} numberOfLines={1}>{r.label}</Text>
+            <View style={styles.summaryRowRight}>
+              <Text style={styles.summaryRowValue} numberOfLines={1}>{r.value}</Text>
+              {r.dot && <View style={[styles.summaryRowDot, { backgroundColor: r.dot }]} />}
+            </View>
+          </View>
+        </React.Fragment>
+      ))}
+    </View>
+  );
+}
+
+// --- QuickFactsGrid (2x2 card grid — no icons, label + value pairs) ---
+
+export function QuickFactsGrid({ nutrition }) {
+  const { styles, theme } = useStyles();
+  if (!nutrition) return null;
+
+  const facts = [
+    nutrition.primaryProteinSource && { label: "Protein", value: nutrition.primaryProteinSource },
+    nutrition.grainFree != null && { label: "Grain", value: nutrition.grainFree ? "Free" : "Inclusive" },
+    nutrition.lifestage && nutrition.lifestage !== "Unknown" && { label: "Life Stage", value: nutrition.lifestage },
+  ].filter(Boolean);
+
+  if (facts.length === 0) return null;
+
+  // Pad to even number for 2-column grid
+  while (facts.length < 4 && facts.length % 2 !== 0) facts.push(null);
+
+  const rows = [];
+  for (let i = 0; i < facts.length; i += 2) {
+    rows.push(facts.slice(i, i + 2));
+  }
+
+  return (
+    <View style={styles.quickFactsCard}>
+      {rows.map((row, ri) => (
+        <View key={ri}>
+          {ri > 0 && <View style={styles.quickFactsDividerH} />}
+          <View style={styles.quickFactsRow}>
+            {row.map((fact, ci) => (
+              <React.Fragment key={ci}>
+                {ci > 0 && <View style={styles.quickFactsDividerV} />}
+                <View style={styles.quickFactsCell}>
+                  {fact ? (
+                    <>
+                      <Text style={[styles.quickFactsLabel, { color: theme.textSecondary }]}>{fact.label}</Text>
+                      <Text style={[styles.quickFactsValue, { color: theme.textPrimary }]}>{fact.value}</Text>
+                    </>
+                  ) : null}
+                </View>
+              </React.Fragment>
+            ))}
+          </View>
         </View>
       ))}
     </View>
   );
 }
 
-// --- VerdictCard (colored left border accent) ---
+// Legacy alias so existing imports don't break
+export { QuickFactsGrid as QuickStatsGrid };
+
+// --- VerdictCard (tinted background accent) ---
 
 export function VerdictCard({ verdict, score, streaming, done, isPro = true }) {
   const { styles } = useStyles();
@@ -815,20 +949,16 @@ export function VerdictCard({ verdict, score, streaming, done, isPro = true }) {
   const needsTruncate = !isFreeGated && !streaming && verdict.length > 200;
 
   return (
-    <View style={[styles.verdictCard, { borderLeftColor: config.color }]}>
+    <View style={[styles.verdictCard, { backgroundColor: config.bg || "rgba(52,199,89,0.06)" }]}>
       <Text
         style={styles.verdictText}
         numberOfLines={expanded || streaming ? undefined : 4}
       >
-        {streaming ? (
-          <StreamingText text={verdict} streaming={streaming} done={done} style={styles.verdictText} />
-        ) : (
-          displayVerdict
-        )}
+        {displayVerdict}
       </Text>
       {isFreeGated && (
         <LinearGradient
-          colors={[Colors.verdictBackground + "00", Colors.verdictBackground]}
+          colors={[( config.bg || "rgba(52,199,89,0.06)") + "00", config.bg || "rgba(52,199,89,0.06)"]}
           style={{
             position: "absolute",
             bottom: 0,
@@ -842,7 +972,13 @@ export function VerdictCard({ verdict, score, streaming, done, isPro = true }) {
         />
       )}
       {needsTruncate && !expanded && (
-        <TouchableOpacity onPress={() => setExpanded(true)} hitSlop={8}>
+        <TouchableOpacity
+          onPress={() => setExpanded(true)}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Show full verdict"
+          accessibilityState={{ expanded }}
+        >
           <Text style={styles.verdictMoreLink}>more</Text>
         </TouchableOpacity>
       )}
@@ -850,15 +986,13 @@ export function VerdictCard({ verdict, score, streaming, done, isPro = true }) {
   );
 }
 
-// --- CategoryBar (refined — gray track, staggered fill, expandable detail) ---
+// --- CategoryBar (refined — gray track, staggered fill, detail text) ---
 
 export function CategoryBar({ name, score, detail, index = 0, isLast = false }) {
   const { styles, theme } = useStyles();
   const config = getScoreConfig(score);
   const animWidth = useSharedValue(0);
   const fadeAnim = useSharedValue(0);
-  const [expanded, setExpanded] = useState(false);
-  const [needsTruncation, setNeedsTruncation] = useState(false);
 
   useEffect(() => {
     const stagger = 200 + index * 150;
@@ -877,66 +1011,35 @@ export function CategoryBar({ name, score, detail, index = 0, isLast = false }) 
     width: `${animWidth.value}%`,
   }));
 
-  const toggleExpand = () => {
-    Haptics.selectionAsync();
-    LayoutAnimation.configureNext(
-      LayoutAnimation.create(250, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity)
-    );
-    setExpanded(!expanded);
-  };
-
   return (
-    <TouchableOpacity
-      activeOpacity={detail ? 0.7 : 1}
-      onPress={detail ? toggleExpand : undefined}
-      disabled={!detail}
+    <Animated.View
+      style={[styles.categoryItem, fadeStyle]}
       accessibilityLabel={`${name}: ${score} out of 100. ${detail || ""}`}
-      accessibilityRole="button"
     >
-      <Animated.View style={[styles.categoryItem, fadeStyle]}>
-        {/* Label row: name (left) + score (right) */}
-        <View style={styles.categoryHeader}>
-          <Text style={styles.categoryName}>{name}</Text>
-          <Text style={[styles.categoryScore, { color: config.color }]}>{score}</Text>
-        </View>
+      {/* Label row: name (left) + score (right) */}
+      <View style={styles.categoryHeader}>
+        <Text style={styles.categoryName}>{name}</Text>
+        <Text style={[styles.categoryScore, { color: config.color }]}>{score}</Text>
+      </View>
 
-        {/* Progress bar with gray track */}
-        <View style={styles.barTrack}>
-          <Animated.View
-            style={[
-              styles.barFill,
-              { backgroundColor: config.color },
-              barStyle,
-            ]}
-          />
-        </View>
+      {/* Progress bar with gray track */}
+      <View style={styles.barTrack}>
+        <Animated.View
+          style={[
+            styles.barFill,
+            { backgroundColor: config.color },
+            barStyle,
+          ]}
+        />
+      </View>
 
-        {/* Description + more/less */}
-        {detail && (
-          <View style={styles.categoryDetailRow}>
-            <Text
-              style={styles.categoryDetail}
-              numberOfLines={expanded ? undefined : 1}
-              onTextLayout={(e) => {
-                if (!needsTruncation && e.nativeEvent.lines.length > 1) setNeedsTruncation(true);
-              }}
-            >
-              {detail}
-            </Text>
-            {needsTruncation && (
-              <TouchableOpacity onPress={toggleExpand} hitSlop={8}>
-                <Text style={styles.categoryMoreLink}>
-                  {expanded ? "less" : "more"}
-                </Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
-
-        {/* Indented divider */}
-        {!isLast && <View style={styles.categoryDivider} />}
-      </Animated.View>
-    </TouchableOpacity>
+      {/* Detail text */}
+      {detail && (
+        <Text style={styles.categoryDetail} numberOfLines={3}>
+          {detail}
+        </Text>
+      )}
+    </Animated.View>
   );
 }
 
@@ -991,7 +1094,13 @@ export function CollapsibleSection({ title, accentColor, defaultOpen = true, chi
 
   return (
     <View style={styles.sectionCard}>
-      <TouchableOpacity onPress={toggle} activeOpacity={0.7} style={styles.collapsibleHeader}>
+      <TouchableOpacity
+        onPress={toggle}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityState={{ expanded }}
+        style={styles.collapsibleHeader}
+      >
         <View style={styles.collapsibleHeaderLeft}>
           {accentColor && (
             <View style={[styles.sectionAccent, { backgroundColor: accentColor }]} />
@@ -1103,20 +1212,21 @@ export function NutritionFacts({ nutrition }) {
 
   const clean = (v) => (v && v !== "N/A" && v !== "Unknown") ? v : null;
 
-  const rows = [
-    [
-      { label: "Protein", value: clean(nutrition.proteinPercent), qualifier: nutrition.proteinPercent ? nutrition.proteinLevel : null },
-      { label: "Calories", value: clean(nutrition.caloriesPerCup) },
-    ],
-    [
-      { label: "Fat", value: clean(nutrition.fatPercent), qualifier: nutrition.fatPercent ? nutrition.fatLevel : null },
-      { label: "Life Stage", value: clean(nutrition.lifestage) },
-    ],
-    [
-      { label: "Fiber", value: clean(nutrition.fiberPercent) },
-      { label: "Grain Free", value: nutrition.grainFree != null ? (nutrition.grainFree ? "Yes" : "No") : null },
-    ],
-  ];
+  // Build a flat list of cells with data, then pair them into 2-col rows.
+  // Skips cells with missing data so the grid never renders empty slots.
+  const cells = [
+    { label: "Protein", value: clean(nutrition.proteinPercent), qualifier: nutrition.proteinPercent ? nutrition.proteinLevel : null },
+    { label: "Fat", value: clean(nutrition.fatPercent), qualifier: nutrition.fatPercent ? nutrition.fatLevel : null },
+    { label: "Fiber", value: clean(nutrition.fiberPercent) },
+    { label: "Life Stage", value: clean(nutrition.lifestage) },
+    { label: "Grain Free", value: nutrition.grainFree != null ? (nutrition.grainFree ? "Yes" : "No") : null },
+  ].filter(c => c.value);
+
+  const rows = [];
+  for (let i = 0; i < cells.length; i += 2) {
+    rows.push([cells[i], cells[i + 1] || null]);
+  }
+  if (rows.length === 0) return null;
 
   return (
     <View style={styles.nutritionSection}>
@@ -1125,8 +1235,14 @@ export function NutritionFacts({ nutrition }) {
         <View key={ri}>
           <View style={styles.nutRow}>
             <NutritionCell {...row[0]} isLeft />
-            <View style={styles.nutVertDivider} />
-            <NutritionCell {...row[1]} isLeft={false} />
+            {row[1] ? (
+              <>
+                <View style={styles.nutVertDivider} />
+                <NutritionCell {...row[1]} isLeft={false} />
+              </>
+            ) : (
+              <View style={{ flex: 1 }} />
+            )}
           </View>
           {ri < rows.length - 1 && <View style={styles.nutHorizDivider} />}
         </View>
@@ -1147,6 +1263,19 @@ function CategoryPill({ category }) {
 }
 
 // --- IngredientRow (tappable → opens bottom sheet) ---
+
+const ingBadgeStyles = RNStyleSheet.create({
+  badge: {
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 6,
+    marginLeft: 6,
+  },
+  text: {
+    fontSize: 11,
+    fontWeight: "600",
+  },
+});
 
 const ING_DOT_COLORS = {
   good: Colors.ingredientGood,
@@ -1184,30 +1313,24 @@ function IngredientRow({ ingredient, isFirst, isLast, index, onPress }) {
       <Animated.View
         style={[
           styles.ingRow,
-          isBad && styles.ingRowWarning,
           fadeStyle,
         ]}
       >
         <View style={styles.ingRowMain}>
-          {/* Quality dot */}
-          <View style={[styles.ingDot, { backgroundColor: dotColor }]} />
+          {/* Quality dot (10px) */}
+          <View style={[styles.ingDot, { width: 10, height: 10, borderRadius: 5, backgroundColor: dotColor }]} />
 
-          {/* Name */}
+          {/* Name + description */}
           <View style={styles.ingNameArea}>
             <Text style={styles.ingName} numberOfLines={1}>
               {ingredient.name}
             </Text>
+            {ingredient.description || ingredient.reason ? (
+              <Text style={[styles.ingDescription, { color: theme.textSecondary }]} numberOfLines={2}>
+                {ingredient.description || ingredient.reason}
+              </Text>
+            ) : null}
           </View>
-
-          {/* 1st badge */}
-          {isFirst && (
-            <View style={styles.ingFirstBadge}>
-              <Text style={styles.ingFirstBadgeText}>1ST</Text>
-            </View>
-          )}
-
-          {/* Category badge (neutral) */}
-          {ingredient.category && <CategoryPill category={ingredient.category} />}
 
           {/* Chevron */}
           <ChevronRight
@@ -1334,7 +1457,12 @@ export function IngredientsSection({ ingredients, onIngredientPress, totalCount,
 
       {/* Expand / collapse toggle (pro users only, >5 ingredients) */}
       {canExpand && (
-        <TouchableOpacity onPress={toggleExpand} activeOpacity={0.7}>
+        <TouchableOpacity
+          onPress={toggleExpand}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityState={{ expanded }}
+        >
           <View style={styles.ingExpandButton}>
             <Text style={styles.ingExpandText}>
               {expanded ? "Show less" : `Show all ${total} ingredients`}
@@ -1471,7 +1599,12 @@ export function IngredientSheet({ ingredient, onDismiss, isPro = true, onUpgrade
           style={[RNStyleSheet.absoluteFill, { backgroundColor: "#000" }, backdropAnimStyle]}
           pointerEvents="none"
         />
-        <Pressable style={RNStyleSheet.absoluteFill} onPress={dismiss} />
+        <Pressable
+          style={RNStyleSheet.absoluteFill}
+          onPress={dismiss}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+        />
 
         {/* Sheet — anchored to bottom */}
         <View style={{ flex: 1, justifyContent: "flex-end" }} pointerEvents="box-none">
@@ -1542,6 +1675,8 @@ export function IngredientSheet({ ingredient, onDismiss, isPro = true, onUpgrade
                           dismiss();
                           onUpgrade?.();
                         }}
+                        accessibilityRole="button"
+                        accessibilityHint="Opens the Woof Pro upgrade screen."
                         style={({ pressed }) => [
                           sheetGateStyles.button,
                           { backgroundColor: theme.buttonPrimary, opacity: pressed ? 0.8 : 1 },
@@ -1555,7 +1690,7 @@ export function IngredientSheet({ ingredient, onDismiss, isPro = true, onUpgrade
                   </View>
                 ) : (
                   <>
-                    {/* What is it */}
+                    {/* What is it (verified mode emits combined info under "reason" — show it once) */}
                     {ing.description ? (
                       <View style={styles.sheetSection}>
                         <Text style={styles.sheetSectionLabel}>What is it</Text>
@@ -1564,9 +1699,9 @@ export function IngredientSheet({ ingredient, onDismiss, isPro = true, onUpgrade
                     ) : null}
 
                     {/* Why this score */}
-                    {ing.reason ? (
+                    {ing.reason && ing.reason !== ing.description ? (
                       <View style={styles.sheetSection}>
-                        <Text style={styles.sheetSectionLabel}>Why this score</Text>
+                        <Text style={styles.sheetSectionLabel}>{ing.description ? "Why this score" : "About this ingredient"}</Text>
                         <Text style={styles.sheetSectionBody}>{ing.reason}</Text>
                       </View>
                     ) : null}
@@ -1712,153 +1847,368 @@ function ReviewPill({ text, bgColor, textColor, index }) {
 
 export function ReviewsSection({ customerRating }) {
   const { styles, theme } = useStyles();
-  const [expanded, setExpanded] = useState(true);
-  const rotation = useSharedValue(0);
-
   if (!customerRating) return null;
 
-  const accentColor = getReviewAccentColor(customerRating.score, customerRating.outOf || 5);
-
-  const toggle = () => {
-    Haptics.selectionAsync();
-    LayoutAnimation.configureNext(
-      LayoutAnimation.create(250, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity)
-    );
-    rotation.value = withTiming(expanded ? 1 : 0, { duration: 200 });
-    setExpanded(!expanded);
-  };
-
-  const chevronStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${rotation.value * 180}deg` }],
-  }));
-
-  const praises = (customerRating.commonPraises || []).slice(0, 3);
-  const complaints = (customerRating.commonComplaints || []).slice(0, 3);
+  const rating = customerRating.score || customerRating.rating;
+  const count = customerRating.count || customerRating.reviewCount || customerRating.totalReviews;
 
   return (
-    <View style={[styles.reviewCard, { borderLeftColor: accentColor }]}>
-      {/* Header — title + collapse chevron */}
-      <TouchableOpacity onPress={toggle} activeOpacity={0.7} style={styles.reviewHeaderRow}>
-        <Text style={styles.reviewTitle}>Customer Reviews</Text>
-        <Animated.View style={chevronStyle}>
-          <ChevronDown size={20} color={theme.textTertiary} strokeWidth={2} />
-        </Animated.View>
-      </TouchableOpacity>
-
-      {expanded && (
-        <View style={{ marginTop: Spacing.elementGap }}>
-          {/* Rating: big number + stars, count below */}
-          <View>
-            <View style={styles.reviewRatingRow}>
-              <Text style={styles.reviewBigScore}>{customerRating.score}</Text>
-              <ReviewStars score={customerRating.score} outOf={customerRating.outOf || 5} />
-            </View>
-            {customerRating.totalReviews && (
-              <Text style={styles.reviewCountText}>
-                {formatReviewCount(customerRating.totalReviews)} reviews
-              </Text>
-            )}
-          </View>
-
-          {/* Summary text */}
-          {customerRating.sentiment && (
-            <Text style={styles.reviewSummary} numberOfLines={2}>
-              {customerRating.sentiment}
-            </Text>
-          )}
-
-          {/* Loved pills */}
-          {praises.length > 0 && (
-            <View style={styles.reviewTagSection}>
-              <Text style={[styles.reviewTagLabel, { color: Colors.lovedPillText }]}>Loved</Text>
-              <View style={styles.reviewTagsWrap}>
-                {praises.map((tag, i) => (
-                  <ReviewPill
-                    key={i}
-                    text={tag}
-                    bgColor={Colors.lovedPillBg}
-                    textColor={Colors.lovedPillText}
-                    index={i}
-                  />
-                ))}
-              </View>
-            </View>
-          )}
-
-          {/* Watch out pills */}
-          {complaints.length > 0 && (
-            <View style={styles.reviewTagSection}>
-              <Text style={[styles.reviewTagLabel, { color: Colors.watchOutPillText }]}>Watch out</Text>
-              <View style={styles.reviewTagsWrap}>
-                {complaints.map((tag, i) => (
-                  <ReviewPill
-                    key={i}
-                    text={tag}
-                    bgColor={Colors.watchOutPillBg}
-                    textColor={Colors.watchOutPillText}
-                    index={praises.length + i}
-                  />
-                ))}
-              </View>
-            </View>
-          )}
-        </View>
-      )}
+    <View style={styles.safetyReviewsRow}>
+      <View style={[styles.safetyReviewsIcon, { backgroundColor: "rgba(255,214,10,0.12)" }]}>
+        <Star size={18} color="#FFD60A" fill="#FFD60A" strokeWidth={1} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.recallRowTitle, { color: theme.textPrimary }]}>
+          {rating ? `${rating} out of 5` : "Customer Reviews"}
+        </Text>
+        <Text style={[styles.recallRowSubtitle, { color: theme.textSecondary }]}>
+          {count ? `Based on ${typeof count === 'number' ? count.toLocaleString() : count} reviews` : "Reviews available"}
+        </Text>
+      </View>
+      <ChevronRight size={14} color={theme.textTertiary} strokeWidth={2} />
     </View>
   );
 }
 
-// --- RecallCard (recall: red-tinted, clean: green-tinted — no shadow) ---
+// --- RecallCard (severity-aware + testing transparency) ---
+// Backwards-compatible: if recallSeverity isn't present on older analyses we
+// derive a coarse tier from the text so pre-v2 cached entries still render.
 
-export function RecallCard({ recallHistory }) {
-  const { styles } = useStyles();
-  const [expanded, setExpanded] = useState(false);
+const RECALL_CONFIG = {
+  none:    { bgKey: "good",    Icon: CheckCircle2,  title: "No Recalls" },
+  minor:   { bgKey: "warn",    Icon: AlertCircle,   title: "Minor Recall History" },
+  major:   { bgKey: "bad",     Icon: AlertTriangle, title: "Major Recall History" },
+  active:  { bgKey: "bad",     Icon: AlertTriangle, title: "Active Safety Concern" },
+  unknown: { bgKey: "neutral", Icon: AlertCircle,   title: "Recall Info Unavailable" },
+};
 
-  if (!recallHistory) return null;
+const RECALL_BG = {
+  good:    { bg: "rgba(52,199,89,0.1)",  color: Colors.ingredientGood },
+  warn:    { bg: "rgba(232,163,23,0.12)", color: "#E8A317" },
+  bad:     { bg: "rgba(239,68,68,0.1)",  color: "#EF4444" },
+  neutral: { bg: "rgba(142,142,147,0.1)", color: "#8E8E93" },
+};
 
-  const isClean = /^(none|no recalls?)\b/i.test(recallHistory);
+const TESTING_LABEL = {
+  high:     "Third-party tested",
+  moderate: "Some testing disclosed",
+  low:      "Limited testing info",
+};
 
-  if (isClean) {
-    return (
-      <View style={styles.recallCardClean}>
-        <View style={styles.recallHeaderRow}>
-          <CheckCircle2 size={16} color={Colors.ingredientGood} strokeWidth={2} />
-          <Text style={styles.recallLabelClean}>NO RECALLS</Text>
-        </View>
-        <Text style={styles.recallTextClean}>
-          No recalls found for this product or brand.
-        </Text>
-      </View>
-    );
-  }
+export function RecallCard({ recallHistory, recallSeverity, testingTransparency, recallSource, testingDetails }) {
+  const { styles, theme } = useStyles();
 
-  const needsTruncate = recallHistory.length > 120;
+  if (!recallHistory && !recallSeverity) return null;
 
-  const toggleExpand = () => {
-    Haptics.selectionAsync();
-    LayoutAnimation.configureNext(
-      LayoutAnimation.create(250, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity)
-    );
-    setExpanded(true);
-  };
+  // Derive severity for legacy analyses that only carry the text field.
+  let sev = recallSeverity;
+  if (!sev) sev = /^(none|no recalls?)\b/i.test(recallHistory || "") ? "none" : "unknown";
+
+  const cfg = RECALL_CONFIG[sev] || RECALL_CONFIG.unknown;
+  const palette = RECALL_BG[cfg.bgKey];
+  const subtitle = sev === "none"
+    ? "No recalls found for this product or brand."
+    : recallHistory || "Recall record could not be verified.";
+  const testingLabel = TESTING_LABEL[testingTransparency];
+  const isFdaVerified = recallSource === "fda_verified";
 
   return (
-    <View style={styles.recallCardWarning}>
-      <View style={styles.recallHeaderRow}>
-        <AlertTriangle size={16} color="#EF4444" strokeWidth={2} />
-        <Text style={styles.recallLabelWarning}>RECALL HISTORY</Text>
+    <View style={styles.recallRow}>
+      <View style={[styles.recallRowIcon, { backgroundColor: palette.bg }]}>
+        <cfg.Icon size={18} color={palette.color} strokeWidth={2} />
       </View>
-      <Text
-        style={styles.recallTextWarning}
-        numberOfLines={expanded ? undefined : 3}
+      <View style={styles.recallRowText}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <Text style={[styles.recallRowTitle, { color: theme.textPrimary }]}>{cfg.title}</Text>
+          {isFdaVerified ? (
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 3,
+                backgroundColor: "rgba(56,120,255,0.12)",
+                paddingHorizontal: 7,
+                paddingVertical: 2,
+                borderRadius: 999,
+              }}
+            >
+              <ShieldCheck size={10} color="#1E63C7" strokeWidth={2.4} />
+              <Text style={{ fontSize: 10, fontWeight: "700", color: "#1E63C7", letterSpacing: 0.4 }}>
+                FDA VERIFIED
+              </Text>
+            </View>
+          ) : null}
+        </View>
+        <Text style={[styles.recallRowSubtitle, { color: theme.textSecondary }]} numberOfLines={4}>
+          {subtitle}
+        </Text>
+        {testingLabel || testingDetails ? (
+          <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 5, marginTop: 6 }}>
+            <ShieldCheck size={12} color={theme.textTertiary} strokeWidth={2} style={{ marginTop: 2 }} />
+            <Text style={{ flex: 1, fontSize: 12, lineHeight: 16, fontWeight: "500", color: theme.textTertiary }}>
+              {testingDetails || testingLabel}
+            </Text>
+          </View>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+// --- ProcessingMethodChip (compact pill under the product name) ---
+// Visualizes the cooking/processing method flagged by the analyzer. Tier color
+// maps to scoring bucket — green = low-heat/nutrient-preserving, orange =
+// high-heat extrusion, yellow = moderate/unknown.
+
+const PROCESSING_LABEL = {
+  "freeze-dried": "Freeze-dried",
+  "air-dried":    "Air-dried",
+  "raw":          "Raw",
+  "cold-pressed": "Cold-pressed",
+  "baked":        "Baked",
+  "extruded":     "Extruded",
+  "canned":       "Canned",
+  "unknown":      "Processing Unknown",
+};
+
+const PROCESSING_TIER = {
+  "freeze-dried": "good",
+  "air-dried":    "good",
+  "raw":          "good",
+  "cold-pressed": "good",
+  "baked":        "mid",
+  "canned":       "mid",
+  "extruded":     "bad",
+  "unknown":      "neutral",
+};
+
+const PROCESSING_PALETTE = {
+  good:    { bg: "rgba(52,199,89,0.12)",  color: "#1F7A45" },
+  mid:     { bg: "rgba(232,163,23,0.12)", color: "#B87A0A" },
+  bad:     { bg: "rgba(249,115,22,0.12)", color: "#C2501A" },
+  neutral: { bg: "rgba(142,142,147,0.14)", color: "#6B7280" },
+};
+
+export function ProcessingMethodChip({ processingMethod }) {
+  if (!processingMethod) return null;
+  const label = PROCESSING_LABEL[processingMethod];
+  if (!label) return null;
+  const palette = PROCESSING_PALETTE[PROCESSING_TIER[processingMethod] || "neutral"];
+
+  return (
+    <View style={{ flexDirection: "row", justifyContent: "center", marginTop: 10 }}>
+      <View
+        style={{
+          backgroundColor: palette.bg,
+          paddingHorizontal: 12,
+          paddingVertical: 5,
+          borderRadius: 999,
+        }}
       >
-        {recallHistory}
+        <Text
+          style={{
+            fontSize: 11,
+            fontWeight: "700",
+            letterSpacing: 0.8,
+            color: palette.color,
+          }}
+        >
+          {label.toUpperCase()}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+// --- TrustBadges (supplementary chip row under ProcessingMethodChip) ---
+// Surfaces authoritative brand-level data that comes from brand_metadata:
+// third-party testing, country of manufacture, key certifications. Renders
+// only the chips that have data — so the row disappears for brands with no
+// authoritative record (graceful degradation).
+
+const CERT_PALETTE = { bg: "rgba(56,120,255,0.1)", color: "#1E63C7" };
+const TESTED_PALETTE = { bg: "rgba(52,199,89,0.12)", color: "#1F7A45" };
+const COUNTRY_PALETTE = { bg: "rgba(142,142,147,0.14)", color: "#5C6470" };
+
+function TrustChip({ label, palette, bold = true }) {
+  return (
+    <View
+      style={{
+        backgroundColor: palette.bg,
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 999,
+      }}
+    >
+      <Text
+        style={{
+          fontSize: 10,
+          fontWeight: bold ? "700" : "600",
+          letterSpacing: 0.6,
+          color: palette.color,
+        }}
+      >
+        {label.toUpperCase()}
       </Text>
-      {needsTruncate && !expanded && (
-        <TouchableOpacity onPress={toggleExpand} hitSlop={8}>
-          <Text style={styles.recallSeeDetails}>See details</Text>
-        </TouchableOpacity>
-      )}
+    </View>
+  );
+}
+
+export function TrustBadges({
+  thirdPartyTested,
+  brandCertifications,
+  countryOfManufacture,
+}) {
+  const chips = [];
+
+  if (thirdPartyTested === true) {
+    chips.push({ key: "tested", label: "✓ 3rd-Party Tested", palette: TESTED_PALETTE });
+  }
+
+  // Surface up to 2 certifications (keep the row visually tight)
+  if (Array.isArray(brandCertifications)) {
+    for (const cert of brandCertifications.slice(0, 2)) {
+      chips.push({ key: `cert-${cert}`, label: cert, palette: CERT_PALETTE });
+    }
+  }
+
+  if (countryOfManufacture) {
+    chips.push({
+      key: "country",
+      label: `Made in ${countryOfManufacture}`,
+      palette: COUNTRY_PALETTE,
+    });
+  }
+
+  if (chips.length === 0) return null;
+
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        flexWrap: "wrap",
+        justifyContent: "center",
+        gap: 6,
+        marginTop: 8,
+      }}
+    >
+      {chips.map((c) => (
+        <TrustChip key={c.key} label={c.label} palette={c.palette} />
+      ))}
+    </View>
+  );
+}
+
+// --- NutritionAdvisoryCard (AAFCO + nutrient panel completeness) ---
+// Universal (not personalized by pet). Shown only when there's something
+// specific for the user to know — renders nothing when everything checks out.
+
+const ADVISORY_MESSAGES = {
+  aafco_all_stages: {
+    title: "Formulated for All Life Stages",
+    body: "This food is formulated to meet puppy growth minimums, which run higher in calcium and phosphorus than adult dogs need. For adults and seniors, a life-stage-specific formula is typically a better fit.",
+  },
+  aafco_supplemental: {
+    title: "Not a complete and balanced diet",
+    body: "This product is labeled for supplemental or intermittent feeding and should not be the only food in your pet's diet.",
+  },
+  aafco_missing: {
+    title: "No AAFCO statement found",
+    body: "Without an AAFCO statement we can't verify this meets complete-and-balanced standards. Worth double-checking the packaging before making this a staple.",
+  },
+  data_incomplete: {
+    title: "Only guaranteed analysis is published",
+    body: "This brand publishes minimums and maximums but not a full nutrient panel. A dry-matter-basis breakdown would reveal true nutrient density — brands that publish it stand on firmer ground.",
+  },
+};
+
+export function NutritionAdvisoryCard({ aafcoStatement, nutrientDataCompleteness }) {
+  const { theme } = useStyles();
+
+  const keys = [];
+  if (aafcoStatement === "All Life Stages") keys.push("aafco_all_stages");
+  else if (aafcoStatement === "Supplemental/Intermittent") keys.push("aafco_supplemental");
+  else if (aafcoStatement === "None visible" || aafcoStatement === "Unknown") keys.push("aafco_missing");
+  if (nutrientDataCompleteness === "incomplete") keys.push("data_incomplete");
+
+  if (keys.length === 0) return null;
+
+  return (
+    <View style={{ marginTop: 24 }}>
+      <Text
+        style={{
+          fontSize: 20,
+          fontWeight: "700",
+          color: theme.textPrimary,
+          letterSpacing: -0.4,
+          marginBottom: 12,
+        }}
+      >
+        Heads Up
+      </Text>
+      <View style={{ backgroundColor: theme.card, borderRadius: 16, overflow: "hidden" }}>
+        {keys.map((k, i) => {
+          const msg = ADVISORY_MESSAGES[k];
+          return (
+            <React.Fragment key={k}>
+              {i > 0 ? (
+                <View
+                  style={{
+                    height: RNStyleSheet.hairlineWidth,
+                    backgroundColor: theme.separator,
+                    marginLeft: 20,
+                  }}
+                />
+              ) : null}
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "flex-start",
+                  gap: 12,
+                  paddingVertical: 14,
+                  paddingHorizontal: 20,
+                }}
+              >
+                <View
+                  style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: 14,
+                    backgroundColor: "rgba(232,163,23,0.12)",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    marginTop: 2,
+                  }}
+                >
+                  <AlertCircle size={14} color="#B87A0A" strokeWidth={2.2} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text
+                    style={{
+                      fontSize: 14,
+                      fontWeight: "600",
+                      color: theme.textPrimary,
+                      marginBottom: 3,
+                      letterSpacing: -0.1,
+                    }}
+                  >
+                    {msg.title}
+                  </Text>
+                  <Text
+                    style={{
+                      fontSize: 13,
+                      lineHeight: 19,
+                      color: theme.textSecondary,
+                    }}
+                  >
+                    {msg.body}
+                  </Text>
+                </View>
+              </View>
+            </React.Fragment>
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -1886,6 +2236,7 @@ export function ScanAnotherButton({ onPress }) {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         onPress();
       }}
+      accessibilityRole="button"
     >
       <Animated.View style={[styles.scanAnotherButton, scaleStyle]}>
         <Text style={styles.scanAnotherText}>Scan Another Product</Text>
@@ -2003,8 +2354,6 @@ export const ShareCard = forwardRef(function ShareCard({ result, nutrition }, re
     stats.push({ label: "Grain Free", value: nutrition.grainFree ? "Yes" : "No" });
   if (nutrition?.lifestage && nutrition.lifestage !== "Unknown")
     stats.push({ label: "Life Stage", value: nutrition.lifestage });
-  if (nutrition?.caloriesPerCup && nutrition.caloriesPerCup !== "N/A")
-    stats.push({ label: "Calories", value: nutrition.caloriesPerCup });
 
   return (
     <View ref={ref} collapsable={false} style={shareCardStyles.card}>
@@ -2187,9 +2536,179 @@ export function SkeletonCircle({ size = 180, strokeWidth = 12 }) {
   );
 }
 
+// --- DataSourceBadge (shows where ingredient data came from) ---
+
+function ingredientSourceDisplay(dataSource) {
+  const authoritative = new Set(["opff", "brand", "manufacturer", "verified"]);
+  const reviewedListings = new Set(["web_verified", "dfa", "cfa", "cats"]);
+  const scrapedListings = new Set(["amazon", "chewy", "web"]);
+
+  if (dataSource === "dfa" || dataSource === "cfa" || dataSource === "cats") {
+    const siteNames = { dfa: "Dog Food Advisor", cfa: "Cat Food Advisor", cats: "Cats.com" };
+    return {
+      trusted: false,
+      label: `Ingredient data from ${siteNames[dataSource] || "expert review"}`,
+    };
+  }
+  if (authoritative.has(dataSource)) {
+    return { trusted: true, label: "Verified ingredients from product database" };
+  }
+  if (reviewedListings.has(dataSource)) {
+    return { trusted: false, label: "Ingredients from product listing" };
+  }
+  if (dataSource === "user_ocr") {
+    return { trusted: false, label: "Ingredients from label photo" };
+  }
+  if (scrapedListings.has(dataSource)) {
+    return { trusted: false, label: "Ingredients from retailer listing" };
+  }
+  if (dataSource === "enriched") {
+    return { trusted: true, label: "Enriched with product data" };
+  }
+  return null;
+}
+
+export function DataSourceBadge({ dataSource }) {
+  const theme = useTheme();
+  const display = ingredientSourceDisplay(dataSource);
+  if (!display) return null;
+
+  const Icon = display.trusted ? ShieldCheck : AlertCircle;
+  const color = display.trusted ? Colors.scoreExcellent : theme.textTertiary;
+
+  return (
+    <Animated.View
+      entering={FadeInUp.delay(150).duration(300)}
+      style={dataSourceStyles.container}
+    >
+      <Icon size={14} color={color} strokeWidth={2} />
+      <Text style={[dataSourceStyles.text, { color }]}>{display.label}</Text>
+    </Animated.View>
+  );
+}
+
+const dataSourceStyles = RNStyleSheet.create({
+  container: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 4,
+    marginBottom: 8,
+    justifyContent: "center",
+  },
+  text: {
+    fontSize: 11,
+    fontWeight: "500",
+  },
+});
+
+// --- ProgressSteps (multi-step loading indicator for two-stage flow) ---
+
+function ProgressStep({ completed, active, children, theme }) {
+  return (
+    <View style={progressStyles.step}>
+      <View style={[
+        progressStyles.dot,
+        completed && { backgroundColor: Colors.scoreExcellent },
+        active && { backgroundColor: theme.textSecondary },
+        !completed && !active && { backgroundColor: theme.fill },
+      ]}>
+        {completed && <Check size={8} color="#FFFFFF" strokeWidth={3} />}
+      </View>
+      <Text style={[
+        progressStyles.label,
+        { color: active ? theme.textPrimary : completed ? theme.textSecondary : theme.textTertiary },
+        active && { fontWeight: "600" },
+      ]} numberOfLines={1}>
+        {children}
+      </Text>
+    </View>
+  );
+}
+
+function progressIngredientLabel(dataSource, ingredientCount) {
+  const prefix = `Found ${ingredientCount || ""}`.trim();
+  const display = ingredientSourceDisplay(dataSource);
+  if (!display) return `${prefix} ingredient data`;
+  const label = display.trusted
+    ? "verified ingredients"
+    : display.label.replace(/^Ingredients from /, "").toLowerCase() + " ingredients";
+  return `${prefix} ${label}`;
+}
+
+export function ProgressSteps({ phase, productName, dataSource, ingredientCount }) {
+  const theme = useTheme();
+
+  return (
+    <View style={progressStyles.container}>
+      <ProgressStep
+        completed={phase !== "identifying"}
+        active={phase === "identifying"}
+        theme={theme}
+      >
+        {phase === "identifying"
+          ? "Identifying product..."
+          : productName || "Product identified"}
+      </ProgressStep>
+
+      {phase !== "identifying" && (
+        <Animated.View entering={FadeInUp.duration(200)}>
+          <ProgressStep
+            completed={phase === "analyzing" || phase === "analyzing_photo"}
+            active={phase === "looking_up" || phase === "identified"}
+            theme={theme}
+          >
+            {phase === "looking_up" || phase === "identified"
+              ? "Fetching ingredient data..."
+              : phase === "analyzing"
+                ? progressIngredientLabel(dataSource, ingredientCount)
+                : "Reading from photo"}
+          </ProgressStep>
+        </Animated.View>
+      )}
+
+      {(phase === "analyzing" || phase === "analyzing_photo") && (
+        <Animated.View entering={FadeInUp.duration(200)}>
+          <ProgressStep active theme={theme}>
+            Analyzing safety & quality...
+          </ProgressStep>
+        </Animated.View>
+      )}
+
+      <View style={{ alignItems: "center", marginTop: 16 }}>
+        <StreamingDots />
+      </View>
+    </View>
+  );
+}
+
+const progressStyles = RNStyleSheet.create({
+  container: {
+    gap: 12,
+    paddingHorizontal: 40,
+    paddingTop: 24,
+  },
+  step: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  dot: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  label: {
+    fontSize: 14,
+    flex: 1,
+  },
+});
+
 // --- LoadingSkeleton (full page shimmer layout matching results structure) ---
 
-export function LoadingSkeleton({ loadingStatus, isSlowLoading }) {
+export function LoadingSkeleton({ loadingStatus, isSlowLoading, phase, productName, dataSource, ingredientCount, onRetry }) {
   const { styles, theme } = useStyles();
 
   return (
@@ -2247,68 +2766,105 @@ export function LoadingSkeleton({ loadingStatus, isSlowLoading }) {
         <SkeletonBar width="50%" height={14} />
       </View>
 
-      {/* Loading status */}
-      <View style={{ alignItems: "center", marginTop: 32, gap: 12 }}>
-        <StreamingDots />
-        <Text style={{
-          color: theme.textSecondary,
-          ...Typography.caption,
-          fontWeight: "500",
-        }}>
-          {loadingStatus}
-        </Text>
-        {isSlowLoading && (
-          <Animated.Text
-            entering={FadeInUp.duration(300)}
-            style={{
-              color: theme.textTertiary,
-              ...Typography.caption,
-              textAlign: "center",
-              paddingHorizontal: 40,
-            }}
-          >
-            Taking longer than usual...{"\n"}Hang tight, we're almost there.
-          </Animated.Text>
-        )}
-      </View>
+      {/* Loading status — show progress steps if phase info available */}
+      {phase ? (
+        <ProgressSteps
+          phase={phase}
+          productName={productName}
+          dataSource={dataSource}
+          ingredientCount={ingredientCount}
+        />
+      ) : (
+        <View style={{ alignItems: "center", marginTop: 32, gap: 12 }}>
+          <StreamingDots />
+          <Text style={{
+            color: theme.textSecondary,
+            ...Typography.caption,
+            fontWeight: "500",
+          }}>
+            {loadingStatus}
+          </Text>
+          {isSlowLoading && (
+            <Animated.View
+              entering={FadeInUp.duration(300)}
+              style={{ alignItems: "center", gap: 14, paddingHorizontal: 40 }}
+            >
+              <Text
+                style={{
+                  color: theme.textTertiary,
+                  ...Typography.caption,
+                  textAlign: "center",
+                }}
+              >
+                Taking longer than usual...{"\n"}Hang tight, we're almost there.
+              </Text>
+              {onRetry && (
+                <TouchableOpacity
+                  onPress={onRetry}
+                  activeOpacity={0.82}
+                  accessibilityRole="button"
+                  accessibilityLabel="Retry analysis"
+                  style={{
+                    backgroundColor: theme.buttonPrimary,
+                    borderRadius: Spacing.buttonRadius,
+                    paddingHorizontal: 22,
+                    paddingVertical: 11,
+                    minWidth: 132,
+                    alignItems: "center",
+                  }}
+                >
+                  <Text style={{ color: theme.buttonText, ...Typography.button }}>
+                    Try Again
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </Animated.View>
+          )}
+        </View>
+      )}
     </Animated.View>
   );
 }
 
 // --- ErrorState (redesigned — AlertCircle, descriptive copy, black CTA) ---
 
-export function ErrorState({ error, mode, onRetry, onScanAnother }) {
+export function ErrorState({ error, mode, onRetry, onScanAnother, onUpgrade, onScanProduct, onSignInAgain, isPro = false }) {
   const { styles, theme } = useStyles();
 
-  // Check if this is a session expiry error
-  const isSessionError = error?.includes("Session expired") || error?.includes("session expired");
+  // Route every error through the classifier so the user always sees specific,
+  // actionable copy — not just "Something went wrong".
+  const classified = classifyError(error);
 
-  const title = isSessionError
-    ? "Session Expired"
-    : mode === "history"
-    ? "Result Expired"
-    : mode === "barcode"
-    ? "Barcode Not Found"
-    : "Couldn't analyze this label";
+  // Mode-specific overrides
+  let title = classified.title;
+  let message = classified.message;
+  let buttonLabel = "Try Again";
+  let buttonAction = onRetry;
 
-  const buttonLabel = isSessionError
-    ? "Sign In Again"
-    : mode === "history"
-    ? "Back to Home"
-    : mode === "barcode"
-    ? "Take Photo Instead"
-    : "Try Again";
-
-  const onPress = isSessionError
-    ? () => {
-        // Force sign out when session is expired
-        supabase.auth.signOut().catch((err) => {
-          console.log("[ERROR_STATE] Sign out failed:", err.message);
-        });
-      }
-    : mode === "history" || mode === "barcode"
-    ? onScanAnother
-    : onRetry;
+  if (classified.kind === "auth" || classified.action === "sign_in") {
+    buttonLabel = "Sign In Again";
+    buttonAction = onSignInAgain || onScanAnother;
+  } else if (mode === "history" && classified.kind === "unknown") {
+    title = "Result Expired";
+    message = "This saved result is no longer available. Scan it again to refresh the analysis.";
+    buttonLabel = "Back to Home";
+    buttonAction = onScanAnother;
+  } else if (classified.kind === "quota" || classified.action === "upgrade") {
+    if (isPro) {
+      title = "Subscription Sync Needed";
+      message = "Your Woof Pro subscription looks active on this device, but the scan server still returned a free-limit response.";
+      buttonLabel = "Refresh & Retry";
+    } else {
+      buttonLabel = "Upgrade to Pro";
+    }
+    buttonAction = onUpgrade;
+  } else if (classified.kind === "product_not_found" || classified.action === "scan_product") {
+    buttonLabel = "Scan Product";
+    buttonAction = onScanProduct || onScanAnother;
+  } else if (classified.kind === "image" || classified.action === "retake") {
+    buttonLabel = "Try Another Photo";
+    buttonAction = onScanAnother;
+  }
 
   return (
     <View style={styles.errorContainer}>
@@ -2316,11 +2872,12 @@ export function ErrorState({ error, mode, onRetry, onScanAnother }) {
         <AlertCircle size={48} color={theme.textTertiary} strokeWidth={1.5} />
       </View>
       <Text style={styles.errorTitle}>{title}</Text>
-      <Text style={styles.errorText}>{error}</Text>
+      <Text style={styles.errorText}>{message}</Text>
       <TouchableOpacity
         style={styles.retryButton}
-        onPress={onPress}
+        onPress={buttonAction}
         activeOpacity={0.8}
+        accessibilityRole="button"
       >
         <Text style={styles.retryButtonText}>{buttonLabel}</Text>
       </TouchableOpacity>
@@ -2359,6 +2916,13 @@ export function StreamingDots() {
       ),
       -1
     ));
+    // Cancel infinite animations on unmount so they don't keep ticking on the
+    // UI thread after the user navigates away.
+    return () => {
+      cancelAnimation(dot1);
+      cancelAnimation(dot2);
+      cancelAnimation(dot3);
+    };
   }, []);
 
   const style1 = useAnimatedStyle(() => ({ opacity: dot1.value }));
@@ -2374,34 +2938,41 @@ export function StreamingDots() {
   );
 }
 
-// --- Safety Badge (human food mode) ---
+// --- Safety Badge (human food mode — 80x80 circle, icon, label) ---
 
 export function SafetyBadge({ safetyLevel, petType }) {
   const theme = useTheme();
+  const isDark = theme.isDark;
   const config = {
-    safe: { label: "SAFE", sublabel: "to feed", color: Colors.scoreExcellent, bg: "rgba(52,199,89,0.08)", Icon: CheckCircle2 },
-    caution: { label: "CAUTION", sublabel: "feed with care", color: Colors.scoreDecent, bg: "rgba(232,163,23,0.08)", Icon: AlertTriangle },
-    dangerous: { label: "DANGEROUS", sublabel: "do not feed", color: Colors.scoreConcerning, bg: "rgba(239,68,68,0.08)", Icon: AlertCircle },
-  }[safetyLevel] || { label: "UNKNOWN", sublabel: "", color: theme.textTertiary, bg: theme.surface, Icon: AlertCircle };
-
-  const petLabel = petType === "dog" ? "dogs" : "cats";
+    safe: { label: "Safe", color: Colors.scoreExcellent, bg: isDark ? "rgba(52,199,89,0.18)" : "rgba(52,199,89,0.1)", Icon: CheckCircle2 },
+    caution: { label: "Caution", color: Colors.scoreDecent, bg: isDark ? "rgba(255,159,10,0.18)" : "rgba(232,163,23,0.1)", Icon: AlertTriangle },
+    dangerous: { label: "Dangerous", color: Colors.scoreConcerning, bg: isDark ? "rgba(255,59,48,0.18)" : "rgba(239,68,68,0.1)", Icon: X },
+  }[safetyLevel] || { label: "Unknown", color: theme.textTertiary, bg: theme.surface, Icon: AlertCircle };
 
   return (
-    <View style={{ alignItems: "center", paddingVertical: 28 }}>
+    <View style={{ alignItems: "center", paddingVertical: 24 }}>
       <View style={{
-        width: 120, height: 120, borderRadius: 60,
+        width: 80, height: 80, borderRadius: 40,
         backgroundColor: config.bg,
         alignItems: "center", justifyContent: "center",
-        marginBottom: 16,
+        marginBottom: 12,
       }}>
-        <config.Icon size={52} color={config.color} strokeWidth={1.5} />
+        <config.Icon size={36} color={config.color} strokeWidth={1.8} />
       </View>
-      <Text style={{ fontSize: 32, fontWeight: "800", color: config.color, letterSpacing: 1.5 }}>
+      <Text style={{ fontSize: 18, fontWeight: "700", color: config.color }}>
         {config.label}
       </Text>
-      <Text style={{ fontSize: 14, fontWeight: "500", color: theme.textTertiary, marginTop: 4, textTransform: "uppercase", letterSpacing: 0.5 }}>
-        {config.sublabel} for {petLabel}
-      </Text>
     </View>
+  );
+}
+
+// --- Disclaimer (AI-powered notice) ---
+
+export function Disclaimer() {
+  const { styles } = useStyles();
+  return (
+    <Text style={styles.disclaimer}>
+      AI estimate, not veterinary advice. Contact your vet or pet poison control for ingestion concerns.
+    </Text>
   );
 }

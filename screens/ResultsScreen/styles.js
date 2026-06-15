@@ -23,14 +23,18 @@ export function createStyles(theme) {
       borderBottomColor: Colors.divider,
     },
     backButton: {
-      width: 40,
-      height: 40,
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: theme.fill,
       justifyContent: "center",
       alignItems: "center",
     },
     shareButton: {
-      width: 40,
-      height: 40,
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: theme.fill,
       justifyContent: "center",
       alignItems: "center",
     },
@@ -63,8 +67,8 @@ export function createStyles(theme) {
     // --- Scroll content ---
     scrollContent: {
       paddingHorizontal: Spacing.screenPadding,
-      paddingBottom: 60,
-      paddingTop: Spacing.sm,
+      paddingBottom: 80,
+      paddingTop: Spacing.md,
     },
 
     // --- Loading / Streaming ---
@@ -115,7 +119,7 @@ export function createStyles(theme) {
       width: 7,
       height: 7,
       borderRadius: 3.5,
-      backgroundColor: Colors.textPrimary,
+      backgroundColor: theme.textPrimary,
     },
 
     // Product name preview (barcode loading)
@@ -252,10 +256,12 @@ export function createStyles(theme) {
     // --- Hero section ---
     heroSection: {
       alignItems: "center",
-      marginTop: 28,
-      marginBottom: 28,
+      paddingTop: 16,
+      paddingBottom: 4,
     },
     heroRingContainer: {
+      width: 192,
+      height: 192,
       justifyContent: "center",
       alignItems: "center",
     },
@@ -274,25 +280,78 @@ export function createStyles(theme) {
       paddingBottom: 4,
     },
     heroScoreNumber: {
-      ...Typography.scoreLarge,
+      fontSize: 56,
+      fontWeight: "700",
+      color: theme.textPrimary,
+      letterSpacing: -3,
     },
     heroGradeLabel: {
-      ...Typography.scoreLabel,
+      fontSize: 14,
+      fontWeight: "600",
       marginTop: 4,
     },
 
     // --- Product name ---
     productName: {
       color: theme.textPrimary,
-      fontSize: 22,
-      fontWeight: "600",
-      letterSpacing: -0.3,
+      fontSize: 24,
+      fontWeight: "700",
+      letterSpacing: -0.5,
       textAlign: "center",
       paddingHorizontal: 20,
+      lineHeight: 30,
       marginTop: 16,
     },
 
-    // --- Quick Stats 2x2 Grid ---
+    // --- Product subtitle (NEW) ---
+    productSubtitle: {
+      fontSize: 15,
+      fontWeight: "400",
+      color: theme.textSecondary,
+      textAlign: "center",
+      marginTop: 6,
+    },
+
+    // --- Quick Facts Card (replaces statsGrid) ---
+    quickFactsCard: {
+      backgroundColor: theme.card,
+      borderRadius: 16,
+      flexDirection: "column",
+      overflow: "hidden",
+      marginTop: 24,
+    },
+    quickFactsRow: {
+      flexDirection: "row",
+    },
+    quickFactsCell: {
+      flex: 1,
+      paddingVertical: 16,
+      paddingHorizontal: 16,
+      gap: 4,
+    },
+    quickFactsLabel: {
+      fontSize: 13,
+      fontWeight: "500",
+      color: theme.textSecondary,
+    },
+    quickFactsValue: {
+      fontSize: 15,
+      fontWeight: "600",
+      color: theme.textPrimary,
+      lineHeight: 21,
+    },
+    quickFactsDividerH: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: theme.separator,
+      marginHorizontal: 16,
+    },
+    quickFactsDividerV: {
+      width: StyleSheet.hairlineWidth,
+      backgroundColor: theme.separator,
+      marginVertical: 12,
+    },
+
+    // --- Legacy statsGrid (kept for compat) ---
     statsGrid: {
       flexDirection: "row",
       flexWrap: "wrap",
@@ -320,19 +379,19 @@ export function createStyles(theme) {
       textAlign: "center",
     },
 
-    // --- Verdict card (colored left border) ---
+    // --- Verdict card ---
     verdictCard: {
-      backgroundColor: Colors.verdictBackground,
-      borderRadius: Spacing.cardRadius,
-      padding: Spacing.cardPadding,
-      marginTop: Spacing.subsectionGap,
-      borderLeftWidth: 3,
+      borderRadius: 16,
+      paddingVertical: 20,
+      paddingHorizontal: 20,
+      marginTop: 16,
       overflow: "hidden",
     },
     verdictText: {
       color: theme.textPrimary,
-      ...Typography.body,
-      lineHeight: 24,
+      fontSize: 16,
+      fontWeight: "400",
+      lineHeight: 26,
     },
     verdictMoreLink: {
       color: theme.textPrimary,
@@ -379,14 +438,41 @@ export function createStyles(theme) {
       flex: 1,
     },
 
-    // --- Customer Reviews (card with accent border) ---
+    // --- Safety Reviews Section (NEW) ---
+    safetyReviewsSection: {
+      marginTop: 32,
+    },
+    safetyReviewsCard: {
+      backgroundColor: theme.card,
+      borderRadius: 16,
+      overflow: "hidden",
+    },
+    safetyReviewsRow: {
+      paddingVertical: 16,
+      paddingHorizontal: 20,
+      gap: 14,
+      flexDirection: "row",
+      alignItems: "center",
+    },
+    safetyReviewsIcon: {
+      width: 36,
+      height: 36,
+      borderRadius: 10,
+      justifyContent: "center",
+      alignItems: "center",
+    },
+    safetyReviewsDivider: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: theme.separator,
+      marginLeft: 20,
+      marginRight: 20,
+    },
+
+    // --- Customer Reviews (row format) ---
     reviewCard: {
       backgroundColor: theme.card,
-      borderRadius: Spacing.cardRadius,
-      padding: Spacing.cardPadding,
-      marginTop: Spacing.sectionGap,
-      borderLeftWidth: 3,
-      ...Shadows.card,
+      borderRadius: 16,
+      overflow: "hidden",
     },
     reviewHeaderRow: {
       flexDirection: "row",
@@ -459,13 +545,16 @@ export function createStyles(theme) {
       flex: 1,
     },
 
-    // --- Quality Breakdown (flat, no card) ---
+    // --- Quality Breakdown ---
     qualitySection: {
-      marginTop: Spacing.sectionGap,
+      marginTop: 32,
     },
     qualityTitle: {
-      ...Typography.sectionHeader,
+      fontSize: 20,
+      fontWeight: "700",
       color: theme.textPrimary,
+      letterSpacing: -0.4,
+      marginBottom: 12,
     },
     qualityHeaderDivider: {
       height: 0.5,
@@ -473,29 +562,36 @@ export function createStyles(theme) {
       marginTop: Spacing.elementGap,
       marginBottom: Spacing.cardPadding,
     },
+    qualityCard: {
+      backgroundColor: theme.card,
+      borderRadius: 16,
+      paddingVertical: 4,
+      overflow: "hidden",
+    },
 
     // --- Category Bar ---
     categoryItem: {
-      // 20px gap between divider and next row is handled by paddingTop
+      paddingVertical: 16,
+      paddingHorizontal: 20,
     },
     categoryHeader: {
       flexDirection: "row",
       justifyContent: "space-between",
-      alignItems: "center",
+      alignItems: "baseline",
       marginBottom: 6,
     },
     categoryName: {
       color: theme.textPrimary,
       fontSize: 16,
-      fontWeight: "600",
+      fontWeight: "500",
     },
     categoryScore: {
-      fontSize: 17,
-      fontWeight: "600",
+      fontSize: 20,
+      fontWeight: "700",
     },
     barTrack: {
       height: 6,
-      backgroundColor: Colors.divider,
+      backgroundColor: theme.fill,
       borderRadius: 3,
       overflow: "hidden",
     },
@@ -511,9 +607,10 @@ export function createStyles(theme) {
     },
     categoryDetail: {
       color: theme.textSecondary,
-      fontSize: 13,
+      fontSize: 14,
       fontWeight: "400",
-      lineHeight: 18,
+      lineHeight: 20,
+      marginTop: 8,
       flex: 1,
     },
     categoryMoreLink: {
@@ -523,11 +620,9 @@ export function createStyles(theme) {
       lineHeight: 18,
     },
     categoryDivider: {
-      height: 0.5,
-      backgroundColor: Colors.divider,
-      marginTop: 20,
-      marginBottom: 20,
-      marginLeft: Spacing.dividerIndent,
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: theme.separator,
+      marginHorizontal: 20,
     },
 
     // --- Nutrition Facts (2-col, 3-row grid) ---
@@ -618,7 +713,7 @@ export function createStyles(theme) {
       flexShrink: 1,
     },
 
-    // --- Recall Card ---
+    // --- Recall Card (row format) ---
     recallCardWarning: {
       backgroundColor: Colors.recallBackground,
       borderRadius: Spacing.cardRadius,
@@ -673,15 +768,49 @@ export function createStyles(theme) {
       color: theme.textPrimary,
       marginTop: Spacing.xs,
     },
+    recallRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 14,
+      paddingVertical: 16,
+      paddingHorizontal: 20,
+    },
+    recallRowIcon: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    recallRowText: {
+      flex: 1,
+    },
+    recallRowTitle: {
+      fontSize: 15,
+      fontWeight: "600",
+    },
+    recallRowSubtitle: {
+      fontSize: 13,
+      fontWeight: "400",
+      lineHeight: 18,
+      marginTop: 2,
+    },
 
-    // --- Ingredients Section (flat, no card) ---
+    // --- Ingredients Section ---
     ingredientsSection: {
-      marginTop: Spacing.sectionGap,
+      marginTop: 32,
     },
     ingredientsTitle: {
-      ...Typography.sectionHeader,
+      fontSize: 20,
+      fontWeight: "700",
       color: theme.textPrimary,
-      marginBottom: Spacing.lg,
+      letterSpacing: -0.4,
+      marginBottom: 12,
+    },
+    ingredientsCard: {
+      backgroundColor: theme.card,
+      borderRadius: 16,
+      overflow: "hidden",
     },
 
     // Summary bar (10px height, 5px radius, no gaps)
@@ -717,9 +846,8 @@ export function createStyles(theme) {
 
     // Ingredient rows
     ingRow: {
-      paddingVertical: Spacing.md,
-      minHeight: 56,
-      justifyContent: "center",
+      paddingVertical: 16,
+      paddingHorizontal: 20,
     },
     ingRowWarning: {
       backgroundColor: "rgba(239, 68, 68, 0.04)",
@@ -729,13 +857,14 @@ export function createStyles(theme) {
     },
     ingRowMain: {
       flexDirection: "row",
-      alignItems: "center",
+      alignItems: "flex-start",
+      gap: 14,
     },
     ingDot: {
-      width: 8,
-      height: 8,
-      borderRadius: 4,
-      marginRight: Spacing.lg,
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+      marginTop: 6,
     },
     ingNameArea: {
       flex: 1,
@@ -745,6 +874,13 @@ export function createStyles(theme) {
       color: theme.textPrimary,
       fontSize: 16,
       fontWeight: "500",
+    },
+    ingDescription: {
+      fontSize: 13,
+      fontWeight: "400",
+      color: theme.textSecondary,
+      lineHeight: 18,
+      marginTop: 2,
     },
     ingFirstBadge: {
       backgroundColor: theme.fill,
@@ -772,12 +908,13 @@ export function createStyles(theme) {
     },
     ingChevron: {
       marginLeft: Spacing.sm,
+      marginTop: 4,
     },
     ingDivider: {
       height: StyleSheet.hairlineWidth,
-      backgroundColor: Colors.divider,
-      marginTop: Spacing.md,
-      marginLeft: 24,
+      backgroundColor: theme.separator,
+      marginLeft: 44,
+      marginRight: 20,
     },
     ingExpandButton: {
       flexDirection: "row",
@@ -794,20 +931,192 @@ export function createStyles(theme) {
       fontWeight: "500",
     },
 
-    // --- Scan Another (outline button) ---
+    // --- Scan Another (filled button) ---
     scanAnotherButton: {
-      height: Spacing.buttonHeight,
-      borderRadius: Spacing.buttonRadius,
-      borderWidth: 1.5,
-      borderColor: theme.textPrimary,
+      height: 54,
+      borderRadius: 14,
+      backgroundColor: theme.buttonPrimary,
       justifyContent: "center",
       alignItems: "center",
-      marginTop: Spacing.subsectionGap,
+      marginTop: 36,
       overflow: "hidden",
     },
     scanAnotherText: {
-      ...Typography.button,
+      color: theme.buttonText,
+      fontSize: 17,
+      fontWeight: "600",
+    },
+
+    // --- Disclaimer (NEW) ---
+    disclaimer: {
+      fontSize: 13,
+      fontWeight: "400",
+      color: theme.textTertiary,
+      textAlign: "center",
+      lineHeight: 18,
+      marginTop: 20,
+    },
+
+    // --- Guidance card (human food — vertical list) ---
+    guidanceCard: {
+      backgroundColor: theme.card,
+      borderRadius: 16,
+      marginTop: 24,
+      overflow: "hidden",
+    },
+    guidanceRow: {
+      paddingVertical: 14,
+      paddingHorizontal: 20,
+    },
+    guidanceLabel: {
+      fontSize: 13,
+      fontWeight: "500",
+      marginBottom: 4,
+    },
+    guidanceValue: {
+      fontSize: 15,
+      fontWeight: "600",
+      lineHeight: 22,
+    },
+    guidanceDivider: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: theme.separator,
+      marginHorizontal: 20,
+    },
+
+    // --- Human Food Safety Layout ---
+    safetyHero: {
+      alignItems: "center",
+      paddingHorizontal: 24,
+      paddingTop: 16,
+      paddingBottom: 4,
+    },
+    safetyIcon: {
+      width: 80,
+      height: 80,
+      borderRadius: 40,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    safetyVerdictLabel: {
+      fontSize: 15,
+      fontWeight: "600",
+      marginTop: 16,
+    },
+    safetyFoodName: {
+      fontSize: 30,
+      fontWeight: "700",
+      letterSpacing: -0.8,
+      textAlign: "center",
+      marginTop: 6,
+      lineHeight: 36,
       color: theme.textPrimary,
+    },
+    safetyPetType: {
+      fontSize: 15,
+      fontWeight: "400",
+      color: theme.textSecondary,
+      marginTop: 4,
+    },
+    safetySummary: {
+      fontSize: 16,
+      fontWeight: "400",
+      color: theme.textSecondary,
+      textAlign: "center",
+      lineHeight: 24,
+      marginTop: 14,
+    },
+    toxicSection: {
+      marginTop: 32,
+    },
+    toxicTitle: {
+      fontSize: 20,
+      fontWeight: "700",
+      letterSpacing: -0.4,
+      marginBottom: 12,
+      color: theme.textPrimary,
+    },
+    toxicCard: {
+      backgroundColor: theme.card,
+      borderRadius: 16,
+      overflow: "hidden",
+    },
+    toxicRow: {
+      paddingVertical: 14,
+      paddingHorizontal: 20,
+      gap: 14,
+      flexDirection: "row",
+      alignItems: "center",
+    },
+    toxicDot: {
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+      backgroundColor: "#FF3B30",
+    },
+    toxicName: {
+      fontSize: 16,
+      fontWeight: "500",
+    },
+    toxicDescription: {
+      fontSize: 13,
+      fontWeight: "400",
+      color: theme.textSecondary,
+    },
+    toxicDivider: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: theme.separator,
+      marginLeft: 44,
+    },
+    explanationSection: {
+      marginTop: 32,
+    },
+    explanationTitle: {
+      fontSize: 20,
+      fontWeight: "700",
+      marginBottom: 12,
+      color: theme.textPrimary,
+    },
+    explanationCard: {
+      backgroundColor: theme.card,
+      borderRadius: 16,
+      padding: 20,
+    },
+    explanationText: {
+      fontSize: 16,
+      fontWeight: "400",
+      lineHeight: 26,
+    },
+    symptomsSection: {
+      marginTop: 32,
+    },
+    symptomsTitle: {
+      fontSize: 20,
+      fontWeight: "700",
+      marginBottom: 12,
+      color: theme.textPrimary,
+    },
+    symptomsCard: {
+      backgroundColor: theme.isDark ? "rgba(255,59,48,0.12)" : "rgba(255,59,48,0.06)",
+      borderRadius: 16,
+      padding: 20,
+    },
+    symptomsText: {
+      fontSize: 16,
+      fontWeight: "400",
+      lineHeight: 25,
+      color: theme.textPrimary,
+    },
+    symptomsDivider: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: theme.isDark ? "rgba(255,59,48,0.25)" : "rgba(255,59,48,0.15)",
+      marginVertical: 14,
+    },
+    symptomsEmergency: {
+      fontSize: 16,
+      fontWeight: "600",
+      color: "#FF3B30",
+      lineHeight: 24,
     },
 
     // --- Ingredient Bottom Sheet ---
@@ -888,6 +1197,164 @@ export function createStyles(theme) {
       fontSize: 12,
       fontWeight: "500",
       color: Colors.textSecondary,
+    },
+
+    // --- Woof wordmark (header center) ---
+    wordmarkRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      flex: 1,
+      justifyContent: "center",
+    },
+    wordmarkText: {
+      color: theme.textPrimary,
+      fontSize: 18,
+      fontWeight: "700",
+      letterSpacing: -0.3,
+    },
+
+    // --- Hero product image ---
+    heroImageContainer: {
+      alignItems: "center",
+      justifyContent: "center",
+      paddingTop: 12,
+      paddingBottom: 8,
+    },
+    heroImage: {
+      width: 220,
+      height: 220,
+    },
+    heroImagePlaceholder: {
+      alignSelf: "center",
+      width: 180,
+      height: 180,
+      borderRadius: 20,
+      backgroundColor: theme.fill,
+      alignItems: "center",
+      justifyContent: "center",
+      marginTop: 12,
+      marginBottom: 8,
+    },
+
+    // --- Side-by-side title row (title/brand/chip + compact score ring) ---
+    titleRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 14,
+      paddingHorizontal: 4,
+      paddingTop: 8,
+      paddingBottom: 16,
+    },
+    titleBlock: {
+      flex: 1,
+      minWidth: 0,
+      gap: 6,
+    },
+    productNameLeft: {
+      color: theme.textPrimary,
+      fontSize: 22,
+      fontWeight: "700",
+      letterSpacing: -0.4,
+      lineHeight: 28,
+    },
+    productSubtitleLeft: {
+      color: theme.textSecondary,
+      fontSize: 14,
+      fontWeight: "500",
+      textDecorationLine: "underline",
+    },
+    categoryChip: {
+      alignSelf: "flex-start",
+      backgroundColor: theme.fill,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 10,
+      marginTop: 4,
+    },
+    categoryChipText: {
+      color: theme.textPrimary,
+      fontSize: 12,
+      fontWeight: "500",
+    },
+    titleRowRing: {
+      flexShrink: 0,
+    },
+    titleRowRingLabel: {
+      ...StyleSheet.absoluteFillObject,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingBottom: 2,
+    },
+    titleRowRingScore: {
+      color: theme.textPrimary,
+      fontSize: 22,
+      fontWeight: "700",
+      letterSpacing: -0.5,
+    },
+    titleRowRingOutOf: {
+      color: theme.textTertiary,
+      fontSize: 11,
+      fontWeight: "500",
+    },
+    titleRowRingGrade: {
+      fontSize: 11,
+      fontWeight: "600",
+      marginTop: 2,
+    },
+
+    // --- Summary rows card ---
+    summaryRowsCard: {
+      backgroundColor: theme.card,
+      borderRadius: 14,
+      paddingHorizontal: 16,
+      marginBottom: 24,
+    },
+    summaryRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingVertical: 14,
+      gap: 12,
+    },
+    summaryRowIconSlot: {
+      width: 22,
+      flexShrink: 0,
+      alignItems: "center",
+    },
+    summaryRowLabel: {
+      flex: 1,
+      color: theme.textPrimary,
+      fontSize: 15,
+      fontWeight: "500",
+    },
+    summaryRowRight: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      flexShrink: 0,
+      maxWidth: "55%",
+    },
+    summaryRowValue: {
+      color: theme.textPrimary,
+      fontSize: 15,
+      fontWeight: "600",
+    },
+    summaryRowDot: {
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+    },
+    summaryRowDivider: {
+      height: 0.5,
+      backgroundColor: Colors.divider,
+      marginLeft: 34,
+    },
+    firstScanToastOverlay: {
+      position: "absolute",
+      left: 0,
+      right: 0,
+      alignItems: "center",
+      paddingHorizontal: 16,
     },
   });
 }

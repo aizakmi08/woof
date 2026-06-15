@@ -1,0 +1,51 @@
+{
+  "version": "4",
+  "remote": {
+    "https://esm.sh/@supabase/supabase-js@2.108.0": "c825db8edcb1570c7ac5f330e39fb4a5f0e616cbad2300e0eaaa49d803c2244b"
+  },
+  "workspace": {
+    "packageJson": {
+      "dependencies": [
+        "npm:@react-native-async-storage/async-storage@2.2.0",
+        "npm:@react-navigation/native-stack@^7.14.5",
+        "npm:@react-navigation/native@^7.1.33",
+        "npm:@supabase/supabase-js@^2.99.1",
+        "npm:@types/react@~19.2.10",
+        "npm:babel-preset-expo@~55.0.8",
+        "npm:dotenv@^17.3.1",
+        "npm:expo-apple-authentication@~55.0.13",
+        "npm:expo-auth-session@~55.0.16",
+        "npm:expo-blur@~55.0.14",
+        "npm:expo-camera@~55.0.19",
+        "npm:expo-constants@~55.0.16",
+        "npm:expo-crypto@~55.0.15",
+        "npm:expo-dev-client@~55.0.35",
+        "npm:expo-file-system@~55.0.22",
+        "npm:expo-haptics@~55.0.14",
+        "npm:expo-image-manipulator@~55.0.17",
+        "npm:expo-linear-gradient@~55.0.14",
+        "npm:expo-secure-store@~55.0.14",
+        "npm:expo-sharing@~55.0.20",
+        "npm:expo-splash-screen@~55.0.21",
+        "npm:expo-status-bar@~55.0.6",
+        "npm:expo-updates@~55.0.24",
+        "npm:expo-web-browser@~55.0.16",
+        "npm:expo@~55.0.26",
+        "npm:lucide-react-native@0.577",
+        "npm:partial-json@~0.1.7",
+        "npm:react-native-paper@^5.15.0",
+        "npm:react-native-purchases@^9.12.0",
+        "npm:react-native-reanimated@4.2.1",
+        "npm:react-native-safe-area-context@5.6",
+        "npm:react-native-screens@4.23",
+        "npm:react-native-svg@15.15.3",
+        "npm:react-native-view-shot@4.0.3",
+        "npm:react-native-webview@13.16.0",
+        "npm:react-native-worklets@0.7.4",
+        "npm:react-native@0.83.6",
+        "npm:react@19.2.0",
+        "npm:typescript@~5.9.2"
+      ]
+    }
+  }
+}

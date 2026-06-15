@@ -1,6 +1,6 @@
 const APP_NAME = "Woof";
 const SUPPORT_EMAIL = "woofapp.help@gmail.com";
-const EFFECTIVE_DATE = "March 16, 2026";
+const EFFECTIVE_DATE = "June 8, 2026";
 
 const baseStyles = `
   <style>
@@ -37,9 +37,11 @@ export const PRIVACY_HTML = `<!DOCTYPE html>
 <h2>Information We Collect</h2>
 <ul>
   <li><strong>Account information:</strong> email address and display name when you sign in with Apple or Google.</li>
-  <li><strong>Photos:</strong> images of pet food labels you scan. Photos are sent to our servers for analysis and are not stored after processing.</li>
+  <li><strong>Guest usage information:</strong> limited local quota and device/session information used to provide guest scanning without requiring an account.</li>
+  <li><strong>Photos:</strong> images of pet food packaging, ingredient labels, or human foods you scan. Photos are sent to our servers and AI providers for analysis and are not intentionally stored after processing or saved in scan history.</li>
   <li><strong>Barcodes:</strong> barcode numbers you scan, used to look up product information.</li>
-  <li><strong>Scan history:</strong> product names, scores, and analysis results are stored to provide your history.</li>
+  <li><strong>Search and lookup information:</strong> product names, brands, and search terms used to find matching product data.</li>
+  <li><strong>Scan history:</strong> product or food names, scores, human-food safety details, and analysis results are stored locally for guest users and may be synced to your account when you sign in.</li>
   <li><strong>Device information:</strong> device type and OS version for app functionality and troubleshooting.</li>
 </ul>
 
@@ -52,22 +54,24 @@ export const PRIVACY_HTML = `<!DOCTYPE html>
 </ul>
 
 <h2>AI-Generated Content</h2>
-<p>${APP_NAME} uses artificial intelligence (Anthropic's Claude) to analyze pet food labels and generate ingredient ratings, quality scores, and recommendations. <strong>AI-generated content may contain errors, inaccuracies, or omissions.</strong> Scores and analysis should be treated as informational estimates, not definitive assessments. We do not guarantee the accuracy, completeness, or reliability of any AI-generated analysis. Always verify important dietary decisions with your veterinarian.</p>
+<p>${APP_NAME} uses artificial intelligence, including Anthropic Claude and OpenAI models, to identify products, read labels, assess human-food safety, and generate ingredient ratings, quality scores, and recommendations. <strong>AI-generated content may contain errors, inaccuracies, or omissions.</strong> Scores and analysis should be treated as informational estimates, not definitive assessments. We do not guarantee the accuracy, completeness, or reliability of any AI-generated analysis. Always verify important dietary decisions with your veterinarian.</p>
 
 <h2>Third-Party Services</h2>
 <ul>
   <li><strong>Supabase:</strong> authentication and data storage.</li>
-  <li><strong>Anthropic (Claude):</strong> AI-powered ingredient analysis. Label photos are sent to their API for processing.</li>
+  <li><strong>Anthropic (Claude):</strong> AI-powered ingredient analysis, safety checks, and scoring. Scan content may be sent to their API for processing.</li>
+  <li><strong>OpenAI:</strong> product identification, OCR, and ingredient lookup assistance. Scan photos, product names, or label text may be sent to their API for processing.</li>
   <li><strong>Open Pet Food Facts:</strong> product database lookups by barcode.</li>
+  <li><strong>ScrapingBee and public product websites:</strong> server-side product lookup, when needed, to find product ingredient data from public web sources.</li>
   <li><strong>RevenueCat:</strong> subscription management.</li>
   <li><strong>Apple / Google:</strong> sign-in authentication.</li>
 </ul>
 
 <h2>Data Retention</h2>
-<p>Your scan history and cached analyses are retained while your account is active. You can delete your account and all associated data at any time from the Profile screen in the app.</p>
+<p>Guest scan history is stored on your device. Signed-in scan history and cached analyses are retained while your account is active. Scan history contains product or food names, scores, timestamps, human-food safety details, and related analysis metadata, not the original scan photos. You can delete your account and associated account data at any time from the Profile screen in the app. Some de-identified cached product analyses may be retained to improve app performance and avoid repeating AI analysis.</p>
 
 <h2>Data Security</h2>
-<p>We use industry-standard security measures including encrypted connections (HTTPS), server-side API key management, and row-level security policies on our database.</p>
+<p>We use security measures including encrypted connections (HTTPS), native secure storage for authentication sessions where supported, server-side API key management, and row-level security policies on our database.</p>
 
 <h2>Children's Privacy</h2>
 <p>${APP_NAME} is not directed at children under 13. We do not knowingly collect information from children.</p>
@@ -97,13 +101,14 @@ export const TERMS_HTML = `<!DOCTYPE html>
 <p>The information provided by ${APP_NAME} is for informational purposes only. It is not a substitute for professional veterinary advice, diagnosis, or treatment. Always consult your veterinarian with questions about your pet's diet. Do not make feeding decisions based solely on ${APP_NAME}'s AI-generated analysis.</p>
 
 <h2>Account</h2>
-<p>You must sign in with Apple or Google to use the App. You are responsible for maintaining the security of your account.</p>
+<p>You may use limited guest features without creating an account. Signing in with Apple or Google enables account-based history, restore flows, and other account features. You are responsible for maintaining the security of your account.</p>
 
 <h2>Free Scans & Subscriptions</h2>
 <ul>
-  <li>${APP_NAME} provides 3 free scans with limited results. Free scans show the overall score, quick stats, a summary verdict, and the first 3 ingredients. Full ingredient details, quality breakdown, reviews, and recall history require a paid subscription.</li>
+  <li>${APP_NAME} may provide a limited number of free scans or safety checks. Free limits can differ for guest and signed-in users and may be enforced by account, device, or network signals to prevent abuse.</li>
+  <li>Free results may show limited analysis compared with paid features. The exact free and paid feature set may change as the App improves.</li>
   <li>Some features require a paid subscription (Woof Pro).</li>
-  <li>Subscriptions are billed through Apple's App Store or Google Play. Some plans include a free trial period. If you cancel before the trial ends, you will not be charged. After the trial, your subscription renews automatically at the plan price until you cancel.</li>
+  <li>Subscriptions are billed through Apple's App Store or Google Play. Some plans may include a free trial or introductory offer when shown in the App Store or Google Play purchase sheet. If a trial applies and you cancel before the trial ends, you will not be charged. After the trial, your subscription renews automatically at the plan price until you cancel.</li>
   <li>Payment is charged to your Apple ID or Google Play account at confirmation of purchase, or at the end of the free trial period if applicable.</li>
   <li>You can manage or cancel subscriptions in your device's subscription settings at any time.</li>
   <li>Refunds are handled by Apple or Google per their respective policies.</li>

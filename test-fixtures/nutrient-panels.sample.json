@@ -1,0 +1,20 @@
+[
+  {
+    "cacheKey": "sample adult chicken dry dog food",
+    "productName": "Sample Adult Chicken Dry Dog Food",
+    "brand": "Sample",
+    "nutrientPanel": {
+      "basis": "as-fed",
+      "protein_pct": 26,
+      "fat_pct": 14,
+      "fiber_pct": 4,
+      "moisture_pct": 10,
+      "calories_per_kg": 3650,
+      "source_url": "https://example.com/sample-nutrients"
+    }
+  },
+  {
+    "cacheKey": "invalid missing panel",
+    "productName": "Invalid Missing Panel"
+  }
+]
