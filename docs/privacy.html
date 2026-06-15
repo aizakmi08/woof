@@ -76,13 +76,15 @@
       <img src="icon.png" alt="Woof" style="width:40px;height:40px;border-radius:10px">
       <h1 style="margin-bottom:0">Privacy Policy</h1>
     </div>
-    <p class="updated">Last updated: March 17, 2025</p>
+    <p class="updated">Last updated: June 8, 2026</p>
 
     <p>Woof ("we," "our," or "the app") is a pet food scanning application. Your privacy is important to us. This policy explains what data we collect, how we use it, and your rights.</p>
 
     <h2>1. Data We Collect</h2>
-    <p><strong>Camera Images:</strong> When you scan a pet food label, the image is sent to our servers for analysis. Images are processed in real-time and are not stored permanently.</p>
-    <p><strong>Scan History:</strong> We store your scan results (product name, scores, and analysis) so you can revisit them later. This data is associated with your account if you sign in.</p>
+    <p><strong>Camera Images:</strong> When you scan pet food packaging, ingredient labels, or human foods, the image is sent to our servers and AI providers for analysis. Images are processed in real time and are not intentionally stored after processing or saved in scan history.</p>
+    <p><strong>Guest Usage Information:</strong> We use limited local quota and device/session information to provide guest scanning without requiring an account.</p>
+    <p><strong>Search and Lookup Information:</strong> Product names, brands, barcode numbers, and search terms may be used to find matching product data.</p>
+    <p><strong>Scan History:</strong> Scan results, including human-food safety details, are stored locally for guest users and may be synced to your account when you sign in.</p>
     <p><strong>Account Information:</strong> If you sign in with Apple or Google, we receive your name and email address. We use this solely for authentication and account management.</p>
     <p><strong>Anonymous Usage Data:</strong> We may collect anonymous usage statistics (e.g., number of scans, feature usage) to improve the app. This data cannot identify you personally.</p>
 
@@ -99,6 +101,7 @@
       <li>To analyze pet food ingredients and generate reports</li>
       <li>To save your scan history for future reference</li>
       <li>To manage your account and subscription</li>
+      <li>To cache product analyses and reduce repeated AI processing</li>
       <li>To improve the accuracy and quality of our analysis</li>
     </ul>
 
@@ -106,22 +109,25 @@
     <p>We use the following third-party services:</p>
     <ul>
       <li><strong>Supabase:</strong> For authentication and data storage. <a href="https://supabase.com/privacy" target="_blank">Privacy Policy</a></li>
-      <li><strong>Anthropic (Claude AI):</strong> For ingredient analysis. Images are processed per their <a href="https://www.anthropic.com/privacy" target="_blank">Privacy Policy</a></li>
+      <li><strong>Anthropic (Claude AI):</strong> For ingredient analysis, safety checks, and scoring. Scan content may be processed per their <a href="https://www.anthropic.com/privacy" target="_blank">Privacy Policy</a></li>
+      <li><strong>OpenAI:</strong> For product identification, OCR, and ingredient lookup assistance. Scan photos, product names, or label text may be processed per their <a href="https://openai.com/policies/privacy-policy" target="_blank">Privacy Policy</a></li>
+      <li><strong>Open Pet Food Facts:</strong> For product database lookups by barcode and product name.</li>
+      <li><strong>ScrapingBee and public product websites:</strong> For server-side product lookup, when needed, to find public ingredient data.</li>
       <li><strong>RevenueCat:</strong> For subscription management. <a href="https://www.revenuecat.com/privacy" target="_blank">Privacy Policy</a></li>
       <li><strong>Apple Sign In / Google Sign In:</strong> For authentication only</li>
     </ul>
 
     <h2>5. Data Retention</h2>
-    <p>Scan images are processed in real-time and not stored beyond the analysis session. Scan results (text data) are cached for up to 7 days to provide faster results for repeated scans. Your scan history is retained as long as you have an active account.</p>
+    <p>Scan images are processed in real time and are not intentionally stored after processing. Guest scan history is stored on your device. Signed-in scan history and cached analyses are retained while your account is active. Scan history contains product or food names, scores, timestamps, human-food safety details, and related analysis metadata, not the original scan photos. Some de-identified cached product analyses may be retained to improve performance and avoid repeating AI analysis.</p>
 
     <h2>6. Data Deletion</h2>
-    <p>You can delete your account and all associated data at any time from the Profile screen in the app. Account deletion is immediate and permanent. If you need assistance, contact us at <a href="mailto:woofapp.help@gmail.com">woofapp.help@gmail.com</a>.</p>
+    <p>You can delete your account and associated account data at any time from the Profile screen in the app. Account deletion is permanent. If you need assistance, contact us at <a href="mailto:woofapp.help@gmail.com">woofapp.help@gmail.com</a>.</p>
 
     <h2>7. Children's Privacy</h2>
     <p>Woof is not directed at children under 13. We do not knowingly collect personal information from children under 13.</p>
 
     <h2>8. Security</h2>
-    <p>We use industry-standard security measures including HTTPS encryption, secure authentication (JWT), and server-side API key management. Your data is transmitted and stored securely.</p>
+    <p>We use security measures including HTTPS encryption, native secure storage for authentication sessions where supported, server-side API key management, and row-level security policies on our database.</p>
 
     <h2>9. Changes to This Policy</h2>
     <p>We may update this policy from time to time. Changes will be posted on this page with an updated date. Continued use of the app after changes constitutes acceptance of the updated policy.</p>
@@ -132,7 +138,7 @@
     </p>
 
     <div class="footer">
-      <p>&copy; 2025 Woof</p>
+      <p>&copy; 2026 Woof</p>
     </div>
   </div>
 </body>

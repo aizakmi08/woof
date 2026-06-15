@@ -7,6 +7,7 @@ import {
   Dimensions,
   Alert,
   Pressable,
+  Linking,
 } from "react-native";
 import * as ImageManipulator from "expo-image-manipulator";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -28,11 +29,14 @@ import { ChevronLeft, HelpCircle, CameraOff, X } from "lucide-react-native";
 import { useIsFocused } from "@react-navigation/native";
 import { useTheme, Colors, Spacing, Shadows } from "../theme";
 import { useAuth } from "../services/auth";
+import { useNetwork } from "../services/network";
+import { trackEvent } from "../services/analytics";
+import * as analysisService from "../services/analysisService";
 import * as Haptics from "expo-haptics";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 const SCAN_SIZE = 260;
-const SCAN_Y = Math.round(SCREEN_H * 0.28);
+const SCAN_Y = Math.round(SCREEN_H * 0.22);
 const SCAN_X = Math.round((SCREEN_W - SCAN_SIZE) / 2);
 
 const CORNER_LEN = 40;
@@ -40,6 +44,23 @@ const CORNER_W = 3;
 const CORNER_RAD = 4;
 const CORNER_COLOR = "#F5F5F5";
 const MASK = "rgba(0,0,0,0.45)";
+const CAMERA_CAPTURE_TIMEOUT_MS = 12000;
+const IMAGE_MANIPULATION_TIMEOUT_MS = 15000;
+const SCANNER_SESSION_WARM_TIMEOUT_MS = 1200;
+const FRONT_SCAN_IMAGE_WIDTH = 1400;
+const FRONT_SCAN_IMAGE_COMPRESS = 0.76;
+
+function withCaptureTimeout(promise, label, timeoutMs) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      const err = new Error(`${label} timed out. Please try again.`);
+      err.code = "CAPTURE_TIMEOUT";
+      reject(err);
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+}
 
 // --- Processing Card (frosted glass) ---
 
@@ -55,6 +76,8 @@ function ProcessingCard({ onCancel }) {
             onPress={onCancel}
             hitSlop={12}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel scan"
           >
             <X size={16} color="rgba(245,245,245,0.7)" strokeWidth={2} />
             <Text style={styles.cancelText}>Cancel</Text>
@@ -100,38 +123,49 @@ function StreamingDots() {
 
 export default function ScannerScreen({ navigation, route }) {
   // Extract mode params for human food scanning
-  const { fallbackToPhoto, mode: scanMode, petType } = route.params || {};
+  const { mode: scanMode, petType } = route.params || {};
   const isHumanFood = scanMode === "human_food";
 
   const cameraRef = useRef(null);
-  const scannedRef = useRef(false);
+  const captureSessionRef = useRef({ id: 0, cancelled: false });
+  const mountedRef = useRef(true);
   const [permission, requestPermission] = useCameraPermissions();
   const [capturing, setCapturing] = useState(false);
-  const [showFallbackBanner, setShowFallbackBanner] = useState(false);
-  const [barcodeEnabled, setBarcodeEnabled] = useState(!isHumanFood);
+  const [cameraReady, setCameraReady] = useState(false);
   const theme = useTheme();
-  const { checkSession } = useAuth();
+  const { checkSession, isPro } = useAuth();
+  const { isOnline } = useNetwork();
   const isFocused = useIsFocused(); // Only show camera when screen is focused
+
+  useEffect(() => () => {
+    mountedRef.current = false;
+    captureSessionRef.current.cancelled = true;
+    captureSessionRef.current.id += 1;
+  }, []);
+
+  useEffect(() => {
+    if (!isFocused) {
+      setCameraReady(false);
+      captureSessionRef.current.cancelled = true;
+      captureSessionRef.current.id += 1;
+      setCapturing(false);
+    }
+  }, [isFocused]);
 
   // Proactively refresh auth session when scanner mounts
   useEffect(() => {
-    checkSession().catch((err) => {
+    checkSession({ timeoutMs: SCANNER_SESSION_WARM_TIMEOUT_MS }).catch((err) => {
       console.log("[SCANNER] Session check failed:", err.message);
     });
   }, [checkSession]);
 
-  // Barcode-not-found fallback: show banner and briefly disable barcode scanning
+  // Re-poll camera permission when screen regains focus — handles the case
+  // where the user denied initially, opened iOS Settings, granted, then came back.
   useEffect(() => {
-    if (!fallbackToPhoto) return;
-    setShowFallbackBanner(true);
-    setBarcodeEnabled(false);
-    const enableTimer = setTimeout(() => !isHumanFood && setBarcodeEnabled(true), 3000);
-    const bannerTimer = setTimeout(() => setShowFallbackBanner(false), 5000);
-    return () => {
-      clearTimeout(enableTimer);
-      clearTimeout(bannerTimer);
-    };
-  }, [route.params]);
+    if (isFocused && permission && !permission.granted && permission.canAskAgain === false) {
+      requestPermission().catch(() => {});
+    }
+  }, [isFocused, permission?.granted, permission?.canAskAgain, requestPermission]);
 
   // --- Reanimated shared values ---
   const pulseAnim = useSharedValue(0);
@@ -206,28 +240,38 @@ export default function ScannerScreen({ navigation, route }) {
   }));
 
   // --- Handlers ---
-  const handleBarcodeScanned = useCallback(
-    ({ data }) => {
-      if (scannedRef.current || capturing) return;
-      scannedRef.current = true;
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  const isActiveCapture = useCallback((sessionId) => (
+    mountedRef.current &&
+    captureSessionRef.current.id === sessionId &&
+    !captureSessionRef.current.cancelled
+  ), []);
 
-      flashOpacity.value = withSequence(
-        withTiming(1, { duration: 150 }),
-        withTiming(0, { duration: 300 })
-      );
-
-      navigation.push("Results", { mode: "barcode", barcode: data });
-      setTimeout(() => {
-        scannedRef.current = false;
-      }, 2000);
-    },
-    [capturing, navigation]
-  );
+  const cancelActiveCapture = useCallback(() => {
+    captureSessionRef.current.cancelled = true;
+    captureSessionRef.current.id += 1;
+    if (mountedRef.current) setCapturing(false);
+  }, []);
 
   const handleCapture = async () => {
-    if (!cameraRef.current || capturing) return;
+    if (!cameraRef.current || capturing || !cameraReady) return;
+    // Pre-flight network check — analysis needs the network. Tell user immediately
+    // instead of letting them snap a photo that's destined to fail.
+    if (!isOnline) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      Alert.alert(
+        "No internet connection",
+        "Connect to Wi-Fi or cellular data to scan products.",
+        [{ text: "OK" }],
+      );
+      return;
+    }
+    const sessionId = captureSessionRef.current.id + 1;
+    captureSessionRef.current = { id: sessionId, cancelled: false };
     setCapturing(true);
+    trackEvent("scan_started", {
+      mode: isHumanFood ? "human_food_photo" : "pet_food_photo",
+      petType: petType || "unknown",
+    });
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
 
     captureScale.value = withSequence(
@@ -236,20 +280,52 @@ export default function ScannerScreen({ navigation, route }) {
     );
 
     try {
-      const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.8,
-      });
+      // Let Expo normalize device orientation before vision analysis; tilted
+      // package photos are worse than the small extra capture cost.
+      const photo = await withCaptureTimeout(
+        cameraRef.current.takePictureAsync({
+          quality: 0.9,
+          skipProcessing: false,
+          base64: false,
+          exif: false,
+        }),
+        "Camera capture",
+        CAMERA_CAPTURE_TIMEOUT_MS,
+      );
+      if (!isActiveCapture(sessionId)) return;
       if (!photo?.uri) {
         Alert.alert("Capture Failed", "Could not read the photo. Please try again.");
         setCapturing(false);
         return;
       }
-      // Resize to 1024px max dimension — drastically reduces upload + Claude processing time
-      const resized = await ImageManipulator.manipulateAsync(
-        photo.uri,
-        [{ resize: { width: 1024 } }],
-        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+      // Front scans identify the package, not dense ingredient text. Keep enough
+      // detail for brand/name recognition while reducing upload and Edge decode time.
+      const resized = await withCaptureTimeout(
+        ImageManipulator.manipulateAsync(
+          photo.uri,
+          [{ resize: { width: FRONT_SCAN_IMAGE_WIDTH } }],
+          { compress: FRONT_SCAN_IMAGE_COMPRESS, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+        ),
+        "Image preparation",
+        IMAGE_MANIPULATION_TIMEOUT_MS,
       );
+      if (!isActiveCapture(sessionId)) return;
+      if (!resized?.base64) {
+        Alert.alert("Capture Failed", "Could not prepare the photo. Please try again.");
+        setCapturing(false);
+        return;
+      }
+      try {
+        analysisService.startAnalysis({
+          mode: isHumanFood ? "human_food" : "photo",
+          base64: resized.base64,
+          uri: photo.uri,
+          petType,
+          isPro,
+        });
+      } catch (err) {
+        console.log("[SCANNER] Background analysis start failed:", err.message);
+      }
       navigation.push("Results", {
         mode: isHumanFood ? "human_food" : "photo",
         base64: resized.base64,
@@ -257,22 +333,34 @@ export default function ScannerScreen({ navigation, route }) {
         ...(isHumanFood && { petType }),
       });
     } catch (err) {
+      if (!isActiveCapture(sessionId)) return;
       console.log("[SCANNER] Capture error:", err.message);
-      Alert.alert("Capture Failed", "Something went wrong. Please try again.");
+      Alert.alert("Capture Failed", err.code === "CAPTURE_TIMEOUT" ? err.message : "Something went wrong. Please try again.");
     } finally {
-      setCapturing(false);
+      // Always reset capturing state, even on error — prevents button-stuck-disabled bug
+      if (isActiveCapture(sessionId)) {
+        setCapturing(false);
+      }
     }
   };
 
   const handleCancelCapture = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setCapturing(false);
+    cancelActiveCapture();
+  };
+
+  const handleBack = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (capturing) {
+      cancelActiveCapture();
+    }
+    navigation.goBack();
   };
 
   const showHelp = () => {
     Alert.alert(
       "How to Scan",
-      "1. Point the camera at the front of the product — brand and name visible\n\n2. Tap the capture button to take a photo\n\n3. Barcodes are detected automatically — just hold steady",
+      "1. Point the camera at the front of the product — brand and name visible\n\n2. Tap the capture button to take a photo\n\n3. We'll identify the product and analyze its ingredients",
       [{ text: "Got it" }]
     );
   };
@@ -293,20 +381,23 @@ export default function ScannerScreen({ navigation, route }) {
             Camera Access Needed
           </Text>
           <Text style={[styles.permissionText, { color: theme.textSecondary }]}>
-            Woof needs camera access to scan{"\n"}pet food ingredient labels.
+            Woof needs camera access to scan{"\n"}pet food packages, ingredient labels,{"\n"}and human foods.
           </Text>
           <Pressable
             style={({ pressed }) => [
               styles.permissionButton,
               { backgroundColor: theme.buttonPrimary, opacity: pressed ? 0.85 : 1 },
             ]}
-            onPress={() => {
+            onPress={async () => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              requestPermission();
+              const result = await requestPermission();
+              if (!result.granted) {
+                Linking.openSettings();
+              }
             }}
           >
             <Text style={[styles.permissionButtonText, { color: theme.buttonText }]}>
-              Open Settings
+              Allow Camera
             </Text>
           </Pressable>
         </View>
@@ -323,10 +414,7 @@ export default function ScannerScreen({ navigation, route }) {
           ref={cameraRef}
           style={StyleSheet.absoluteFill}
           facing="back"
-          onBarcodeScanned={barcodeEnabled ? handleBarcodeScanned : undefined}
-          barcodeScannerSettings={{
-            barcodeTypes: ["ean13", "ean8", "upc_a", "upc_e"],
-          }}
+          onCameraReady={() => setCameraReady(true)}
         />
       )}
 
@@ -344,7 +432,7 @@ export default function ScannerScreen({ navigation, route }) {
         pointerEvents="none"
       />
 
-      {/* Scan frame: corners + flash + processing */}
+      {/* Scan frame: corners + flash */}
       <View style={styles.scanFrame} pointerEvents="none">
         <Animated.View style={[StyleSheet.absoluteFill, cornerAnimStyle]}>
           <Animated.View style={[styles.corner, styles.cornerTL, cornerTLStyle]} />
@@ -352,19 +440,23 @@ export default function ScannerScreen({ navigation, route }) {
           <Animated.View style={[styles.corner, styles.cornerBL, cornerBLStyle]} />
           <Animated.View style={[styles.corner, styles.cornerBR, cornerBRStyle]} />
         </Animated.View>
-
-        <Animated.View style={[styles.barcodeFlash, flashStyle]} />
-
-        {capturing && <ProcessingCard onCancel={handleCancelCapture} />}
       </View>
+
+      {capturing && (
+        <View style={styles.processingOverlay} pointerEvents="box-none">
+          <ProcessingCard onCancel={handleCancelCapture} />
+        </View>
+      )}
 
       {/* Instruction pill below scan area */}
       <View style={styles.instructionWrap} pointerEvents="none">
-        <BlurView intensity={25} tint="light" style={styles.instructionBlur}>
-          <Text style={styles.instructionLight}>
-            {showFallbackBanner ? "Point at the ingredient label" : isHumanFood ? "Point at the food item" : "Point at the product packaging"}
+        <View style={styles.instructionPill}>
+          <Text style={styles.instructionText}>
+            {isHumanFood
+              ? "Take a clear photo of the food"
+              : "Capture brand name & flavor for accurate results"}
           </Text>
-        </BlurView>
+        </View>
       </View>
 
       {/* Interactive controls */}
@@ -373,14 +465,11 @@ export default function ScannerScreen({ navigation, route }) {
         <View style={styles.topBar}>
           <TouchableOpacity
             style={styles.topBtn}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              navigation.goBack();
-            }}
+            onPress={handleBack}
             hitSlop={8}
             activeOpacity={0.7}
             accessibilityRole="button"
-            accessibilityLabel="Go back"
+            accessibilityLabel={capturing ? "Cancel scan and go back" : "Go back"}
           >
             <ChevronLeft size={24} color="#F5F5F5" strokeWidth={2.5} />
           </TouchableOpacity>
@@ -397,32 +486,19 @@ export default function ScannerScreen({ navigation, route }) {
           </TouchableOpacity>
         </View>
 
-        {/* Fallback banner when barcode not found */}
-        {showFallbackBanner && (
-          <Animated.View
-            entering={FadeInDown.duration(300)}
-            exiting={FadeOutUp.duration(300)}
-            style={styles.fallbackBanner}
-          >
-            <Text style={styles.fallbackBannerText}>
-              Barcode not found — capture the ingredient label instead
-            </Text>
-          </Animated.View>
-        )}
-
         <View style={{ flex: 1 }} />
 
-        {/* Bottom: barcode note + capture button + label */}
+        {/* Bottom: capture button + label */}
         <View style={styles.bottomArea}>
           {!isHumanFood && (
             <Text style={styles.barcodeHint}>
-              Barcodes detected automatically
+              Capture the front of the bag — brand, product name, and flavor must be readable
             </Text>
           )}
           <View style={{ height: 20 }} />
           <Pressable
             onPress={handleCapture}
-            disabled={capturing}
+            disabled={capturing || !cameraReady}
             onPressIn={() => {
               captureScale.value = withSpring(0.92, { damping: 20, stiffness: 300 });
             }}
@@ -430,19 +506,19 @@ export default function ScannerScreen({ navigation, route }) {
               captureScale.value = withSpring(1, { damping: 15, stiffness: 150 });
             }}
             accessibilityRole="button"
-            accessibilityLabel={capturing ? "Scanning" : "Capture photo"}
-            accessibilityState={{ disabled: capturing }}
+            accessibilityLabel={capturing ? "Scanning" : cameraReady ? "Capture photo" : "Camera starting"}
+            accessibilityState={{ disabled: capturing || !cameraReady }}
           >
             <Animated.View style={[styles.captureBtn, captureScaleStyle]}>
               <View style={[
                 styles.captureInner,
-                capturing && styles.captureInnerDisabled,
+                (capturing || !cameraReady) && styles.captureInnerDisabled,
               ]} />
             </Animated.View>
           </Pressable>
           <View style={{ height: 12 }} />
           <Text style={styles.captureLabel}>
-            {capturing ? "Scanning..." : "Capture"}
+            {capturing ? "Analyzing..." : cameraReady ? "Take Photo" : "Camera starting..."}
           </Text>
         </View>
       </SafeAreaView>
@@ -465,6 +541,13 @@ const styles = StyleSheet.create({
 
   // Scan frame
   scanFrame: {
+    position: "absolute",
+    top: SCAN_Y,
+    left: SCAN_X,
+    width: SCAN_SIZE,
+    height: SCAN_SIZE,
+  },
+  processingOverlay: {
     position: "absolute",
     top: SCAN_Y,
     left: SCAN_X,
@@ -522,20 +605,15 @@ const styles = StyleSheet.create({
     right: 0,
     alignItems: "center",
   },
-  instructionBlur: {
+  instructionPill: {
     borderRadius: 20,
     overflow: "hidden",
     paddingHorizontal: 20,
     paddingVertical: 10,
+    backgroundColor: "rgba(0,0,0,0.55)",
   },
-  instruction: {
-    color: "rgba(245,245,245,0.85)",
-    fontSize: 15,
-    fontWeight: "500",
-    letterSpacing: 0.2,
-  },
-  instructionLight: {
-    color: "#1C1C1E",
+  instructionText: {
+    color: "#F5F5F5",
     fontSize: 15,
     fontWeight: "500",
     letterSpacing: 0.2,
@@ -603,7 +681,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
   },
   captureInnerDisabled: {
-    backgroundColor: "rgba(245,245,245,0.4)",
+    backgroundColor: "rgba(245,245,245,0.3)",
   },
   captureLabel: {
     color: "rgba(245,245,245,0.8)",
@@ -668,17 +746,17 @@ const styles = StyleSheet.create({
   // Fallback banner
   fallbackBanner: {
     alignSelf: "center",
-    backgroundColor: "rgba(232, 163, 23, 0.92)",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 10,
+    backgroundColor: "rgba(30, 30, 30, 0.85)",
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 12,
     marginTop: 12,
     marginHorizontal: Spacing.screenPadding,
   },
   fallbackBannerText: {
-    color: "#1C1C1E",
-    fontSize: 13,
-    fontWeight: "600",
+    color: "#F5F5F5",
+    fontSize: 14,
+    fontWeight: "500",
     textAlign: "center",
     letterSpacing: 0.1,
   },
@@ -691,26 +769,34 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
   },
   permissionIconWrap: {
-    marginBottom: 24,
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: "rgba(0,0,0,0.04)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 28,
   },
   permissionTitle: {
     fontSize: 22,
     fontWeight: "700",
-    marginBottom: Spacing.md,
+    marginBottom: 16,
     letterSpacing: -0.3,
   },
   permissionText: {
     fontSize: 16,
     textAlign: "center",
-    marginBottom: 32,
+    marginBottom: 40,
     lineHeight: 24,
   },
   permissionButton: {
     height: Spacing.buttonHeight,
-    paddingHorizontal: 32,
+    paddingHorizontal: 40,
     borderRadius: Spacing.buttonRadius,
     justifyContent: "center",
     alignItems: "center",
+    alignSelf: "stretch",
+    marginHorizontal: Spacing.screenPadding,
   },
   permissionButtonText: {
     fontSize: 17,

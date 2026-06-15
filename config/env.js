@@ -1,10 +1,19 @@
 import Constants from "expo-constants";
 
-export const SUPABASE_URL =
-  Constants.expoConfig?.extra?.SUPABASE_URL ?? "";
+const isDev = typeof __DEV__ !== "undefined" ? __DEV__ : process.env.NODE_ENV !== "production";
 
-export const SUPABASE_ANON_KEY =
-  Constants.expoConfig?.extra?.SUPABASE_ANON_KEY ?? "";
+function requiredExtra(name) {
+  const value = Constants.expoConfig?.extra?.[name];
+  if (typeof value === "string" && value.trim()) return value.trim();
 
-export const GOOGLE_WEB_CLIENT_ID =
-  Constants.expoConfig?.extra?.GOOGLE_WEB_CLIENT_ID ?? "";
+  const message = `Missing required app config extra: ${name}`;
+  if (!isDev) throw new Error(message);
+  console.warn(`[config] ${message}`);
+  return "";
+}
+
+export const SUPABASE_URL = requiredExtra("SUPABASE_URL");
+
+export const SUPABASE_ANON_KEY = requiredExtra("SUPABASE_ANON_KEY");
+
+export const GOOGLE_WEB_CLIENT_ID = requiredExtra("GOOGLE_WEB_CLIENT_ID");

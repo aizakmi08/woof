@@ -1,13 +1,17 @@
 import { useColorScheme } from "react-native";
+import { createContext, useContext, useState, useEffect, useCallback } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+const THEME_STORAGE_KEY = "@woof_theme_preference";
 
 // --- Design Tokens ---
 
 export const Colors = {
   // Core surfaces
-  background: "#FAFAFA",
+  background: "#F5F4F0",
   card: "#FFFFFF",
-  surface: "#F5F5F5",
-  divider: "#F0F0F0",
+  surface: "#EEECEA",
+  divider: "rgba(60,60,67,0.09)",
 
   // Text
   textPrimary: "#1C1C1E",
@@ -19,33 +23,33 @@ export const Colors = {
   buttonText: "#FFFFFF",
 
   // Score tiers
-  scoreExcellent: "#34C759",
-  scoreGreat: "#34C759",
-  scoreDecent: "#E8A317",
-  scoreFair: "#F97316",
-  scoreConcerning: "#EF4444",
+  scoreExcellent: "#30D158",
+  scoreGreat: "#30D158",
+  scoreDecent: "#FF9F0A",
+  scoreFair: "#FF9F0A",
+  scoreConcerning: "#FF453A",
 
   // Ingredient quality
-  ingredientGood: "#34C759",
+  ingredientGood: "#30D158",
   ingredientNeutral: "#9CA3AF",
-  ingredientBad: "#EF4444",
+  ingredientBad: "#FF453A",
 
   // Semantic
   recallBorder: "rgba(239, 68, 68, 0.25)",
   recallBackground: "#FEF2F2",
-  verdictBackground: "#FFFDF7",
+  verdictBackground: "#F0FDF4",
   lovedPillBg: "#F0FDF4",
-  lovedPillText: "#16A34A",
-  watchOutPillBg: "#FEF3C7",
-  watchOutPillText: "#D97706",
+  lovedPillText: "#30D158",
+  watchOutPillBg: "rgba(255,159,10,0.1)",
+  watchOutPillText: "#FF9F0A",
 
   // Score tiers — nested for backward compat
   score: {
-    excellent: "#34C759",
-    good: "#34C759",
-    decent: "#E8A317",
-    poor: "#F97316",
-    bad: "#EF4444",
+    excellent: "#30D158",
+    good: "#30D158",
+    decent: "#FF9F0A",
+    poor: "#FF9F0A",
+    bad: "#FF453A",
   },
 
   // Semantic accent
@@ -54,13 +58,13 @@ export const Colors = {
 
   // Light palette
   light: {
-    bg: "#FAFAFA",
+    bg: "#F5F4F0",
     card: "#FFFFFF",
-    surface: "#F5F5F5",
+    surface: "#EEECEA",
     textPrimary: "#1C1C1E",
-    textSecondary: "#6B7280",
-    textTertiary: "#9CA3AF",
-    separator: "#F0F0F0",
+    textSecondary: "rgba(60,60,67,0.6)",
+    textTertiary: "rgba(60,60,67,0.3)",
+    separator: "rgba(60,60,67,0.10)",
     fill: "rgba(0,0,0,0.04)",
     fillSecondary: "rgba(0,0,0,0.08)",
     statusBar: "dark",
@@ -68,13 +72,13 @@ export const Colors = {
 
   // Dark palette
   dark: {
-    bg: "#1C1C1E",
-    card: "#2C2C2E",
-    surface: "#3A3A3C",
+    bg: "#121214",
+    card: "#1C1C1E",
+    surface: "#2C2C2E",
     textPrimary: "#F5F5F5",
-    textSecondary: "#8E8E93",
-    textTertiary: "#48484A",
-    separator: "#3A3A3C",
+    textSecondary: "#98989F",
+    textTertiary: "#636366",
+    separator: "rgba(255,255,255,0.08)",
     fill: "rgba(255,255,255,0.06)",
     fillSecondary: "rgba(255,255,255,0.10)",
     statusBar: "light",
@@ -134,18 +138,25 @@ export const Spacing = {
 
 export const Shadows = {
   card: {
-    shadowColor: "#000",
+    shadowColor: "#3C3C43",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
+    shadowOpacity: 0.07,
+    shadowRadius: 14,
+    elevation: 3,
+  },
+  cardSubtle: {
+    shadowColor: "#3C3C43",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
     shadowRadius: 8,
     elevation: 2,
   },
   button: {
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 3,
+    shadowColor: "#3C3C43",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 4,
   },
   scoreGlow: (color) => ({
     shadowColor: color,
@@ -168,18 +179,92 @@ export const Animation = {
 // --- Score Config ---
 
 export function getScoreConfig(score) {
-  if (score >= 85) return { label: "EXCELLENT", color: Colors.scoreExcellent, bg: "rgba(52,199,89,0.08)" };
-  if (score >= 70) return { label: "GOOD", color: Colors.scoreGreat, bg: "rgba(52,199,89,0.08)" };
-  if (score >= 50) return { label: "AVERAGE", color: Colors.scoreDecent, bg: "rgba(232,163,23,0.08)" };
-  if (score >= 30) return { label: "BELOW AVERAGE", color: Colors.scoreFair, bg: "rgba(249,115,22,0.08)" };
-  return { label: "POOR", color: Colors.scoreConcerning, bg: "rgba(239,68,68,0.08)" };
+  if (score >= 85) return { label: "Excellent", color: Colors.scoreExcellent, bg: "rgba(52,199,89,0.08)" };
+  if (score >= 70) return { label: "Good", color: Colors.scoreGreat, bg: "rgba(52,199,89,0.08)" };
+  if (score >= 50) return { label: "Average", color: Colors.scoreDecent, bg: "rgba(232,163,23,0.08)" };
+  if (score >= 30) return { label: "Fair", color: Colors.scoreFair, bg: "rgba(249,115,22,0.08)" };
+  return { label: "Poor", color: Colors.scoreConcerning, bg: "rgba(239,68,68,0.08)" };
+}
+
+// --- Theme Context ---
+
+const ThemeContext = createContext(null);
+
+// "system" | "light" | "dark"
+export function ThemeProvider({ children }) {
+  const systemScheme = useColorScheme();
+  const [preference, setPreference] = useState("system");
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let resolved = false;
+    // 2s timeout so a slow disk doesn't keep `loaded` false forever (which would
+    // block downstream consumers waiting on the theme to settle).
+    const timeout = setTimeout(() => {
+      if (resolved) return;
+      resolved = true;
+      setLoaded(true);
+    }, 2000);
+    AsyncStorage.getItem(THEME_STORAGE_KEY)
+      .then((val) => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(timeout);
+        if (val === "light" || val === "dark") setPreference(val);
+        setLoaded(true);
+      })
+      .catch(() => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(timeout);
+        setLoaded(true);
+      });
+  }, []);
+
+  const setThemePreference = useCallback((pref) => {
+    setPreference(pref);
+    if (pref === "system") {
+      AsyncStorage.removeItem(THEME_STORAGE_KEY);
+    } else {
+      AsyncStorage.setItem(THEME_STORAGE_KEY, pref);
+    }
+  }, []);
+
+  const resolvedScheme = preference === "system" ? systemScheme : preference;
+  const isDark = resolvedScheme === "dark";
+  const palette = isDark ? Colors.dark : Colors.light;
+
+  const theme = {
+    ...palette,
+    blue: Colors.blue,
+    amber: Colors.amber,
+    green: Colors.scoreExcellent,
+    red: Colors.scoreConcerning,
+    buttonPrimary: isDark ? "#F5F5F5" : Colors.buttonPrimary,
+    buttonText: isDark ? "#1C1C1E" : Colors.buttonText,
+    isDark,
+    preference,
+    setThemePreference,
+  };
+
+  // Don't render until preference is loaded to avoid flash
+  if (!loaded) return null;
+
+  return (
+    <ThemeContext.Provider value={theme}>
+      {children}
+    </ThemeContext.Provider>
+  );
 }
 
 // --- Theme Hook ---
 
 export function useTheme() {
-  const scheme = useColorScheme();
-  const isDark = scheme === "dark";
+  const ctx = useContext(ThemeContext);
+  // Fallback for components rendered outside ThemeProvider (e.g. ErrorBoundary, Onboarding)
+  const systemScheme = useColorScheme();
+  if (ctx) return ctx;
+  const isDark = systemScheme === "dark";
   const palette = isDark ? Colors.dark : Colors.light;
   return {
     ...palette,
@@ -189,6 +274,9 @@ export function useTheme() {
     red: Colors.scoreConcerning,
     buttonPrimary: isDark ? "#F5F5F5" : Colors.buttonPrimary,
     buttonText: isDark ? "#1C1C1E" : Colors.buttonText,
+    isDark,
+    preference: "system",
+    setThemePreference: () => {},
   };
 }
 

@@ -8,6 +8,7 @@ import { useTheme, Spacing, Typography } from "../theme";
 export default function WebViewScreen({ navigation, route }) {
   const theme = useTheme();
   const { title, html, url } = route.params || {};
+  const isLocalHtml = !url;
 
   const source = url ? { uri: url } : { html, baseUrl: "" };
 
@@ -21,6 +22,8 @@ export default function WebViewScreen({ navigation, route }) {
           }}
           hitSlop={12}
           style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
           <ChevronLeft size={28} color={theme.textPrimary} strokeWidth={2} />
         </Pressable>
@@ -36,6 +39,10 @@ export default function WebViewScreen({ navigation, route }) {
         source={source}
         style={{ flex: 1, backgroundColor: theme.bg }}
         showsVerticalScrollIndicator={false}
+        javaScriptEnabled={!isLocalHtml}
+        domStorageEnabled={!isLocalHtml}
+        originWhitelist={isLocalHtml ? ["about:blank"] : ["https://*"]}
+        setSupportMultipleWindows={false}
       />
     </SafeAreaView>
   );
