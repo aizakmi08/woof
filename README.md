@@ -1,5 +1,7 @@
 # Woof
 
+[![CI](https://github.com/aizakmi08/woof/actions/workflows/ci.yml/badge.svg)](https://github.com/aizakmi08/woof/actions/workflows/ci.yml)
+
 Woof is an Expo/React Native mobile app for scanning pet food and turning product labels, barcodes, and food photos into structured nutrition analysis. It combines mobile camera flows, Supabase-backed auth/history, and server-side AI analysis behind an Edge Function.
 
 ## Product Scope
@@ -68,3 +70,9 @@ Deploy the Supabase Edge Function and migrations before testing full analysis fl
 ## Quality Notes
 
 The repository includes an audit document covering architecture, security, accessibility, and operational follow-ups. The public `.env.example` file is safe to commit; real keys should stay in local environment files or hosted secret managers.
+
+## Quality Signals
+
+- CI installs dependencies and verifies the expected app, Supabase, docs, and migration structure.
+- `CONTRIBUTING.md` documents the expected validation path for scanner, analysis, auth, and migration changes.
+- `SECURITY.md` captures credential, Edge Function, RLS, and privacy expectations.
