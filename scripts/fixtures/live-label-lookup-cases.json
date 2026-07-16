@@ -1,0 +1,122 @@
+[
+  {
+    "id": "open-farm-goodgut-beef-dog",
+    "cache_key": "open-farm:683547120129",
+    "brand": "Open Farm",
+    "product_name": "GoodGut Grass-Fed Beef Dog Kibble",
+    "pet_type": "dog",
+    "image_url": "https://openfarmpet.com/cdn/shop/files/PLP-Images_GoodGut_Beef_1.png?v=1769183941&width=1024",
+    "source_url": "https://openfarmpet.com/products/goodgut-grass-fed-beef-dog-kibble",
+    "expected_terms": ["open farm", "goodgut", "beef"]
+  },
+  {
+    "id": "open-farm-rawmix-prairie-cat",
+    "cache_key": "open-farm:683547129801",
+    "brand": "Open Farm",
+    "product_name": "RawMix Open Prairie Grain-Free Cat Kibble",
+    "pet_type": "cat",
+    "image_url": "https://openfarmpet.com/cdn/shop/products/PDP-Images-DryCat-RawMix-GF-2023-Prairie-FOP.png?v=1677562179&width=1024",
+    "source_url": "https://openfarmpet.com/products/open-prairie-recipe-for-cats",
+    "expected_terms": ["open farm", "rawmix", "prairie"]
+  },
+  {
+    "id": "purina-pro-plan-kitten-chicken",
+    "cache_key": "nestle-purina-pro-plan:038100105851",
+    "brand": "Purina Pro Plan",
+    "product_name": "Purina Pro Plan Kitten Complete Essentials Shredded Blend Chicken & Rice Formula Dry Cat Food",
+    "pet_type": "cat",
+    "image_url": "https://www.purina.com/sites/default/files/products/2025-06/pro-plan-complete-essentials-shredded-blend-chicken-kitten-dry-cat-food.png",
+    "source_url": "https://www.purina.com/cats/shop/pro-plan-kitten-development-shredded-blend-chicken-rice-probiotics-dry-cat-food",
+    "expected_terms": ["purina", "pro plan", "kitten", "chicken"]
+  },
+  {
+    "id": "purina-pro-plan-advantedge-senior-dog",
+    "cache_key": "nestle-purina-pro-plan:038100106742",
+    "brand": "Purina Pro Plan",
+    "product_name": "Pro Plan AdvantEDGE Large Breed Adult 7+ Senior Support+ Shredded Blend Chicken & Rice Formula Dry Dog Food",
+    "pet_type": "dog",
+    "image_url": "https://www.purina.com/sites/default/files/products/2025-12/pro-plan-advantedge-senior-support-large-breed-dry-dog-food_1.png",
+    "source_url": "https://www.purina.com/dogs/shop/pro-plan-advantedge-senior-support-large-breed-shredded-blend-chicken-rice-dry-dog-food",
+    "expected_terms": ["pro plan", "advantedge", "senior", "chicken"]
+  },
+  {
+    "id": "royal-canin-indoor-7-cat",
+    "cache_key": "royal-canin-mars-petcare:336771:030111630322",
+    "brand": "Royal Canin",
+    "product_name": "Indoor 7+ Dry Cat Food",
+    "pet_type": "cat",
+    "image_url": "https://cdn.royalcanin-weshare-online.io/Mz85vYcBRYZmsWpcA_gL/v43/center-front-hero-image-2548-030111630315-cat-01-jpg",
+    "source_url": "https://www.royalcanin.com/us/cats/products/retail-products/indoor-7+-2548",
+    "expected_terms": ["royal canin", "indoor", "7"]
+  },
+  {
+    "id": "royal-canin-mature-consult-large-dog",
+    "cache_key": "royal-canin-mars-petcare:643606:030111496010",
+    "brand": "Royal Canin",
+    "product_name": "Canine Mature Consult Large Dog",
+    "pet_type": "dog",
+    "image_url": "https://cdn.royalcanin-weshare-online.io/7D9CvYcBRYZmsWpcuvgl/v15/center-front-hero-image-3709-030111496010-dog-01-jpg",
+    "source_url": "https://www.royalcanin.com/us/dogs/products/vet-products/mature-consult-large-dog-3709",
+    "expected_terms": ["royal canin", "mature", "consult", "large"]
+  },
+  {
+    "id": "hills-science-diet-kitten-turkey",
+    "cache_key": "hill-s-pet-nutrition:052742617404",
+    "brand": "Hill's Science Diet",
+    "product_name": "Kitten Savory Turkey Entrée",
+    "pet_type": "cat",
+    "image_url": "https://pxmshare.colgatepalmolive.com/PNG_500/dHmdCks1Avb-yNc18WhPO.png",
+    "source_url": "https://www.hillspet.com/cat-food/science-diet-kitten-turkey-giblets-canned",
+    "expected_terms": ["hill", "science diet", "kitten", "turkey"]
+  },
+  {
+    "id": "hills-science-diet-puppy-lamb",
+    "cache_key": "petsmart-retail-catalog:052742059396",
+    "brand": "Hill's Science Diet",
+    "product_name": "Hill's Science Diet Puppy Dry Dog Food - Lamb Meal & Brown Rice",
+    "pet_type": "dog",
+    "image_url": "https://s7d2.scene7.com/is/image/PetSmart/5339736",
+    "source_url": "https://www.petsmart.com/dog/food/dry-food/hill-s-science-diet-puppy-dry-dog-food-lamb-meal-and-brown-rice-76215.html",
+    "expected_terms": ["hill", "science diet", "puppy", "lamb"]
+  },
+  {
+    "id": "acana-market-medley-indoor-cat",
+    "cache_key": "acana-champion-petfoods:acana market medley indoor cat chicken trout salmon recipe market-medley -indoor-cat-chicken -trout-and-salmon-recipe ds-aca-marketmedley-indoor-chicken-cat html",
+    "brand": "ACANA",
+    "product_name": "Market Medley, Indoor Cat Chicken, Trout & Salmon Recipe",
+    "pet_type": "cat",
+    "image_url": "https://www.acana.com/dw/image/v2/BFDW_PRD/on/demandware.static/-/Sites-acana-na-master-catalog/default/dw600e9c7a/CAT/ACA%20Market%20Medley/INDOOR%20CAT%20CHICKEN,%20TROUT%20&%20SALMON%20RECIPE/ACANA_Market_Medley_Chicken_Trout_Salmon_Recipe_with_Chicken_Cranberry_Morsels_9_lb_Bag_Front%20with%20New.png?sw=1200",
+    "source_url": "https://www.acana.com/en-US/cats/cat-food/market-medley%2C-indoor-cat-chicken%2C-trout-and-salmon-recipe/ds-aca-marketmedley-indoor-chicken-cat.html",
+    "expected_terms": ["acana", "market medley", "indoor", "chicken"]
+  },
+  {
+    "id": "orijen-small-breed-puppy-dog",
+    "cache_key": "orijen-champion-petfoods:064992727352",
+    "brand": "Orijen",
+    "product_name": "Small Breed Puppy",
+    "pet_type": "dog",
+    "image_url": "https://www.orijenpetfoods.com/dw/image/v2/BFDW_PRD/on/demandware.static/-/Sites-orijen-na-master-catalog/default/dwe463b249/ORI%20Dog%20Refresh%202023/Small%20Breed%20Puppy/ORIJEN%20Dog%20Small%20Breed%20Puppy%204lb%20Front%20USA.png?sw=1200",
+    "source_url": "https://www.orijenpetfoods.com/en-US/dogs/dog-food/small-breed-puppy/064992727352.html",
+    "expected_terms": ["orijen", "small breed", "puppy"]
+  },
+  {
+    "id": "fancy-feast-cheddar-tuna-cat",
+    "cache_key": "nestle-purina-fancy-feast:050000579280",
+    "brand": "Fancy Feast",
+    "product_name": "Purina Fancy Feast Delights With Cheddar Grilled Tuna & Cheddar Cheese Feast in Wet Cat Food Gravy Cat Food",
+    "pet_type": "cat",
+    "image_url": "https://www.purina.com/sites/default/files/products/2023-08/fancy-feast-cheddar-delights-tuna.png",
+    "source_url": "https://www.purina.com/cats/shop/fancy-feast-delights-with-cheddar-tuna-gravy-wet-cat-food",
+    "expected_terms": ["fancy feast", "cheddar", "tuna"]
+  },
+  {
+    "id": "wholehearted-plus-beef-dog",
+    "cache_key": "petco-wholehearted:3692250",
+    "brand": "WholeHearted",
+    "product_name": "WholeHearted Plus Beef & Brown Rice Recipe with Whole Grains Plus Dry Dog Food",
+    "pet_type": "dog",
+    "image_url": "https://assets.petco.com/petco/image/upload/c_pad,dpr_1.0,f_auto,q_auto,h_636,w_636/c_pad,h_636,w_636/l_bypetco-badge,fl_relative,w_0.20,g_south_east,e_sharpen/3692250-center-1",
+    "source_url": "https://www.petco.com/product/wholehearted-with-whole-grains-plus-beef-and-brown-rice-recipe-dry-dog-food",
+    "expected_terms": ["wholehearted", "plus", "beef", "brown rice"]
+  }
+]

@@ -208,7 +208,7 @@ export function createStyles(theme) {
     dataSourceText: {
       ...Typography.smallLabel,
       textTransform: "uppercase",
-      letterSpacing: 0.5,
+      letterSpacing: 0,
     },
 
     // --- Nutriscore / NOVA badges ---
@@ -286,10 +286,33 @@ export function createStyles(theme) {
       color: theme.textPrimary,
       fontSize: 22,
       fontWeight: "600",
-      letterSpacing: -0.3,
+      lineHeight: 28,
+      letterSpacing: 0,
       textAlign: "center",
       paddingHorizontal: 20,
       marginTop: 16,
+    },
+    productVariant: {
+      color: theme.textSecondary,
+      fontSize: 14,
+      fontWeight: "500",
+      lineHeight: 20,
+      textAlign: "center",
+      paddingHorizontal: 24,
+      marginTop: 6,
+    },
+    productImageHero: {
+      alignItems: "center",
+      justifyContent: "center",
+      marginTop: Spacing.sm,
+      marginBottom: Spacing.sm,
+      minHeight: 132,
+    },
+    productImage: {
+      width: 132,
+      height: 132,
+      borderRadius: 14,
+      backgroundColor: theme.fill,
     },
 
     // --- Quick Stats 2x2 Grid ---
@@ -379,68 +402,6 @@ export function createStyles(theme) {
       flex: 1,
     },
 
-    // --- Customer Reviews (card with accent border) ---
-    reviewCard: {
-      backgroundColor: theme.card,
-      borderRadius: Spacing.cardRadius,
-      padding: Spacing.cardPadding,
-      marginTop: Spacing.sectionGap,
-      borderLeftWidth: 3,
-      ...Shadows.card,
-    },
-    reviewHeaderRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-    },
-    reviewTitle: {
-      ...Typography.cardTitle,
-      color: theme.textPrimary,
-    },
-    reviewRatingRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 10,
-    },
-    reviewBigScore: {
-      fontSize: 28,
-      fontWeight: "800",
-      color: theme.textPrimary,
-    },
-    reviewCountText: {
-      ...Typography.caption,
-      color: theme.textTertiary,
-      marginTop: 4,
-    },
-    reviewSummary: {
-      fontSize: 15,
-      fontWeight: "400",
-      color: theme.textSecondary,
-      lineHeight: 22,
-      marginTop: Spacing.elementGap,
-    },
-    reviewTagSection: {
-      marginTop: Spacing.cardPadding,
-    },
-    reviewTagLabel: {
-      fontSize: 13,
-      fontWeight: "600",
-      marginBottom: Spacing.sm,
-    },
-    reviewTagsWrap: {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      gap: Spacing.sm,
-    },
-    reviewPill: {
-      paddingVertical: 8,
-      paddingHorizontal: 14,
-      borderRadius: 10,
-    },
-    reviewPillText: {
-      fontSize: 13,
-      fontWeight: "500",
-    },
     bulletRow: {
       flexDirection: "row",
       alignItems: "flex-start",
@@ -618,62 +579,6 @@ export function createStyles(theme) {
       flexShrink: 1,
     },
 
-    // --- Recall Card ---
-    recallCardWarning: {
-      backgroundColor: Colors.recallBackground,
-      borderRadius: Spacing.cardRadius,
-      padding: Spacing.cardPadding,
-      marginTop: Spacing.sectionGap,
-      borderLeftWidth: 3,
-      borderLeftColor: Colors.recallBorder,
-    },
-    recallCardClean: {
-      backgroundColor: Colors.lovedPillBg,
-      borderRadius: Spacing.cardRadius,
-      padding: Spacing.cardPadding,
-      marginTop: Spacing.sectionGap,
-      borderLeftWidth: 3,
-      borderLeftColor: "rgba(52, 199, 89, 0.25)",
-    },
-    recallHeaderRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 6,
-      marginBottom: 6,
-    },
-    recallLabelWarning: {
-      fontSize: 11,
-      fontWeight: "600",
-      letterSpacing: 1.5,
-      textTransform: "uppercase",
-      color: "#EF4444",
-    },
-    recallLabelClean: {
-      fontSize: 11,
-      fontWeight: "600",
-      letterSpacing: 1.5,
-      textTransform: "uppercase",
-      color: "#16A34A",
-    },
-    recallTextWarning: {
-      fontSize: 14,
-      fontWeight: "400",
-      color: "#991B1B",
-      lineHeight: 20,
-    },
-    recallTextClean: {
-      fontSize: 14,
-      fontWeight: "400",
-      color: "#166534",
-      lineHeight: 20,
-    },
-    recallSeeDetails: {
-      fontSize: 14,
-      fontWeight: "600",
-      color: theme.textPrimary,
-      marginTop: Spacing.xs,
-    },
-
     // --- Ingredients Section (flat, no card) ---
     ingredientsSection: {
       marginTop: Spacing.sectionGap,
@@ -768,7 +673,7 @@ export function createStyles(theme) {
       fontWeight: "600",
       color: Colors.textSecondary,
       textTransform: "uppercase",
-      letterSpacing: 1,
+      letterSpacing: 0,
     },
     ingChevron: {
       marginLeft: Spacing.sm,

@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { execFileSync } = require("child_process");
 
 const root = process.cwd();
 
@@ -49,8 +50,20 @@ if (migrations.length < 6) {
   missing.push("at least 6 Supabase migration files");
 }
 
+function isTracked(file) {
+  try {
+    execFileSync("git", ["ls-files", "--error-unmatch", file], {
+      cwd: root,
+      stdio: "ignore",
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 for (const forbidden of [".env", ".env.local"]) {
-  if (fs.existsSync(path.join(root, forbidden))) {
+  if (isTracked(forbidden)) {
     missing.push(`${forbidden} should not be committed`);
   }
 }

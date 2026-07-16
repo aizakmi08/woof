@@ -1,16 +1,21 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
+  push:
+    branches:
+      - main
 
 jobs:
-  quality:
-    name: Install and verify project
+  smoke:
+    name: Smoke checks
     runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
     steps:
-      - name: Checkout
+      - name: Check out repository
         uses: actions/checkout@v4
 
       - name: Set up Node
@@ -19,8 +24,113 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Check git whitespace
+        run: git diff --check
+
+      - name: Check for committed secrets
+        run: npm run check:secrets
+
+      - name: Check JavaScript syntax
+        run: npm run check:syntax
+
       - name: Install dependencies
         run: npm ci
 
-      - name: Verify repository structure
-        run: npm run verify
+      - name: Check product resolver contract
+        run: npm run check:resolver-contract
+
+      - name: Check catalog quality
+        run: npm run check:catalog
+
+      - name: Check catalog scraper contract
+        run: npm run check:catalog-scraper
+
+      - name: Check CI release alignment
+        run: npm run check:ci
+
+      - name: Check GitHub release audit
+        run: npm run check:github-release
+
+      - name: Check analytics privacy
+        run: npm run check:analytics
+
+      - name: Check App Privacy disclosure
+        run: npm run check:privacy
+
+      - name: Check accessibility labels
+        run: npm run check:accessibility
+
+      - name: Check pet-profile safety behavior
+        run: npm run check:pet-safety
+
+      - name: Check claim safety
+        run: npm run check:claims
+
+      - name: Check App Store listing
+        run: npm run check:listing
+
+      - name: Check App Store screenshots
+        run: npm run check:appstore-screenshots
+
+      - name: Check EAS versioning
+        run: npm run check:eas-versioning
+
+      - name: Check RevenueCat readiness
+        run: npm run check:revenuecat
+
+      - name: Check SQL migrations
+        run: npm run check:sql
+
+      - name: Check KPI runbook
+        run: npm run check:kpi
+
+      - name: Check deployment readiness
+        run: npm run check:deployment
+
+      - name: Check release evidence structure
+        run: npm run check:evidence
+
+      - name: Check native crash reporting gate
+        run: npm run check:crash-reporting
+
+      - name: Check Edge Functions
+        run: npm run check:edge
+
+      - name: Check Edge Function types
+        run: npm run check:edge-types
+
+      - name: Fingerprint Edge Functions
+        run: npm run edge:fingerprint
+
+      - name: Dry-run live Edge verifier
+        run: npm run edge:verify-live -- --dry-run
+
+      - name: Dry-run live Auth verifier
+        run: npm run auth:verify-live -- --dry-run
+
+      - name: Check production dependency audit threshold
+        run: npm run check:audit
+
+      - name: Check catalog completeness
+        if: ${{ env.SUPABASE_URL != '' && env.SUPABASE_SERVICE_ROLE_KEY != '' }}
+        run: npm run check:catalog-completeness
+
+      - name: Check Expo package versions
+        run: npm run check:expo-versions
+
+      - name: Check Expo config
+        run: npm run check:expo-config
+
+      - name: Check Expo bundle export
+        run: npm run check:bundle
+
+      - name: Check Expo native prebuild
+        run: npm run check:prebuild
+
+      - name: Check release metadata
+        run: npm run check:release

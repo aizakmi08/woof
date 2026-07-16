@@ -14,6 +14,7 @@ CREATE OR REPLACE FUNCTION cleanup_expired_cache()
 RETURNS INTEGER
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public
 AS $$
 DECLARE
   deleted_count INTEGER;
@@ -35,6 +36,7 @@ CREATE OR REPLACE FUNCTION cleanup_stale_rate_limits()
 RETURNS INTEGER
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public
 AS $$
 DECLARE
   deleted_count INTEGER;

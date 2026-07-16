@@ -1,0 +1,72 @@
+{
+  "configVersion": 0,
+  "apple": {
+    "version": "1.2.1",
+    "copyright": "2026 Woof",
+    "release": {
+      "automaticRelease": false
+    },
+    "info": {
+      "en-US": {
+        "description": "Woof helps dog and cat parents identify pet food from the front of the package and review source-backed product information in seconds.\n\nScan the front label or search by product name, brand, recipe, flavor, life stage, or food type. When Woof finds a verified catalog match, the result includes:\n- The exact source-backed ingredient statement\n- A clear 0-100 food score\n- Ingredient notes and flags to review\n- Protein, fat, fiber, and calorie details when published\n- Filler, additive, and preservative context\n- Product image, source, and verification details\n- Pet-profile ingredient checks\n- Scan history and shareable result cards\n\nWoof reads the product name from the package. A barcode is optional and is not required for front-label scanning. If a product is not verified yet, Woof can guide you to photograph the full ingredients panel for review instead of guessing the recipe.\n\nStart with 3 free scans. No account is needed to try Woof, and you can save your account later with Apple or Google if you want scan history across devices.\n\nWoof also includes AI-assisted guidance for common human-food questions such as whether a fruit, vegetable, meat, dairy item, or snack may be appropriate for a dog or cat.\n\nWoof Pro unlocks unlimited scans, deeper ingredient details, quality breakdowns, nutrition details, saved history, and shareable result cards.\n\nWoof is informational only and is not veterinary advice. Product formulas can change, so confirm the current package label and consult your veterinarian about allergies, medical diets, symptoms, or major diet changes.",
+        "keywords": [
+          "kibble",
+          "treats",
+          "ingredients",
+          "label",
+          "nutrition",
+          "toxic",
+          "safety",
+          "allergy",
+          "puppy",
+          "kitten",
+          "petfood",
+          "raw",
+          "wet",
+          "dry",
+          "scan"
+        ],
+        "releaseNotes": "- Faster front-label matching with on-device text recognition\n- Shorter, recoverable timeouts when an analysis provider is unavailable\n- Source-backed ingredient statements for verified catalog products\n- Smarter recipe and package-variant matching\n- Improved product images, nutrition display, accessibility, and stability",
+        "marketingUrl": "https://aizakmi08.github.io/woof/",
+        "supportUrl": "https://aizakmi08.github.io/woof/support.html",
+        "title": "Woof Pet Food Scanner",
+        "subtitle": "Dog & Cat Food Checker",
+        "privacyPolicyUrl": "https://aizakmi08.github.io/woof/privacy.html",
+        "promoText": "Scan a front label or search by name to find verified dog and cat food ingredients in seconds. Barcode pickup is optional."
+      }
+    },
+    "categories": [
+      "FOOD_AND_DRINK",
+      "HEALTH_AND_FITNESS"
+    ],
+    "advisory": {
+      "ageRatingOverride": "NONE",
+      "alcoholTobaccoOrDrugUseOrReferences": "NONE",
+      "contests": "NONE",
+      "gambling": false,
+      "gamblingSimulated": "NONE",
+      "horrorOrFearThemes": "NONE",
+      "kidsAgeBand": null,
+      "koreaAgeRatingOverride": "NONE",
+      "lootBox": false,
+      "matureOrSuggestiveThemes": "NONE",
+      "medicalOrTreatmentInformation": "NONE",
+      "profanityOrCrudeHumor": "NONE",
+      "sexualContentGraphicAndNudity": "NONE",
+      "sexualContentOrNudity": "NONE",
+      "unrestrictedWebAccess": false,
+      "violenceCartoonOrFantasy": "NONE",
+      "violenceRealistic": "NONE",
+      "violenceRealisticProlongedGraphicOrSadistic": "NONE",
+      "advertising": false,
+      "ageAssurance": false,
+      "ageRatingOverrideV2": "NONE",
+      "developerAgeRatingInfoUrl": null,
+      "gunsOrOtherWeapons": "NONE",
+      "healthOrWellnessTopics": false,
+      "messagingAndChat": false,
+      "parentalControls": false,
+      "userGeneratedContent": false
+    }
+  }
+}

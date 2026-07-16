@@ -1,22 +1,37 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { analyzeIngredients, analyzeWithData, analyzeHumanFood } from "./claude";
+import { analyzeIngredients, analyzeHumanFood } from "./claude";
 import { lookupBarcode, searchByName } from "./opff";
+import {
+  catalogProductToVerifiedProduct,
+  findVerifiedCatalogProductByBarcode,
+  findVerifiedCatalogProductForLookup,
+} from "./productCatalog";
+import {
+  buildVerifiedPetFoodAnalysis,
+  hasVerifiedIngredientData,
+  hasVerifiedProductImageData,
+} from "./verifiedScoring";
 import { getCachedAnalysis, normalizeCacheKey } from "./cache";
 import { addHistoryEntry } from "./history";
+import { consumeScan } from "./entitlements";
+import { createLogger } from "./logger";
 
 const LOCAL_RESULT_PREFIX = "@woof_result_";
 const LOCAL_RESULT_KEYS = "@woof_result_keys";
 const MAX_LOCAL_RESULTS = 30;
+const logger = createLogger("ANALYSIS");
 
 /**
  * Background analysis service — singleton.
  *
  * Manages running analyses so they survive component unmounts.
- * Components subscribe/unsubscribe to receive partial updates,
- * but the analysis itself keeps going even with zero subscribers.
+ * Components subscribe/unsubscribe to receive partial updates. Analyses keep
+ * going across unmounts unless a user action explicitly cancels them.
  */
 
-const ANALYSIS_TIMEOUT_MS = 120000;
+// Keep the client watchdog longer than the Edge Function's Claude timeout so
+// server-side scan reversal can come back before the app gives up locally.
+const ANALYSIS_TIMEOUT_MS = 60000;
 
 // Map<cacheKey, { status, result, error, dataSource, opffData, uri, mode, controller }>
 const analyses = new Map();
@@ -33,14 +48,92 @@ const recentHistorySaves = new Map(); // cacheKey → timestamp
 // Track scheduled cleanups to avoid duplicates
 const scheduledCleanups = new Set();
 
+function _errorCode(err, fallback = null) {
+  return err?.code || fallback;
+}
+
+function _errorStatus(err) {
+  return Number.isFinite(err?.status) ? err.status : null;
+}
+
 function _notify(event) {
   for (const cb of subscribers) {
     try {
       cb(event);
     } catch (err) {
-      console.log("[ANALYSIS] Subscriber error:", err.message);
+      logger.debug("[ANALYSIS] Subscriber error:", err.message);
     }
   }
+}
+
+function _createScanId(mode) {
+  return `${mode}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+async function _consumeScanForState(state, scanMode) {
+  const usage = await consumeScan({
+    scanId: state.scanId,
+    scanMode,
+  });
+  state.scanUsage = usage;
+  return usage;
+}
+
+function _syncScanUsageFromAnalysis(state, analysis) {
+  if (analysis?.__scanUsage) {
+    state.scanUsage = analysis.__scanUsage;
+  }
+}
+
+function _userFacingAnalysisError(message, mode) {
+  const text = String(message || "").trim();
+  if (mode === "ingredient_capture" && (
+    /incomplete pet-food analysis/i.test(text) ||
+    /analysis stream ended/i.test(text) ||
+    /connection ended before completion/i.test(text) ||
+    /failed to parse/i.test(text) ||
+    /invalid response format/i.test(text) ||
+    /no response from claude/i.test(text)
+  )) {
+    return "Could not find a readable ingredients list. Retake the photo with the full ingredients panel flat, close, and in focus.";
+  }
+  if (mode === "human_food" && (
+    /incomplete human-food safety/i.test(text) ||
+    /analysis stream ended/i.test(text) ||
+    /connection ended before completion/i.test(text) ||
+    /failed to parse/i.test(text) ||
+    /invalid response format/i.test(text) ||
+    /no response from claude/i.test(text)
+  )) {
+    return "Could not identify the food clearly. Retake the photo with the food or package label close, well lit, and in focus.";
+  }
+  return text || "Something went wrong.";
+}
+
+function _hasVerifiedResultProvenance(product = {}) {
+  return hasVerifiedIngredientData(product) && hasVerifiedProductImageData(product);
+}
+
+function _completeWithResult(state, cacheKey, result, dataSource, opffData) {
+  state.result = result;
+  state.dataSource = dataSource;
+  state.opffData = opffData || null;
+  state.status = "complete";
+
+  if (cacheKey && result) {
+    _saveLocalResult(cacheKey, result, state.dataSource, state.opffData);
+    _saveHistory(state, cacheKey);
+  }
+}
+
+function _completeWithCachedResult(state, cacheKey, cached, fallbackDataSource) {
+  _completeWithResult(
+    state,
+    cacheKey,
+    cached.analysis,
+    cached.dataSource || fallbackDataSource,
+    cached.opffData || null
+  );
 }
 
 function _getEntry(key) {
@@ -103,9 +196,16 @@ async function _withTimeout(analysisPromise, state, cacheKey) {
       state.controller?.abort();
       state.error = "Analysis is taking too long. Please try again.";
       state.status = "error";
-      _notify({ type: "error", cacheKey, error: state.error });
+      _notify({
+        type: "error",
+        cacheKey,
+        scanId: state.scanId,
+        error: state.error,
+        errorCode: "ANALYSIS_TIMEOUT",
+        errorStatus: null,
+      });
       _scheduleCleanup(cacheKey);
-      console.log("[ANALYSIS] Hard timeout reached for:", cacheKey);
+      logger.debug("[ANALYSIS] Hard timeout reached for:", cacheKey);
     }
     // Other errors are already handled inside _runBarcode/_runPhoto
   } finally {
@@ -140,34 +240,63 @@ export function resolveKey(key) {
 }
 
 /**
+ * Abort a running analysis when the user intentionally leaves the loading flow.
+ * The Edge Function reverses any counted free scan when the stream is cancelled
+ * before a valid result is delivered.
+ */
+export function cancelAnalysis(key, reason = "user_cancelled") {
+  if (!key) return false;
+  const { entry, resolvedKey } = _getEntry(key);
+  if (!entry || entry.status !== "running") return false;
+
+  entry.status = "cancelled";
+  entry.error = "Analysis cancelled.";
+  entry.cancelReason = reason;
+  entry.controller?.abort();
+  _notify({ type: "cancelled", cacheKey: resolvedKey, scanId: entry.scanId, reason });
+  _scheduleCleanup(resolvedKey);
+  logger.debug("[ANALYSIS] Cancelled analysis:", resolvedKey, reason);
+  return true;
+}
+
+/**
  * Start (or attach to) a background analysis.
  * Returns the cacheKey used to track it.
  *
  * If an analysis for this key is already running, returns the existing key
  * so the caller can subscribe without duplicating API calls.
+ * Completed entries are not reused for new scan attempts because that would bypass scan accounting.
  */
-export function startAnalysis({ mode, base64, barcode, uri, petType }) {
+export function startAnalysis({ mode, base64, barcode, uri, petType, catalogProduct }) {
   if (mode === "barcode" && !barcode) {
-    console.log("[ANALYSIS] startAnalysis called with barcode mode but no barcode");
+    logger.debug("[ANALYSIS] startAnalysis called with barcode mode but no barcode");
     return null;
   }
   if (mode === "photo" && !base64) {
-    console.log("[ANALYSIS] startAnalysis called with photo mode but no base64");
+    logger.debug("[ANALYSIS] startAnalysis called with photo mode but no base64");
+    return null;
+  }
+  if (mode === "ingredient_capture" && !base64) {
+    logger.debug("[ANALYSIS] startAnalysis called with ingredient_capture mode but no base64");
+    return null;
+  }
+  if (mode === "catalog" && !catalogProduct) {
+    logger.debug("[ANALYSIS] startAnalysis called with catalog mode but no product");
     return null;
   }
   if (mode === "human_food" && (!base64 || !petType)) {
-    console.log("[ANALYSIS] startAnalysis called with human_food mode but missing base64 or petType");
+    logger.debug("[ANALYSIS] startAnalysis called with human_food mode but missing base64 or petType");
     return null;
   }
 
-  let cacheKey = barcode || null;
+  let cacheKey = barcode || catalogProduct?.cacheKey || null;
   const tempId = cacheKey || `_temp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
-  // Already running/complete for this key? Reuse it.
+  // Already running for this key? Reuse it.
   if (cacheKey) {
     const { entry } = _getEntry(cacheKey);
-    if (entry && (entry.status === "running" || entry.status === "complete")) {
-      console.log("[ANALYSIS] Reusing existing analysis for key:", cacheKey);
+    if (entry && entry.status === "running") {
+      logger.debug("[ANALYSIS] Reusing existing analysis for key:", cacheKey);
       return cacheKey;
     }
   }
@@ -181,8 +310,14 @@ export function startAnalysis({ mode, base64, barcode, uri, petType }) {
     error: null,
     dataSource: "ai",
     opffData: null,
-    uri: uri || null,
+    // Catalog results should keep the verified front-pack image in history,
+    // not a temporary camera-cache file that can disappear after a restart.
+    uri: mode === "catalog"
+      ? catalogProduct?.imageUrl || uri || null
+      : uri || catalogProduct?.imageUrl || null,
     mode,
+    scanId: _createScanId(mode),
+    scanUsage: null,
     controller,
   };
 
@@ -191,6 +326,11 @@ export function startAnalysis({ mode, base64, barcode, uri, petType }) {
   if (mode === "barcode") {
     _withTimeout(
       _runBarcode({ cacheKey: tempId, barcode, signal, state }),
+      state, tempId
+    );
+  } else if (mode === "catalog") {
+    _withTimeout(
+      _runCatalog({ cacheKey: tempId, catalogProduct, signal, state }),
       state, tempId
     );
   } else if (mode === "human_food") {
@@ -210,50 +350,214 @@ export function startAnalysis({ mode, base64, barcode, uri, petType }) {
 
 // ── Barcode flow ──────────────────────────────────────────────
 
+async function _completeBarcodeWithVerifiedCatalog({
+  cacheKey,
+  barcode,
+  catalogMatch,
+  lookupProduct = null,
+  signal,
+  state,
+}) {
+  const verifiedProduct = catalogProductToVerifiedProduct({
+    ...catalogMatch,
+    barcode: catalogMatch.barcode || barcode,
+  });
+
+  if (!hasVerifiedIngredientData(verifiedProduct) || !hasVerifiedProductImageData(verifiedProduct)) return false;
+
+  await _consumeScanForState(state, "barcode");
+  if (signal.aborted) return true;
+
+  const analysis = buildVerifiedPetFoodAnalysis(verifiedProduct);
+  if (analysis.error) {
+    state.error = analysis.error;
+    state.status = "error";
+    _notify({
+      type: "error",
+      cacheKey,
+      scanId: state.scanId,
+      error: analysis.error,
+      errorCode: "ANALYSIS_RESULT_ERROR",
+      errorStatus: null,
+      scanUsage: state.scanUsage,
+    });
+    _scheduleCleanup(cacheKey);
+    return true;
+  }
+
+  state.result = analysis;
+  state.dataSource = "verified";
+  state.status = "complete";
+  state.uri = catalogMatch.imageUrl || lookupProduct?.imageUrl || state.uri;
+  state.opffData = {
+    ...verifiedProduct,
+    imageUrl: verifiedProduct.imageUrl || lookupProduct?.imageUrl || null,
+    sourceUrl: verifiedProduct.sourceUrl || lookupProduct?.sourceUrl || null,
+  };
+
+  _saveLocalResult(barcode, analysis, "verified", state.opffData);
+  _saveHistory(state, barcode);
+  _notify({ type: "complete", cacheKey, ...state, fromCache: false, catalogMatched: true });
+  _scheduleCleanup(cacheKey);
+  logger.debug("[ANALYSIS] Barcode matched verified catalog:", analysis.productName);
+  return true;
+}
+
 async function _runBarcode({ cacheKey, barcode, signal, state }) {
   try {
     // 1. Check cache
     const cached = await getCachedAnalysis(barcode);
     if (signal.aborted) return;
 
-    if (cached.hit) {
-      state.result = cached.analysis;
-      state.dataSource = cached.dataSource || "verified";
-      state.opffData = cached.opffData || null;
-      state.status = "complete";
+    if (cached.hit && _hasVerifiedResultProvenance(cached.opffData || {})) {
+      await _consumeScanForState(state, "barcode");
+      if (signal.aborted) return;
+
+      _completeWithCachedResult(state, cacheKey, cached, "verified");
       _notify({ type: "complete", cacheKey, ...state, fromCache: true });
       _scheduleCleanup(cacheKey);
       return;
+    } else if (cached.hit) {
+      logger.debug("[ANALYSIS] Ignoring barcode cache without verified ingredient/image provenance:", barcode);
     }
 
-    // 2. OPFF lookup
+    // 2. Check the verified Woof catalog by GTIN before external lookup.
+    const directCatalogMatch = await findVerifiedCatalogProductByBarcode(barcode, { signal });
+    if (signal.aborted) return;
+    if (directCatalogMatch) {
+      const completed = await _completeBarcodeWithVerifiedCatalog({
+        cacheKey,
+        barcode,
+        catalogMatch: directCatalogMatch,
+        signal,
+        state,
+      });
+      if (completed) return;
+    }
+
+    // 3. OPFF lookup for identity hints when the local barcode is not verified yet.
     const lookup = await lookupBarcode(barcode);
     if (signal.aborted) return;
 
     if (!lookup.found) {
       state.status = "not_found";
-      _notify({ type: "barcode_not_found", cacheKey });
+      _notify({ type: "barcode_not_found", cacheKey, scanId: state.scanId });
       _scheduleCleanup(cacheKey);
-      console.log("[ANALYSIS] Barcode not found in OPFF:", barcode);
+      logger.debug("[ANALYSIS] Barcode not found in OPFF or verified catalog:", barcode);
       return;
     }
 
     state.opffData = lookup.product;
 
-    // 3. Stream analysis
-    const onUpdate = (partial) => {
-      state.result = partial;
-      _notify({ type: "update", cacheKey, result: partial, opffData: state.opffData });
-    };
+    if (
+      lookup.product?.sourceKind === "catalog" &&
+      hasVerifiedIngredientData(lookup.product) &&
+      hasVerifiedProductImageData(lookup.product)
+    ) {
+      const completed = await _completeBarcodeWithVerifiedCatalog({
+        cacheKey,
+        barcode,
+        catalogMatch: lookup.product,
+        signal,
+        state,
+      });
+      if (completed) return;
+    }
 
-    const analysis = await analyzeWithData(lookup.product, undefined, { onUpdate, signal, cacheKey: barcode });
+    // Prefer the local verified catalog when a barcode lookup identifies a
+    // product we already have exact ingredients for. OPFF is useful for
+    // identity/image hints, but community data is not enough to score.
+    const catalogMatch = await findVerifiedCatalogProductForLookup(lookup.product, { signal });
     if (signal.aborted) return;
 
-    if (analysis.error) {
-      state.error = analysis.error;
+    if (catalogMatch) {
+      const completed = await _completeBarcodeWithVerifiedCatalog({
+        cacheKey,
+        barcode,
+        catalogMatch,
+        lookupProduct: lookup.product,
+        signal,
+        state,
+      });
+      if (completed) return;
+    }
+
+    state.status = "verification_required";
+    _notify({
+      type: "barcode_not_found",
+      cacheKey,
+      scanId: state.scanId,
+      reason: "verification_required",
+      productName: lookup.product?.productName || "",
+      brand: lookup.product?.brand || "",
+      barcode,
+    });
+    _scheduleCleanup(cacheKey);
+    logger.debug("[ANALYSIS] Barcode product needs verified catalog ingredients:", lookup.product?.productName || barcode);
+  } catch (err) {
+    if (err.name === "AbortError" || signal.aborted) return;
+    const errorScanUsage = err.scanUsage || null;
+    if (errorScanUsage) state.scanUsage = errorScanUsage;
+    state.error = err.message || "Something went wrong.";
+    state.status = "error";
+    _notify({
+      type: "error",
+      cacheKey,
+      scanId: state.scanId,
+      error: state.error,
+      errorCode: _errorCode(err),
+      errorStatus: _errorStatus(err),
+      scanUsage: errorScanUsage,
+    });
+    _scheduleCleanup(cacheKey);
+    logger.debug("[ANALYSIS] Barcode analysis error:", err.message);
+  }
+}
+
+// ── Catalog product flow ──────────────────────────────────────
+
+async function _runCatalog({ cacheKey, catalogProduct, signal, state }) {
+  try {
+    const verifiedProduct = catalogProductToVerifiedProduct(catalogProduct);
+    const productName = verifiedProduct.productName || catalogProduct?.productName || "";
+    const normalizedKey = cacheKey || catalogProduct?.cacheKey || normalizeCacheKey(productName);
+
+    state.opffData = verifiedProduct;
+
+    if (!hasVerifiedIngredientData(verifiedProduct) || !hasVerifiedProductImageData(verifiedProduct)) {
+      state.error = "Verified ingredients and product image are required before Woof can score this product.";
       state.status = "error";
-      _notify({ type: "error", cacheKey, error: analysis.error });
-      _scheduleCleanup(cacheKey);
+      _notify({
+        type: "error",
+        cacheKey: normalizedKey,
+        scanId: state.scanId,
+        error: state.error,
+        errorCode: "CATALOG_VERIFICATION_REQUIRED",
+        errorStatus: null,
+        scanUsage: state.scanUsage,
+      });
+      _scheduleCleanup(normalizedKey);
+      return;
+    }
+
+    await _consumeScanForState(state, "catalog");
+    if (signal.aborted) return;
+
+    const analysis = buildVerifiedPetFoodAnalysis(verifiedProduct);
+
+    if (analysis.error) {
+      state.error = _userFacingAnalysisError(analysis.error, state.mode);
+      state.status = "error";
+      _notify({
+        type: "error",
+        cacheKey: normalizedKey,
+        scanId: state.scanId,
+        error: analysis.error,
+        errorCode: "ANALYSIS_RESULT_ERROR",
+        errorStatus: null,
+        scanUsage: state.scanUsage,
+      });
+      _scheduleCleanup(normalizedKey);
       return;
     }
 
@@ -261,19 +565,28 @@ async function _runBarcode({ cacheKey, barcode, signal, state }) {
     state.dataSource = "verified";
     state.status = "complete";
 
-    // Cache write happens server-side in the Edge Function
-    _saveLocalResult(barcode, analysis, "verified", lookup.product);
-    _saveHistory(state, barcode);
-    _notify({ type: "complete", cacheKey, ...state, fromCache: false });
-    _scheduleCleanup(cacheKey);
-    console.log("[ANALYSIS] Barcode analysis complete:", analysis.productName);
+    _saveLocalResult(normalizedKey, analysis, "verified", verifiedProduct);
+    _saveHistory(state, normalizedKey);
+    _notify({ type: "complete", cacheKey: normalizedKey, ...state, fromCache: false });
+    _scheduleCleanup(normalizedKey);
+    logger.debug("[ANALYSIS] Catalog analysis complete:", analysis.productName);
   } catch (err) {
     if (err.name === "AbortError" || signal.aborted) return;
+    const errorScanUsage = err.scanUsage || state.scanUsage || null;
+    if (errorScanUsage) state.scanUsage = errorScanUsage;
     state.error = err.message || "Something went wrong.";
     state.status = "error";
-    _notify({ type: "error", cacheKey, error: state.error });
+    _notify({
+      type: "error",
+      cacheKey,
+      scanId: state.scanId,
+      error: state.error,
+      errorCode: _errorCode(err),
+      errorStatus: _errorStatus(err),
+      scanUsage: errorScanUsage,
+    });
     _scheduleCleanup(cacheKey);
-    console.log("[ANALYSIS] Barcode analysis error:", err.message);
+    logger.debug("[ANALYSIS] Catalog analysis error:", err.message);
   }
 }
 
@@ -287,13 +600,22 @@ async function _runHumanFood({ tempId, base64, petType, uri, signal, state }) {
   };
 
   try {
-    const analysis = await analyzeHumanFood(base64, petType, { onUpdate, signal });
+    const analysis = await analyzeHumanFood(base64, petType, { onUpdate, signal, scanId: state.scanId });
     if (signal.aborted) return;
+    _syncScanUsageFromAnalysis(state, analysis);
 
     if (analysis.error) {
       state.error = analysis.error;
       state.status = "error";
-      _notify({ type: "error", cacheKey: tempId, error: analysis.error });
+      _notify({
+        type: "error",
+        cacheKey: tempId,
+        scanId: state.scanId,
+        error: analysis.error,
+        errorCode: "ANALYSIS_RESULT_ERROR",
+        errorStatus: null,
+        scanUsage: state.scanUsage,
+      });
       _scheduleCleanup(tempId);
       return;
     }
@@ -303,19 +625,29 @@ async function _runHumanFood({ tempId, base64, petType, uri, signal, state }) {
     state.status = "complete";
 
     // Save locally for history playback
-    _saveLocalResult(tempId, { result: analysis, dataSource: "ai", opffData: null });
+    _saveLocalResult(tempId, analysis, "ai", null);
 
     _saveHistory(state, tempId);
-    _notify({ type: "complete", cacheKey: tempId, result: analysis, dataSource: "ai", opffData: null, fromCache: false });
+    _notify({ type: "complete", cacheKey: tempId, ...state, result: analysis, dataSource: "ai", opffData: null, fromCache: false });
     _scheduleCleanup(tempId);
-    console.log("[ANALYSIS] Human food check complete:", analysis.foodName, "| safety:", analysis.safetyLevel);
+    logger.debug("[ANALYSIS] Human food check complete:", analysis.foodName, "| safety:", analysis.safetyLevel);
   } catch (err) {
     if (err.name === "AbortError" || signal.aborted) return;
-    state.error = err.message || "Something went wrong.";
+    const errorScanUsage = err.scanUsage || null;
+    if (errorScanUsage) state.scanUsage = errorScanUsage;
+    state.error = _userFacingAnalysisError(err.message, state.mode);
     state.status = "error";
-    _notify({ type: "error", cacheKey: tempId, error: state.error });
+    _notify({
+      type: "error",
+      cacheKey: tempId,
+      scanId: state.scanId,
+      error: state.error,
+      errorCode: _errorCode(err),
+      errorStatus: _errorStatus(err),
+      scanUsage: errorScanUsage,
+    });
     _scheduleCleanup(tempId);
-    console.log("[ANALYSIS] Human food check error:", err.message);
+    logger.debug("[ANALYSIS] Human food check error:", err.message);
   }
 }
 
@@ -327,7 +659,6 @@ async function _runPhoto({ tempId, base64, uri, signal, state }) {
   let cachePromise = null;
   let opffTriggered = false;
   let cacheTriggered = false;
-  let cacheShortCircuited = false;
 
   const onUpdate = (partial) => {
     if (signal.aborted) return;
@@ -354,24 +685,16 @@ async function _runPhoto({ tempId, base64, uri, signal, state }) {
           // If old analysis errored, discard it and let this one take over
           if (existing.status === "error") {
             analyses.delete(normalizedName);
-            console.log("[ANALYSIS] Replacing errored entry for:", normalizedName);
+            logger.debug("[ANALYSIS] Replacing errored entry for:", normalizedName);
           } else if (existing.status === "complete") {
-            // Existing analysis is complete — use it immediately
-            cacheShortCircuited = true;
-            state.controller.abort();
-            keyAliases.set(tempId, normalizedName);
-            analyses.delete(tempId);
-            state.result = existing.result;
-            state.dataSource = existing.dataSource;
-            state.opffData = existing.opffData;
-            state.status = "complete";
-            _notify({ type: "complete", cacheKey: normalizedName, ...state, fromCache: true });
-            console.log("[ANALYSIS] Reusing completed analysis for:", normalizedName);
-            return;
+            // Replace completed entries for a new scan attempt so the Edge
+            // entitlement path still confirms scan usage before completion.
+            logger.debug("[ANALYSIS] Replacing completed entry for new scan:", normalizedName);
+            _rekey(tempId, normalizedName, state);
           } else {
             // Existing is still running — DON'T abort current stream, let both complete
             // The first to finish wins, the second will become a no-op
-            console.log("[ANALYSIS] Concurrent analysis detected for:", normalizedName, "— letting both complete");
+            logger.debug("[ANALYSIS] Concurrent analysis detected for:", normalizedName, "— letting both complete");
             // Still rekey so both point to the same final key
             _rekey(tempId, normalizedName, state);
             // Don't return — continue with cache check
@@ -381,27 +704,10 @@ async function _runPhoto({ tempId, base64, uri, signal, state }) {
           _rekey(tempId, normalizedName, state);
         }
 
-        // Check Supabase cache (only abort if cache is fresh and complete)
+        // Photo cache hits wait for Edge scan usage before completing. Aborting
+        // the stream here would trigger server-side scan reversal and make a
+        // successful cached result bypass the free-scan gate.
         cachePromise = getCachedAnalysis(normalizedName);
-        cachePromise.then((cached) => {
-          if (cached.hit && !signal.aborted) {
-            // Only abort if we haven't progressed too far (< 10 ingredients parsed)
-            const ingredientCount = partial.ingredients?.length || 0;
-            if (ingredientCount < 10) {
-              cacheShortCircuited = true;
-              state.result = cached.analysis;
-              state.dataSource = cached.dataSource || "ai";
-              state.opffData = cached.opffData || null;
-              state.status = "complete";
-              state.controller.abort();
-              console.log("[ANALYSIS] Cache hit early — aborting stream for:", normalizedName);
-              _notify({ type: "complete", cacheKey: normalizedName, ...state, fromCache: true });
-              _scheduleCleanup(normalizedName);
-            } else {
-              console.log("[ANALYSIS] Cache hit but stream too advanced — letting stream complete");
-            }
-          }
-        }).catch(() => {});
       }
     }
 
@@ -412,22 +718,31 @@ async function _runPhoto({ tempId, base64, uri, signal, state }) {
   try {
     let analysis;
     try {
-      analysis = await analyzeIngredients(base64, { onUpdate, signal });
+      analysis = await analyzeIngredients(base64, { onUpdate, signal, scanId: state.scanId });
     } catch (err) {
       if (err.name === "AbortError" || signal.aborted) {
-        if (cacheShortCircuited) return;
         return;
       }
+      if (err.scanUsage) state.scanUsage = err.scanUsage;
       throw err;
     }
 
     if (signal.aborted) return;
+    _syncScanUsageFromAnalysis(state, analysis);
 
     if (analysis.error) {
       const notifyKey = realCacheKey || tempId;
       state.error = analysis.error;
       state.status = "error";
-      _notify({ type: "error", cacheKey: notifyKey, error: analysis.error });
+      _notify({
+        type: "error",
+        cacheKey: notifyKey,
+        scanId: state.scanId,
+        error: analysis.error,
+        errorCode: "ANALYSIS_RESULT_ERROR",
+        errorStatus: null,
+        scanUsage: state.scanUsage,
+      });
       _scheduleCleanup(notifyKey);
       return;
     }
@@ -444,20 +759,23 @@ async function _runPhoto({ tempId, base64, uri, signal, state }) {
         if (existing && existing !== state) {
           if (existing.status === "complete") {
             // Another analysis already completed — use it
-            state.result = existing.result;
-            state.dataSource = existing.dataSource;
-            state.opffData = existing.opffData;
-            state.status = "complete";
+            _completeWithResult(
+              state,
+              fullNormalized,
+              existing.result,
+              existing.dataSource || "ai",
+              existing.opffData
+            );
             keyAliases.set(tempId, fullNormalized);
             if (oldKey !== tempId) keyAliases.set(oldKey, fullNormalized);
             analyses.delete(oldKey);
             analyses.delete(tempId);
-            console.log("[ANALYSIS] Using existing completed analysis for:", fullNormalized);
+            logger.debug("[ANALYSIS] Using existing completed analysis for:", fullNormalized);
             _notify({ type: "complete", cacheKey: fullNormalized, ...state, fromCache: true });
             return;
           } else if (existing.status === "running") {
             // Another is still running — mark this one as duplicate and bail
-            console.log("[ANALYSIS] Concurrent completion detected, discarding duplicate for:", fullNormalized);
+            logger.debug("[ANALYSIS] Concurrent completion detected, discarding duplicate for:", fullNormalized);
             keyAliases.set(tempId, fullNormalized);
             if (oldKey !== tempId) keyAliases.set(oldKey, fullNormalized);
             analyses.delete(oldKey);
@@ -484,10 +802,7 @@ async function _runPhoto({ tempId, base64, uri, signal, state }) {
       if (signal.aborted) return;
       if (cached.hit) {
         const notifyKey = realCacheKey || tempId;
-        state.result = cached.analysis;
-        state.dataSource = cached.dataSource || "ai";
-        state.opffData = cached.opffData || null;
-        state.status = "complete";
+        _completeWithCachedResult(state, notifyKey, cached, "ai");
         _notify({ type: "complete", cacheKey: notifyKey, ...state, fromCache: true });
         _scheduleCleanup(notifyKey);
         return;
@@ -539,15 +854,25 @@ async function _runPhoto({ tempId, base64, uri, signal, state }) {
     _saveHistory(state, realCacheKey);
     _notify({ type: "complete", cacheKey: notifyKey, ...state, fromCache: false });
     _scheduleCleanup(notifyKey);
-    console.log("[ANALYSIS] Photo analysis complete:", analysis.productName);
+    logger.debug("[ANALYSIS] Photo analysis complete:", analysis.productName);
   } catch (err) {
     if (err.name === "AbortError" || signal.aborted) return;
     const notifyKey = realCacheKey || tempId;
-    state.error = err.message || "Something went wrong.";
+    const errorScanUsage = err.scanUsage || null;
+    if (errorScanUsage) state.scanUsage = errorScanUsage;
+    state.error = _userFacingAnalysisError(err.message, state.mode);
     state.status = "error";
-    _notify({ type: "error", cacheKey: notifyKey, error: state.error });
+    _notify({
+      type: "error",
+      cacheKey: notifyKey,
+      scanId: state.scanId,
+      error: state.error,
+      errorCode: _errorCode(err),
+      errorStatus: _errorStatus(err),
+      scanUsage: errorScanUsage,
+    });
     _scheduleCleanup(notifyKey);
-    console.log("[ANALYSIS] Photo analysis error:", err.message);
+    logger.debug("[ANALYSIS] Photo analysis error:", err.message);
   }
 }
 
@@ -575,9 +900,9 @@ async function _saveLocalResult(cacheKey, analysis, dataSource, opffData) {
         toDelete.map((k) => AsyncStorage.removeItem(`${LOCAL_RESULT_PREFIX}${k}`))
       );
     }
-    console.log("[ANALYSIS] Saved local result for:", cacheKey);
+    logger.debug("[ANALYSIS] Saved local result for:", cacheKey);
   } catch (e) {
-    console.log("[ANALYSIS] Failed to save local result:", e.message);
+    logger.debug("[ANALYSIS] Failed to save local result:", e.message);
   }
 }
 
@@ -588,9 +913,28 @@ export async function getLocalResult(cacheKey) {
   try {
     const json = await AsyncStorage.getItem(`${LOCAL_RESULT_PREFIX}${cacheKey}`);
     if (!json) return null;
-    return JSON.parse(json);
+    const parsed = JSON.parse(json);
+    if (parsed?.dataSource === "verified" && !_hasVerifiedResultProvenance(parsed.opffData || {})) {
+      logger.debug("[ANALYSIS] Ignoring local verified result without ingredient/image provenance:", cacheKey);
+      return null;
+    }
+    return parsed;
   } catch {
     return null;
+  }
+}
+
+export async function clearLocalResults() {
+  try {
+    const keysJson = await AsyncStorage.getItem(LOCAL_RESULT_KEYS) || "[]";
+    const keys = JSON.parse(keysJson);
+    const resultKeys = Array.isArray(keys)
+      ? keys.map((key) => `${LOCAL_RESULT_PREFIX}${key}`)
+      : [];
+
+    await AsyncStorage.multiRemove([LOCAL_RESULT_KEYS, ...resultKeys]);
+  } catch (err) {
+    logger.debug("[ANALYSIS] Failed to clear local results:", err.message);
   }
 }
 
@@ -599,18 +943,18 @@ export async function getLocalResult(cacheKey) {
 function _saveHistory(state, cacheKey) {
   const name = state.result?.productName || state.result?.foodName;
   if (!name) {
-    console.log("[ANALYSIS] Skipping history save — no product/food name");
+    logger.debug("[ANALYSIS] Skipping history save — no product/food name");
     return;
   }
   if (!cacheKey) {
-    console.log("[ANALYSIS] Skipping history save — no cacheKey for:", state.result.productName);
+    logger.debug("[ANALYSIS] Skipping history save — no cacheKey for:", state.result.productName);
     return;
   }
 
   // Prevent duplicate saves within 60 seconds (handles concurrent analyses for same product)
   const lastSave = recentHistorySaves.get(cacheKey);
   if (lastSave && Date.now() - lastSave < 60000) {
-    console.log("[ANALYSIS] Skipping duplicate history save for:", cacheKey);
+    logger.debug("[ANALYSIS] Skipping duplicate history save for:", cacheKey);
     return;
   }
   recentHistorySaves.set(cacheKey, Date.now());
@@ -626,9 +970,15 @@ function _saveHistory(state, cacheKey) {
       scanMode: state.mode,
       dataSource: state.dataSource,
       photoUri: state.uri || null,
-      ...(isHumanFood && { safetyLevel: state.result.safetyLevel }),
+      productImageUrl: state.dataSource === "verified"
+        ? state.opffData?.imageUrl || state.result?.imageUrl || null
+        : null,
+      ...(isHumanFood && {
+        safetyLevel: state.result.safetyLevel,
+        resultSnapshot: state.result,
+      }),
     });
   } catch (err) {
-    console.log("[ANALYSIS] Error saving history:", err.message);
+    logger.debug("[ANALYSIS] Error saving history:", err.message);
   }
 }

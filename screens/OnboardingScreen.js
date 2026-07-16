@@ -1,12 +1,12 @@
-import { useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import {
   StyleSheet,
-  Text,
   View,
   FlatList,
   Pressable,
   useWindowDimensions,
 } from "react-native";
+import { AppText as Text, MAX_FONT_SIZE_MULTIPLIER } from "../components/AppText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Animated, {
   useSharedValue,
@@ -21,6 +21,7 @@ import { ScanLine } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useTheme, getScoreConfig, Colors, Spacing, Shadows, Typography } from "../theme";
+import { trackEvent } from "../services/analytics";
 
 const ONBOARDING_KEY = "@woof_onboarding_complete";
 
@@ -57,8 +58,7 @@ function ScoreRingIllustration({ theme }) {
             strokeDasharray={circumference}
             strokeDashoffset={fillOffset}
             strokeLinecap="round"
-            rotation={-90}
-            origin={`${size / 2}, ${size / 2}`}
+            transform={`rotate(-90 ${size / 2} ${size / 2})`}
           />
         </Svg>
         <View style={StyleSheet.absoluteFill}>
@@ -170,22 +170,28 @@ function PageDots({ count, current, theme }) {
 const PAGES = [
   {
     key: "scan",
-    title: "Scan any pet food",
-    body: "Point your camera at the ingredient label and we'll do the rest",
+    title: "Scan the front label",
+    body: "Scan first, no account required. Woof reads the product name from the front of the bag or can. No barcode required.",
+    highlights: [
+      "Product name",
+      "Search works too",
+      "No barcode needed",
+      "3 free scans",
+    ],
     Illustration: ScanIllustration,
     button: "Continue",
   },
   {
     key: "score",
-    title: "Get an instant health score",
-    body: "AI analyzes every ingredient and rates the food from 0 to 100",
+    title: "Get the verified breakdown",
+    body: "Pet food labels use the verified ingredient list for scores and safety notes. Human-food checks help with everyday foods too.",
     Illustration: ScoreRingIllustration,
     button: "Continue",
   },
   {
     key: "ingredients",
-    title: "Know what's in the bowl",
-    body: "See exactly which ingredients are good, neutral, or concerning for your pet",
+    title: "Help fill missing products",
+    body: "If a product is not verified yet, scan the ingredients panel for review. Save results later by adding an account after your scan.",
     Illustration: IngredientIllustration,
     button: "Get Started",
   },
@@ -215,24 +221,69 @@ export default function OnboardingScreen({ onComplete }) {
     viewAreaCoveragePercentThreshold: 50,
   }).current;
 
+  useEffect(() => {
+    trackEvent("onboarding_started");
+  }, []);
+
+  useEffect(() => {
+    const page = PAGES[currentIndex];
+    if (!page) return;
+    trackEvent("onboarding_step_viewed", {
+      step_index: currentIndex,
+      step_key: page.key,
+    });
+  }, [currentIndex]);
+
+  const completeOnboarding = useCallback(async ({ completionMethod, nextRoute = "Home" }) => {
+    const page = PAGES[currentIndex];
+    trackEvent("onboarding_completed", {
+      step_index: currentIndex,
+      step_key: page?.key,
+      completion_method: completionMethod,
+      next_route: nextRoute,
+    });
+    await AsyncStorage.setItem(ONBOARDING_KEY, "true");
+    onComplete({ nextRoute });
+  }, [currentIndex, onComplete]);
+
+  const handleScanNow = useCallback(async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const page = PAGES[currentIndex];
+    trackEvent("onboarding_scan_now_tapped", {
+      step_index: currentIndex,
+      step_key: page?.key,
+    });
+    await completeOnboarding({
+      completionMethod: "scan_now",
+      nextRoute: "Scanner",
+    });
+  }, [completeOnboarding, currentIndex]);
+
   const handleNext = useCallback(async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const page = PAGES[currentIndex];
 
     if (currentIndex < PAGES.length - 1) {
+      trackEvent("onboarding_continue_tapped", {
+        step_index: currentIndex,
+        step_key: page?.key,
+      });
       flatListRef.current?.scrollToIndex({
         index: currentIndex + 1,
         animated: true,
       });
     } else {
       // Final page — mark complete and dismiss
-      await AsyncStorage.setItem(ONBOARDING_KEY, "true");
-      onComplete();
+      await completeOnboarding({
+        completionMethod: "completed_flow",
+        nextRoute: "Home",
+      });
     }
-  }, [currentIndex, onComplete]);
+  }, [completeOnboarding, currentIndex]);
 
   const renderPage = useCallback(
     ({ item }) => {
-      const { Illustration, title, body } = item;
+      const { Illustration, title, body, highlights } = item;
       return (
         <View style={[styles.page, { width }]}>
           <View style={styles.pageContent}>
@@ -247,6 +298,30 @@ export default function OnboardingScreen({ onComplete }) {
               >
                 {body}
               </Text>
+              {Array.isArray(highlights) && highlights.length > 0 && (
+                <View style={styles.highlightsGrid}>
+                  {highlights.map((highlight) => (
+                    <View
+                      key={highlight}
+                      style={[
+                        styles.highlightPill,
+                        { backgroundColor: theme.surface },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.highlightText,
+                          { color: theme.textSecondary },
+                        ]}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                      >
+                        {highlight}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              )}
             </View>
           </View>
         </View>
@@ -255,7 +330,8 @@ export default function OnboardingScreen({ onComplete }) {
     [width, theme]
   );
 
-  const buttonText = PAGES[currentIndex]?.button || "Continue";
+  const isFirstPage = currentIndex === 0;
+  const buttonText = isFirstPage ? "Scan Front Label" : PAGES[currentIndex]?.button || "Continue";
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.bg }]}>
@@ -280,13 +356,16 @@ export default function OnboardingScreen({ onComplete }) {
       {/* Bottom: button + dots */}
       <View style={styles.bottomArea}>
         <Pressable
-          onPress={handleNext}
+          onPress={isFirstPage ? handleScanNow : handleNext}
           onPressIn={() => {
             btnScale.value = withSpring(0.97, { damping: 15, stiffness: 150 });
           }}
           onPressOut={() => {
             btnScale.value = withSpring(1, { damping: 15, stiffness: 150 });
           }}
+          accessibilityRole="button"
+          accessibilityLabel={buttonText}
+          accessibilityHint={isFirstPage ? "Starts a front label scan" : currentIndex === PAGES.length - 1 ? "Finishes onboarding" : "Shows the next onboarding screen"}
         >
           <Animated.View
             style={[
@@ -296,7 +375,11 @@ export default function OnboardingScreen({ onComplete }) {
               btnStyle,
             ]}
           >
+            {isFirstPage && (
+              <ScanLine size={18} color={theme.buttonText} strokeWidth={2} />
+            )}
             <Animated.Text
+              maxFontSizeMultiplier={MAX_FONT_SIZE_MULTIPLIER}
               key={buttonText}
               entering={FadeIn.duration(200)}
               style={[styles.ctaText, { color: theme.buttonText }]}
@@ -305,6 +388,23 @@ export default function OnboardingScreen({ onComplete }) {
             </Animated.Text>
           </Animated.View>
         </Pressable>
+
+        {isFirstPage && (
+          <Pressable
+            onPress={handleNext}
+            style={({ pressed }) => [
+              styles.secondaryButton,
+              { opacity: pressed ? 0.55 : 1 },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="How Woof works"
+            accessibilityHint="Shows the next onboarding screen"
+          >
+            <Text style={[styles.secondaryText, { color: theme.textSecondary }]}>
+              How Woof works
+            </Text>
+          </Pressable>
+        )}
 
         <PageDots count={PAGES.length} current={currentIndex} theme={theme} />
       </View>
@@ -352,12 +452,12 @@ const styles = StyleSheet.create({
   ringScore: {
     fontSize: 36,
     fontWeight: "700",
-    letterSpacing: -1,
+    letterSpacing: 0,
   },
   ringGrade: {
     fontSize: 11,
     fontWeight: "600",
-    letterSpacing: 2,
+    letterSpacing: 0,
     textTransform: "uppercase",
     marginTop: 2,
   },
@@ -403,7 +503,7 @@ const styles = StyleSheet.create({
   pageTitle: {
     fontSize: 28,
     fontWeight: "700",
-    letterSpacing: -0.3,
+    letterSpacing: 0,
     textAlign: "center",
     marginBottom: Spacing.lg,
   },
@@ -412,6 +512,26 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 22,
     maxWidth: 300,
+  },
+  highlightsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: 8,
+    maxWidth: 320,
+    marginTop: Spacing.xl,
+  },
+  highlightPill: {
+    minHeight: 30,
+    borderRadius: 15,
+    paddingHorizontal: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  highlightText: {
+    fontSize: 13,
+    fontWeight: "600",
+    letterSpacing: 0,
   },
 
   // Bottom area
@@ -423,11 +543,24 @@ const styles = StyleSheet.create({
   ctaButton: {
     height: Spacing.buttonHeight,
     borderRadius: Spacing.buttonRadius,
+    flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
+    gap: 8,
   },
   ctaText: {
     ...Typography.button,
+  },
+  secondaryButton: {
+    minHeight: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: -8,
+  },
+  secondaryText: {
+    fontSize: 15,
+    fontWeight: "600",
+    letterSpacing: 0,
   },
 
   // Dots

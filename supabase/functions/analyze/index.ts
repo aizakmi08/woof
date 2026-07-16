@@ -1,24 +1,88 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const DEFAULT_BROWSER_ORIGINS = new Set([
+  "http://localhost:19006",
+  "http://localhost:3000",
+  "http://localhost:8081",
+  "http://localhost:8082",
+  "http://127.0.0.1:19006",
+  "http://127.0.0.1:3000",
+  "http://127.0.0.1:8081",
+  "http://127.0.0.1:8082",
+]);
 
 const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers":
     "Content-Type, Authorization, apikey, x-client-info",
+  "Access-Control-Expose-Headers":
+    "X-Woof-Function-Name, X-Woof-Function-Audit-Version",
+  "Vary": "Origin",
+};
+
+const FUNCTION_NAME = "analyze";
+const FUNCTION_AUDIT_VERSION = "2026-07-16-edge-bounded-analysis-v2";
+const DEPLOYMENT_HEADERS = {
+  "X-Woof-Function-Name": FUNCTION_NAME,
+  "X-Woof-Function-Audit-Version": FUNCTION_AUDIT_VERSION,
 };
 
 // ── Constants ────────────────────────────────────────────────────────
 
-const MAX_IMAGE_B64_LENGTH = 7_000_000; // ~5 MB decoded
+// Keep this aligned with ScannerScreen's MAX_CLIENT_IMAGE_BASE64_LENGTH.
+// Lowering the Edge cap prevents older clients from forwarding oversized
+// image payloads to Claude, which directly increases Supabase egress.
+const MAX_IMAGE_B64_LENGTH = 2_400_000; // ~1.8 MB decoded
 const MAX_FIELD_LENGTH = 10_000;
-const CLAUDE_TIMEOUT_MS = 120_000;
-const STREAM_CACHE_TIMEOUT_MS = 120_000;
+// Stay well below Supabase's 150-second free-tier request ceiling. A bounded
+// failure lets scan usage reverse cleanly instead of ending as a platform 503.
+const CLAUDE_TIMEOUT_MS = 45_000;
+const STREAM_CACHE_TIMEOUT_MS = 50_000;
 
 const OPFF_ALLOWED_FIELDS = new Set([
   "productName", "brand", "petType", "ingredientsText",
   "nutriments", "nutriscoreGrade", "novaGroup", "barcode",
-  "ingredients", "imageUrl",
+  "ingredients", "imageUrl", "source", "sourceUrl", "sourceQuality",
+  "ingredientVerificationStatus", "imageVerificationStatus", "verifiedAt",
 ]);
+const VERIFIED_INGREDIENT_STATUSES = new Set([
+  "gdsn",
+  "official",
+  "manufacturer",
+  "retailer_verified",
+  "label_ocr_verified",
+]);
+
+function requiredEnv(name: string): string {
+  const value = Deno.env.get(name);
+  if (!value) {
+    throw new Error(`${name} is not configured`);
+  }
+  return value;
+}
+
+function configuredAllowedOrigins(): Set<string> {
+  const configured = Deno.env.get("WOOF_ALLOWED_ORIGINS") || "";
+  const origins = configured
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  return new Set([...DEFAULT_BROWSER_ORIGINS, ...origins]);
+}
+
+function corsHeaders(req: Request): Record<string, string> {
+  const origin = req.headers.get("Origin");
+  if (!origin) {
+    return { ...CORS_HEADERS, ...DEPLOYMENT_HEADERS, "Access-Control-Allow-Origin": "*" };
+  }
+
+  if (configuredAllowedOrigins().has(origin)) {
+    return { ...CORS_HEADERS, ...DEPLOYMENT_HEADERS, "Access-Control-Allow-Origin": origin };
+  }
+
+  return { ...CORS_HEADERS, ...DEPLOYMENT_HEADERS };
+}
 
 // ── System prompts (server-side only — never sent to client) ─────────
 
@@ -32,7 +96,8 @@ CRITICAL RULES:
 - If an ingredient label is visible, transcribe every ingredient you can read from the label.
 - If no label is visible, use your knowledge of this EXACT product. Do NOT confuse it with other products from the same brand. If unsure about specific ingredients, say so in the summary rather than guessing wrong.
 - List the COMPLETE ingredient list. Pet foods have 15-40 ingredients including vitamins, minerals, and supplements.
-- Include customer sentiment, nutritional breakdown, and safety info.
+- Include nutritional breakdown and safety info.
+- Do NOT invent customer reviews, customer ratings, recall alerts, or recall history. Only include facts supported by the visible label or provided product database data.
 
 CRITICAL OUTPUT FORMAT REQUIREMENT:
 - Return ONLY pure JSON - NO markdown code fences
@@ -47,14 +112,6 @@ Use this exact format:
   "petType": "dog" | "cat" | "unknown",
   "overallScore": 1-100,
   "summary": "2-3 sentence overall assessment",
-  "customerRating": {
-    "score": 4.2,
-    "outOf": 5,
-    "totalReviews": "approximate number like 5000+",
-    "sentiment": "short summary of what customers say",
-    "commonPraises": ["2-4 word tag", "2-4 word tag", "2-4 word tag"],
-    "commonComplaints": ["2-4 word tag", "2-4 word tag"]
-  },
   "categories": [
     { "name": "Protein Quality", "score": 1-100, "detail": "brief assessment" },
     { "name": "Ingredient Safety", "score": 1-100, "detail": "brief assessment" },
@@ -75,7 +132,6 @@ Use this exact format:
   },
   "pros": ["pro 1", "pro 2", "pro 3"],
   "cons": ["con 1", "con 2"],
-  "recallHistory": "None known" | "description of recalls",
   "ingredients": [
     { "name": "ingredient", "category": "protein|carb|fat|fiber|vitamin|mineral|preservative|other", "rating": "good|bad|neutral", "reason": "1-2 sentences explaining this quality rating", "description": "1-2 sentences explaining what this ingredient is in plain english", "alternatives": ["better alt 1", "better alt 2"] }
   ],
@@ -109,17 +165,46 @@ Bad: BHA/BHT/ethoxyquin, by-products, excessive fillers, sugar, artificial color
 Neutral: common fillers that aren't harmful but aren't remarkable (rice, barley, oats).
 
 IMPORTANT formatting rules:
-- commonPraises and commonComplaints MUST be short pill tags of 2-4 words max. Examples: "Great taste", "Affordable price", "Coat improvement", "Contains by-products", "Picky eater approved". NEVER use full sentences.
 - primaryProteinSource: use just the protein name (e.g. "Chicken", "Salmon Meal", "Deboned Chicken"). Do NOT include "By-Products" or long qualifiers.
 - lifestage: keep concise (e.g. "All Life Stages", "Adult", "Puppy", "Senior"). Do NOT write "Adult Dogs (1+ years)" — just "Adult".
 
 If not pet food: { "error": "Could not identify this as a pet food product. Try getting the brand name in the shot." }`;
+
+const LABEL_LOOKUP_PROMPT = `You identify pet food products from front packaging photos for a shopping scanner.
+
+Your job is NOT to analyze ingredients. Your job is only to read the visible brand/product/package text and create a search query for a pet food catalog.
+
+CRITICAL RULES:
+- Use only text and packaging cues visible in the image.
+- Do not invent ingredients, scores, reviews, recalls, or nutrition.
+- Prefer the exact brand and product line/flavor/recipe text if visible.
+- Extract visible product line, flavor/recipe, life stage, food form, and package size separately when present.
+- If the product is not pet food or the label is not readable, return found=false.
+- Return ONLY pure JSON with no markdown.
+
+Use this exact JSON shape:
+{
+  "found": true | false,
+  "productName": "visible product name or empty string",
+  "brand": "visible brand or empty string",
+  "productLine": "visible product line/sub-brand or empty string",
+  "flavor": "visible flavor or recipe, e.g. Chicken & Brown Rice, or empty string",
+  "lifeStage": "visible life stage, e.g. puppy, adult, senior, kitten, or empty string",
+  "foodForm": "visible form, e.g. dry, wet, pate, freeze-dried, fresh, or empty string",
+  "packageSize": "visible size/weight/count, e.g. 24 lb, 3 oz, 12 cans, or empty string",
+  "petType": "dog" | "cat" | "unknown",
+  "confidence": 0.0-1.0,
+  "searchQuery": "best short catalog search query including exact line/flavor/form/size when visible",
+  "visibleText": ["short visible words or phrases"],
+  "notes": "brief uncertainty note or empty string"
+}`;
 
 const VERIFIED_DATA_PROMPT = `You are a pet food expert. You have been given REAL, VERIFIED ingredient and nutrition data from a product database. Do NOT guess or make up any data — analyze ONLY what is provided.
 
 CRITICAL RULES:
 - NEVER inflate scores to make products seem better than they are. Accuracy over optimism.
 - If uncertain about any data point, say so in your assessment rather than guessing.
+- Do NOT invent customer reviews, customer ratings, recall alerts, or recall history. Only include facts supported by the verified product database data.
 
 Steps:
 1. Analyze each ingredient and rate it (good/bad/neutral) based on pet nutrition science.
@@ -139,14 +224,6 @@ Use this exact format:
   "petType": "dog" | "cat" | "unknown",
   "overallScore": 1-100,
   "summary": "2-3 sentence overall assessment based on verified data",
-  "customerRating": {
-    "score": 4.0,
-    "outOf": 5,
-    "totalReviews": "N/A - database rating",
-    "sentiment": "Assessment based on verified ingredient quality",
-    "commonPraises": ["2-4 word tag based on real ingredients"],
-    "commonComplaints": ["2-4 word tag based on real ingredients"]
-  },
   "categories": [
     { "name": "Protein Quality", "score": 1-100, "detail": "based on verified data" },
     { "name": "Ingredient Safety", "score": 1-100, "detail": "based on verified data" },
@@ -167,7 +244,6 @@ Use this exact format:
   },
   "pros": ["pro based on real data"],
   "cons": ["con based on real data"],
-  "recallHistory": "None known",
   "ingredients": [
     { "name": "ingredient", "category": "protein|carb|fat|fiber|vitamin|mineral|preservative|other", "rating": "good|bad|neutral", "reason": "1-2 sentences explaining this quality rating", "description": "1-2 sentences explaining what this ingredient is in plain english", "alternatives": ["better alt 1", "better alt 2"] }
   ],
@@ -198,7 +274,6 @@ Bad: BHA/BHT/ethoxyquin, by-products, excessive fillers, sugar, artificial color
 Neutral: common fillers that aren't harmful but aren't remarkable (rice, barley, oats).
 
 IMPORTANT formatting rules:
-- commonPraises and commonComplaints MUST be short pill tags of 2-4 words max. Examples: "Great taste", "Affordable price", "Coat improvement", "Contains by-products", "Picky eater approved". NEVER use full sentences.
 - primaryProteinSource: use just the protein name (e.g. "Chicken", "Salmon Meal", "Deboned Chicken"). Do NOT include "By-Products" or long qualifiers.
 - lifestage: keep concise (e.g. "All Life Stages", "Adult", "Puppy", "Senior"). Do NOT write "Adult Dogs (1+ years)" — just "Adult".`;
 
@@ -261,10 +336,11 @@ If not food: { "error": "Could not identify this as a food item. Please try agai
 function jsonResponse(
   body: Record<string, unknown>,
   status = 200,
+  headers: Record<string, string> = CORS_HEADERS,
 ): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    headers: { ...DEPLOYMENT_HEADERS, ...headers, "Content-Type": "application/json" },
   });
 }
 
@@ -306,6 +382,20 @@ function buildVerifiedDataText(opffProduct: Record<string, any>): string {
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function hasVerifiedIngredientData(product: Record<string, any>): boolean {
+  const ingredientsText = typeof product.ingredientsText === "string"
+    ? product.ingredientsText.trim()
+    : "";
+  const ingredients = Array.isArray(product.ingredients) ? product.ingredients : [];
+  const hasIngredients = ingredients.length >= 3 || ingredientsText.length >= 30;
+  if (!hasIngredients) return false;
+
+  const status = typeof product.ingredientVerificationStatus === "string"
+    ? product.ingredientVerificationStatus.toLowerCase()
+    : "";
+  return VERIFIED_INGREDIENT_STATUSES.has(status);
 }
 
 /**
@@ -360,18 +450,280 @@ function cleanAndParse(text: string): Record<string, any> | null {
 }
 
 /**
- * Validate analysis response has required fields.
+ * Validate and normalize Claude's final response before returning or caching it.
  */
-function isValidAnalysis(obj: any): boolean {
-  return (
-    obj != null &&
-    typeof obj === "object" &&
-    !obj.error &&
-    typeof obj.productName === "string" &&
-    obj.productName.length > 0 &&
-    typeof obj.overallScore === "number" &&
-    obj.overallScore >= 1 &&
-    obj.overallScore <= 100
+function isPlainObject(value: any): value is Record<string, any> {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function requiredString(value: any): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error("missing required string");
+  }
+  return value.trim();
+}
+
+function optionalString(value: any, fallback = ""): string {
+  return typeof value === "string" ? value.trim() : fallback;
+}
+
+function stringArray(value: any): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter(Boolean);
+}
+
+function numberInRange(value: any, min: number, max: number): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
+    throw new Error("number out of range");
+  }
+  return Math.round(parsed);
+}
+
+function normalizeConfidence(value: any): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(0, Math.min(1, parsed));
+}
+
+function normalizePetFoodPetType(value: any): string {
+  const normalized = typeof value === "string" ? value.toLowerCase().trim() : "";
+  if (["dog", "cat", "unknown"].includes(normalized)) return normalized;
+  throw new Error("invalid pet type");
+}
+
+function normalizeHumanFoodPetType(value: any): string {
+  const normalized = typeof value === "string" ? value.toLowerCase().trim() : "";
+  if (normalized === "dog" || normalized === "cat") return normalized;
+  throw new Error("invalid pet type");
+}
+
+function normalizeSafetyLevel(value: any): string {
+  const normalized = typeof value === "string" ? value.toLowerCase().trim() : "";
+  if (["safe", "caution", "dangerous"].includes(normalized)) return normalized;
+  throw new Error("invalid safety level");
+}
+
+function normalizeAgeSafety(value: any): string {
+  const normalized = typeof value === "string" ? value.toLowerCase().trim() : "";
+  if (["safe", "caution", "avoid"].includes(normalized)) return normalized;
+  return "caution";
+}
+
+function normalizeIngredients(value: any): Record<string, any>[] {
+  if (!Array.isArray(value)) {
+    throw new Error("missing ingredients");
+  }
+
+  const ingredients = value
+    .filter(isPlainObject)
+    .map((item) => {
+      const rating = String(item.rating || "").toLowerCase();
+      return {
+        name: optionalString(item.name),
+        category: optionalString(item.category, "other"),
+        rating: ["good", "neutral", "bad"].includes(rating) ? rating : "neutral",
+        reason: optionalString(item.reason),
+        description: optionalString(item.description),
+        alternatives: Array.isArray(item.alternatives)
+          ? stringArray(item.alternatives)
+          : null,
+      };
+    })
+    .filter((item) => item.name);
+
+  if (ingredients.length === 0) {
+    throw new Error("missing ingredients");
+  }
+
+  return ingredients;
+}
+
+function normalizeCategories(value: any): Record<string, any>[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .filter(isPlainObject)
+    .map((item) => ({
+      name: optionalString(item.name),
+      score: Number.isFinite(Number(item.score))
+        ? Math.max(1, Math.min(100, Math.round(Number(item.score))))
+        : 50,
+      detail: optionalString(item.detail),
+    }))
+    .filter((item) => item.name);
+}
+
+function normalizeNutritionAnalysis(value: any): Record<string, any> {
+  if (!isPlainObject(value)) {
+    throw new Error("missing nutrition analysis");
+  }
+
+  return {
+    proteinLevel: optionalString(value.proteinLevel),
+    proteinPercent: optionalString(value.proteinPercent),
+    fatLevel: optionalString(value.fatLevel),
+    fatPercent: optionalString(value.fatPercent),
+    fiberPercent: optionalString(value.fiberPercent),
+    primaryProteinSource: optionalString(value.primaryProteinSource),
+    grainFree: typeof value.grainFree === "boolean" ? value.grainFree : null,
+    lifestage: optionalString(value.lifestage),
+    caloriesPerCup: optionalString(value.caloriesPerCup),
+  };
+}
+
+function validatePetFoodAnalysis(obj: Record<string, any>): Record<string, any> {
+  if (!isPlainObject(obj) || obj.error) {
+    throw new Error("invalid pet-food analysis");
+  }
+
+  return {
+    ...obj,
+    productName: requiredString(obj.productName),
+    brand: optionalString(obj.brand, "Unknown"),
+    petType: normalizePetFoodPetType(obj.petType),
+    overallScore: numberInRange(obj.overallScore, 1, 100),
+    summary: requiredString(obj.summary),
+    verdict: requiredString(obj.verdict),
+    ingredients: normalizeIngredients(obj.ingredients),
+    categories: normalizeCategories(obj.categories),
+    nutritionAnalysis: normalizeNutritionAnalysis(obj.nutritionAnalysis),
+    customerRating: null,
+    recallHistory: "",
+    pros: stringArray(obj.pros),
+    cons: stringArray(obj.cons),
+  };
+}
+
+function validateHumanFoodAnalysis(obj: Record<string, any>): Record<string, any> {
+  if (!isPlainObject(obj) || obj.error) {
+    throw new Error("invalid human-food analysis");
+  }
+
+  const ageGuidance = isPlainObject(obj.ageGuidance) ? obj.ageGuidance : null;
+  if (!ageGuidance) {
+    throw new Error("missing age guidance");
+  }
+
+  return {
+    ...obj,
+    foodName: requiredString(obj.foodName),
+    petType: normalizeHumanFoodPetType(obj.petType),
+    safetyLevel: normalizeSafetyLevel(obj.safetyLevel),
+    summary: requiredString(obj.summary),
+    explanation: requiredString(obj.explanation),
+    toxicCompounds: stringArray(obj.toxicCompounds),
+    symptoms: optionalString(obj.symptoms, "N/A"),
+    portions: requiredString(obj.portions),
+    benefits: stringArray(obj.benefits),
+    alternatives: stringArray(obj.alternatives),
+    ageGuidance: {
+      puppiesOrKittens: normalizeAgeSafety(ageGuidance.puppiesOrKittens),
+      adults: normalizeAgeSafety(ageGuidance.adults),
+      seniors: normalizeAgeSafety(ageGuidance.seniors),
+      note: requiredString(ageGuidance.note),
+    },
+    preparation: requiredString(obj.preparation),
+    disclaimer: optionalString(
+      obj.disclaimer,
+      "Individual pets may have allergies. Always consult your veterinarian.",
+    ),
+  };
+}
+
+function validateLabelLookup(obj: Record<string, any>): Record<string, any> {
+  if (!isPlainObject(obj)) {
+    throw new Error("invalid label lookup");
+  }
+
+  const productName = optionalString(obj.productName);
+  const brand = optionalString(obj.brand);
+  const productLine = optionalString(obj.productLine);
+  const flavor = optionalString(obj.flavor);
+  const lifeStage = optionalString(obj.lifeStage);
+  const foodForm = optionalString(obj.foodForm);
+  const packageSize = optionalString(obj.packageSize);
+  const searchQuery = optionalString(obj.searchQuery);
+  const normalizedPetType = (() => {
+    const petType = String(obj.petType || "").toLowerCase().trim();
+    return ["dog", "cat", "unknown"].includes(petType) ? petType : "unknown";
+  })();
+  const found = obj.found !== false && Boolean(productName || searchQuery);
+
+  return {
+    found,
+    productName,
+    brand,
+    productLine,
+    flavor,
+    lifeStage,
+    foodForm,
+    packageSize,
+    petType: normalizedPetType,
+    confidence: normalizeConfidence(obj.confidence),
+    searchQuery: searchQuery || [brand, productLine, productName, flavor, lifeStage, foodForm, packageSize].filter(Boolean).join(" "),
+    visibleText: stringArray(obj.visibleText).slice(0, 12),
+    notes: optionalString(obj.notes),
+  };
+}
+
+function validateAnalysisResult(
+  mode: string,
+  obj: Record<string, any> | null,
+): Record<string, any> | null {
+  if (!obj) return null;
+
+  try {
+    if (mode === "label_lookup") {
+      return validateLabelLookup(obj);
+    }
+    if (mode === "human_food") {
+      return validateHumanFoodAnalysis(obj);
+    }
+    return validatePetFoodAnalysis(obj);
+  } catch (err) {
+    console.error("[ANALYZE] Invalid Claude response:", (err as Error).message);
+    return null;
+  }
+}
+
+function replaceClaudeTextContent(
+  data: Record<string, any>,
+  analysis: Record<string, any>,
+): Record<string, any> {
+  const content = Array.isArray(data.content) ? [...data.content] : [];
+  content[0] = {
+    ...(isPlainObject(content[0]) ? content[0] : { type: "text" }),
+    text: JSON.stringify(analysis),
+  };
+
+  return { ...data, content };
+}
+
+function streamErrorEvent(
+  error: string,
+  scanUsage: Record<string, any> | null,
+): Uint8Array {
+  const encoder = new TextEncoder();
+  return encoder.encode(
+    `data: ${JSON.stringify({
+      type: "woof_error",
+      error,
+      code: "ANALYSIS_STREAM_FAILED",
+      scanUsage,
+    })}\n\n`,
+  );
+}
+
+function streamScanUsageEvent(scanUsage: Record<string, any> | null): Uint8Array {
+  const encoder = new TextEncoder();
+  return encoder.encode(
+    `data: ${JSON.stringify({
+      type: "woof_scan_usage",
+      scanUsage,
+    })}\n\n`,
   );
 }
 
@@ -379,7 +731,7 @@ function isValidAnalysis(obj: any): boolean {
  * Write analysis result to analysis_cache. Fire-and-forget.
  */
 async function writeToCache(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   analysis: Record<string, any>,
   mode: string,
   cacheKey: string | null,
@@ -420,29 +772,40 @@ async function writeToCache(
 // ── Main handler ─────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
+  const responseHeaders = corsHeaders(req);
+  const json = (body: Record<string, unknown>, status = 200) =>
+    jsonResponse(body, status, responseHeaders);
+
   // CORS preflight
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: CORS_HEADERS });
+    return new Response(null, { headers: responseHeaders });
   }
 
   if (req.method !== "POST") {
-    return jsonResponse({ error: "Method not allowed" }, 405);
+    return json({ error: "Method not allowed" }, 405);
   }
 
   // ── 1. Auth ────────────────────────────────────────────────────────
 
   const authHeader = req.headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ")) {
-    return jsonResponse({ error: "Missing auth token" }, 401);
+    return json({ error: "Missing auth token" }, 401);
   }
 
   const token = authHeader.substring(7);
   if (!token) {
-    return jsonResponse({ error: "Invalid auth token" }, 401);
+    return json({ error: "Invalid auth token" }, 401);
   }
 
-  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  let supabaseUrl: string;
+  let supabaseServiceKey: string;
+  try {
+    supabaseUrl = requiredEnv("SUPABASE_URL");
+    supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
+  } catch (error) {
+    console.error("[ANALYZE] Server configuration error:", (error as Error).message);
+    return json({ error: "Server configuration error" }, 500);
+  }
 
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -453,7 +816,7 @@ Deno.serve(async (req) => {
 
   if (authError || !user) {
     console.error("[ANALYZE] Auth failed:", authError?.message || "No user");
-    return jsonResponse({ error: "Invalid auth token" }, 401);
+    return json({ error: "Invalid auth token" }, 401);
   }
 
   // ── 2. Rate limiting (atomic RPC) ─────────────────────────────────
@@ -467,8 +830,8 @@ Deno.serve(async (req) => {
     console.error("[ANALYZE] Rate limit check failed:", rlError.message);
     // Fail open — don't block users if the rate limit table has issues
   } else if (allowed === false) {
-    return jsonResponse(
-      { error: "Rate limit exceeded. Max 20 scans per hour." },
+    return json(
+      { error: "Rate limit exceeded. Please wait before scanning again." },
       429,
     );
   }
@@ -479,7 +842,7 @@ Deno.serve(async (req) => {
   try {
     body = await req.json();
   } catch {
-    return jsonResponse({ error: "Invalid JSON body" }, 400);
+    return json({ error: "Invalid JSON body" }, 400);
   }
 
   const {
@@ -489,11 +852,12 @@ Deno.serve(async (req) => {
     stream = true,
     cacheKey = null,
     petType = null,
+    scanId = null,
   } = body;
 
-  if (!mode || !["photo", "verified", "human_food"].includes(mode)) {
-    return jsonResponse(
-      { error: 'Invalid mode. Expected "photo", "verified", or "human_food".' },
+  if (!mode || !["photo", "verified", "human_food", "label_lookup"].includes(mode)) {
+    return json(
+      { error: 'Invalid mode. Expected "photo", "verified", "human_food", or "label_lookup".' },
       400,
     );
   }
@@ -507,15 +871,15 @@ Deno.serve(async (req) => {
     systemPrompt = PHOTO_SYSTEM_PROMPT;
 
     if (!imageBase64) {
-      return jsonResponse(
+      return json(
         { error: "imageBase64 is required for photo mode" },
         400,
       );
     }
 
-    // Validate base64 image size (max ~5MB decoded)
+    // Validate base64 image size before forwarding to Claude.
     if (typeof imageBase64 !== "string" || imageBase64.length > MAX_IMAGE_B64_LENGTH) {
-      return jsonResponse(
+      return json(
         { error: "Image too large. Please use a smaller image." },
         413,
       );
@@ -529,11 +893,36 @@ Deno.serve(async (req) => {
       type: "text",
       text: "Identify this pet food product and analyze it.",
     });
+  } else if (mode === "label_lookup") {
+    systemPrompt = LABEL_LOOKUP_PROMPT;
+
+    if (!imageBase64) {
+      return json(
+        { error: "imageBase64 is required for label_lookup mode" },
+        400,
+      );
+    }
+
+    if (typeof imageBase64 !== "string" || imageBase64.length > MAX_IMAGE_B64_LENGTH) {
+      return json(
+        { error: "Image too large. Please use a smaller image." },
+        413,
+      );
+    }
+
+    userContent.push({
+      type: "image",
+      source: { type: "base64", media_type: "image/jpeg", data: imageBase64 },
+    });
+    userContent.push({
+      type: "text",
+      text: "Read the visible pet food label and return the best catalog search query.",
+    });
   } else if (mode === "verified") {
     systemPrompt = VERIFIED_DATA_PROMPT;
 
     if (!opffProduct || typeof opffProduct !== "object") {
-      return jsonResponse(
+      return json(
         { error: "opffProduct is required for verified mode" },
         400,
       );
@@ -541,11 +930,17 @@ Deno.serve(async (req) => {
 
     // Sanitize opffProduct before use
     const safeProduct = sanitizeOpffProduct(opffProduct);
+    if (!hasVerifiedIngredientData(safeProduct)) {
+      return json(
+        { error: "Verified ingredient provenance is required for verified mode" },
+        422,
+      );
+    }
 
     if (imageBase64) {
-      // Validate image size in verified mode too
+      // Validate image size before forwarding to Claude.
       if (typeof imageBase64 !== "string" || imageBase64.length > MAX_IMAGE_B64_LENGTH) {
-        return jsonResponse(
+        return json(
           { error: "Image too large. Please use a smaller image." },
           413,
         );
@@ -563,25 +958,25 @@ Deno.serve(async (req) => {
 
     userContent.push({
       type: "text",
-      text: `Here is VERIFIED data from Open Pet Food Facts. Analyze and rate this product using ONLY this real data:\n\n${buildVerifiedDataText(safeProduct)}`,
+      text: `Here is verified product database data. Analyze and rate this product using ONLY this real data:\n\n${buildVerifiedDataText(safeProduct)}`,
     });
   } else if (mode === "human_food") {
     systemPrompt = HUMAN_FOOD_PROMPT;
 
     if (!imageBase64) {
-      return jsonResponse(
+      return json(
         { error: "imageBase64 is required for human_food mode" },
         400,
       );
     }
     if (!petType || (petType !== "dog" && petType !== "cat")) {
-      return jsonResponse(
+      return json(
         { error: 'petType ("dog" or "cat") is required for human_food mode' },
         400,
       );
     }
     if (typeof imageBase64 !== "string" || imageBase64.length > MAX_IMAGE_B64_LENGTH) {
-      return jsonResponse(
+      return json(
         { error: "Image too large. Please use a smaller image." },
         413,
       );
@@ -597,12 +992,81 @@ Deno.serve(async (req) => {
     });
   }
 
-  // ── 5. Call Claude API (with timeout) ──────────────────────────
+  // ── 5. Entitlement check (atomic free-scan consumption) ─────────
 
-  const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!anthropicKey) {
-    console.error("[ANALYZE] ANTHROPIC_API_KEY not set");
-    return jsonResponse({ error: "Server configuration error" }, 500);
+  let scanUsage: Record<string, any> | null = null;
+
+  if (mode !== "label_lookup") {
+    const entitlementScanMode = mode === "verified" ? "barcode" : mode;
+    const { data, error: scanUsageError } = await supabase.rpc(
+      "consume_scan",
+      {
+        p_user_id: user.id,
+        p_scan_id: typeof scanId === "string" ? scanId : null,
+        p_scan_mode: entitlementScanMode,
+        p_free_limit: 3,
+      },
+    );
+
+    if (scanUsageError) {
+      console.error("[ANALYZE] Scan entitlement check failed:", scanUsageError.message);
+      return json({ error: "Could not verify scan entitlement" }, 500);
+    }
+
+    scanUsage = data;
+
+    if (!scanUsage?.allowed) {
+      return json(
+        {
+          error: "Free scan limit reached. Upgrade to keep scanning.",
+          reason: scanUsage?.reason || "free_limit_reached",
+          scanUsage,
+        },
+        402,
+      );
+    }
+  }
+
+  const reverseConsumedScan = async (
+    reversalReason: string,
+  ): Promise<Record<string, any> | null> => {
+    if (!scanUsage?.counted) return scanUsage || null;
+
+    const consumedScanId =
+      typeof scanUsage.scan_id === "string"
+        ? scanUsage.scan_id
+        : typeof scanId === "string"
+          ? scanId
+          : null;
+
+    if (!consumedScanId) return scanUsage;
+
+    const { data, error } = await supabase.rpc("reverse_scan", {
+      p_user_id: user.id,
+      p_scan_id: consumedScanId,
+      p_reversal_reason: reversalReason,
+    });
+
+    if (error) {
+      console.error("[ANALYZE] Scan reversal failed:", error.message);
+      return scanUsage;
+    }
+
+    return data || scanUsage;
+  };
+
+  // ── 6. Call Claude API (with timeout) ──────────────────────────
+
+  let anthropicKey: string;
+  try {
+    anthropicKey = requiredEnv("ANTHROPIC_API_KEY");
+  } catch (error) {
+    console.error("[ANALYZE] Server configuration error:", (error as Error).message);
+    const reversedUsage = await reverseConsumedScan("server_configuration_error");
+    return json(
+      { error: "Server configuration error", scanUsage: reversedUsage },
+      500,
+    );
   }
 
   const fetchController = new AbortController();
@@ -619,7 +1083,7 @@ Deno.serve(async (req) => {
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-5-20250929",
-        max_tokens: mode === "human_food" ? 2048 : 8192,
+        max_tokens: mode === "label_lookup" ? 512 : (mode === "human_food" ? 2048 : 8192),
         stream,
         system: systemPrompt,
         messages: [{ role: "user", content: userContent }],
@@ -629,10 +1093,18 @@ Deno.serve(async (req) => {
   } catch (err) {
     clearTimeout(fetchTimeout);
     if ((err as Error).name === "AbortError") {
-      return jsonResponse({ error: "Analysis timed out. Please try again." }, 504);
+      const reversedUsage = await reverseConsumedScan("claude_timeout");
+      return json(
+        { error: "Analysis timed out. Please try again.", scanUsage: reversedUsage },
+        504,
+      );
     }
     console.error("[ANALYZE] Claude fetch error:", err);
-    return jsonResponse({ error: "Failed to reach analysis service" }, 502);
+    const reversedUsage = await reverseConsumedScan("claude_fetch_failed");
+    return json(
+      { error: "Failed to reach analysis service", scanUsage: reversedUsage },
+      502,
+    );
   } finally {
     clearTimeout(fetchTimeout);
   }
@@ -643,53 +1115,102 @@ Deno.serve(async (req) => {
       `[ANALYZE] Claude API ${claudeResponse.status}:`,
       errText.slice(0, 500),
     );
-    return jsonResponse(
-      { error: `Analysis service error (${claudeResponse.status})` },
+    const reversedUsage = await reverseConsumedScan(`claude_api_${claudeResponse.status}`);
+    return json(
+      {
+        error: `Analysis service error (${claudeResponse.status})`,
+        scanUsage: reversedUsage,
+      },
       claudeResponse.status >= 500 ? 502 : claudeResponse.status,
     );
   }
 
-  // ── 6. Return response + write to cache ────────────────────────────
+  // ── 7. Return response + write to cache ────────────────────────────
 
   if (stream) {
-    // Tee the stream: one branch goes to client, the other accumulates for caching
-    const [clientStream, cacheStream] = claudeResponse.body!.tee();
+    if (!claudeResponse.body) {
+      const reversedUsage = await reverseConsumedScan("empty_stream_body");
+      return json(
+        { error: "No analysis response returned", scanUsage: reversedUsage },
+        502,
+      );
+    }
 
-    // Background: read cacheStream, accumulate SSE text, parse, and write to cache (with timeout)
-    (async () => {
-      const reader = cacheStream.getReader();
-      const decoder = new TextDecoder();
-      let accumulated = "";
-      const cacheTimeout = setTimeout(() => {
-        reader.cancel().catch(() => {});
-      }, STREAM_CACHE_TIMEOUT_MS);
+    let streamReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+    let streamResultDelivered = false;
 
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          accumulated += decoder.decode(value, { stream: true });
-        }
-        // Final flush
-        accumulated += decoder.decode();
-        // Extract text content from SSE events
-        const text = extractTextFromSSE(accumulated);
-        if (text) {
-          const analysis = cleanAndParse(text);
-          if (isValidAnalysis(analysis)) {
-            await writeToCache(supabase, analysis!, mode, cacheKey, opffProduct);
+    const clientStream = new ReadableStream({
+      async start(controller) {
+        streamReader = claudeResponse.body!.getReader();
+        const decoder = new TextDecoder();
+        let accumulated = "";
+        const cacheTimeout = setTimeout(() => {
+          streamReader?.cancel().catch(() => {});
+        }, STREAM_CACHE_TIMEOUT_MS);
+
+        try {
+          while (true) {
+            const { done, value } = await streamReader.read();
+            if (done) break;
+            controller.enqueue(value);
+            accumulated += decoder.decode(value, { stream: true });
           }
+
+          accumulated += decoder.decode();
+          const text = extractTextFromSSE(accumulated);
+
+          if (!text) {
+            const reversedUsage = await reverseConsumedScan("empty_stream_response");
+            controller.enqueue(
+              streamErrorEvent("No analysis response returned", reversedUsage),
+            );
+            return;
+          }
+
+          const analysis = validateAnalysisResult(mode, cleanAndParse(text));
+          if (!analysis) {
+            const reversedUsage = await reverseConsumedScan("invalid_stream_response");
+            controller.enqueue(
+              streamErrorEvent(
+                "Analysis response failed validation. Please try again.",
+                reversedUsage,
+              ),
+            );
+            return;
+          }
+
+          if (mode !== "human_food" && mode !== "label_lookup") {
+            writeToCache(supabase, analysis, mode, cacheKey, opffProduct).catch(
+              (err) => console.error("[ANALYZE] Stream cache write failed:", err.message),
+            );
+          }
+
+          controller.enqueue(streamScanUsageEvent(scanUsage));
+          streamResultDelivered = true;
+        } catch (err) {
+          console.error("[ANALYZE] Stream proxy error:", (err as Error).message);
+          const reversedUsage = await reverseConsumedScan("stream_proxy_failed");
+          controller.enqueue(
+            streamErrorEvent("Analysis stream failed. Please try again.", reversedUsage),
+          );
+        } finally {
+          clearTimeout(cacheTimeout);
+          streamReader?.releaseLock();
+          streamReader = null;
+          controller.close();
         }
-      } catch (err) {
-        console.error("[ANALYZE] Stream cache error:", (err as Error).message);
-      } finally {
-        clearTimeout(cacheTimeout);
-      }
-    })();
+      },
+      async cancel() {
+        if (!streamResultDelivered) {
+          await reverseConsumedScan("client_stream_cancelled");
+        }
+        await streamReader?.cancel().catch(() => {});
+      },
+    });
 
     return new Response(clientStream, {
       headers: {
-        ...CORS_HEADERS,
+        ...responseHeaders,
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
       },
@@ -697,20 +1218,51 @@ Deno.serve(async (req) => {
   }
 
   // Non-streaming: parse response, cache, then return to client
-  const data = await claudeResponse.json();
-  const content = data.content?.[0]?.text;
-
-  if (content) {
-    const analysis = cleanAndParse(content);
-    if (isValidAnalysis(analysis)) {
-      // Fire-and-forget cache write — don't delay the response
-      writeToCache(supabase, analysis!, mode, cacheKey, opffProduct).catch(
-        (err) => console.error("[ANALYZE] Non-stream cache error:", err.message),
-      );
-    }
+  let data: Record<string, any>;
+  try {
+    data = await claudeResponse.json();
+  } catch (err) {
+    console.error("[ANALYZE] Claude JSON response parse failed:", (err as Error).message);
+    const reversedUsage = await reverseConsumedScan("invalid_claude_json");
+    return json(
+      { error: "Analysis response was invalid. Please try again.", scanUsage: reversedUsage },
+      502,
+    );
   }
 
-  return new Response(JSON.stringify(data), {
-    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+  const content = data.content?.[0]?.text;
+
+  if (!content) {
+    const reversedUsage = await reverseConsumedScan("empty_nonstream_response");
+    return json(
+      { error: "No analysis response returned", scanUsage: reversedUsage },
+      502,
+    );
+  }
+
+  const analysis = validateAnalysisResult(mode, cleanAndParse(content));
+  if (!analysis) {
+    const reversedUsage = await reverseConsumedScan("invalid_nonstream_response");
+    return json(
+      {
+        error: "Analysis response failed validation. Please try again.",
+        scanUsage: reversedUsage,
+      },
+      502,
+    );
+  }
+
+  if (mode !== "human_food" && mode !== "label_lookup") {
+    // Fire-and-forget cache write — don't delay the response
+    writeToCache(supabase, analysis, mode, cacheKey, opffProduct).catch(
+      (err) => console.error("[ANALYZE] Non-stream cache error:", err.message),
+    );
+  }
+
+  const responseBody = replaceClaudeTextContent(data, analysis);
+  responseBody.scanUsage = scanUsage;
+
+  return new Response(JSON.stringify(responseBody), {
+    headers: { ...responseHeaders, "Content-Type": "application/json" },
   });
 });
