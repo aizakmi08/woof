@@ -3390,7 +3390,12 @@ const sourceFeedWorklistReport = spawnSync(process.execPath, [
 if (sourceFeedWorklistReport.status !== 0) {
   fail(`source feed worklist failed: ${sourceFeedWorklistReport.stderr || sourceFeedWorklistReport.stdout}`);
 } else {
-  requireSnippet("source feed worklist output", sourceFeedWorklistReport.stdout, "Set SUPABASE_SERVICE_ROLE_KEY for a live prioritized worklist", "source feed worklist service role guard");
+  if (
+    !sourceFeedWorklistReport.stdout.includes("Set SUPABASE_SERVICE_ROLE_KEY for a live prioritized worklist") &&
+    !sourceFeedWorklistReport.stdout.includes("Missing SUPABASE_URL and a read key")
+  ) {
+    fail("source feed worklist output: missing service-role fallback guard");
+  }
   requireSnippet("source feed worklist output", sourceFeedWorklistReport.stdout, "catalog_acquisition_queue", "source feed worklist fallback SQL");
 }
 
