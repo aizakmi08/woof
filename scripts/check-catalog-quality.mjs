@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
 
 const failures = [];
+const tempRoot = tmpdir();
 
 function fail(message) {
   failures.push(message);
@@ -1584,7 +1586,7 @@ const petcoSnapshotBatchImport = spawnSync(process.execPath, [
   "--brand",
   "WholeHearted",
   "--output-dir",
-  "/private/tmp/woof-petco-snapshot-import-check",
+  `${tempRoot}/woof-petco-snapshot-import-check`,
 ], {
   encoding: "utf8",
 });
@@ -1608,7 +1610,7 @@ const retailerSnapshotBatchImport = spawnSync(process.execPath, [
   "--retailer",
   "petco",
   "--output-dir",
-  "/private/tmp/woof-retailer-snapshot-import-check",
+  `${tempRoot}/woof-retailer-snapshot-import-check`,
 ], {
   encoding: "utf8",
 });
@@ -1623,7 +1625,7 @@ if (retailerSnapshotBatchImport.status !== 0) {
 }
 
 const petcoTextSnapshot = JSON.parse(read("scripts/fixtures/catalog-product-petco-snapshot.json"));
-const petcoArraySnapshotPath = "/private/tmp/woof-petco-snapshot-array-fixture.json";
+const petcoArraySnapshotPath = `${tempRoot}/woof-petco-snapshot-array-fixture.json`;
 fs.writeFileSync(petcoArraySnapshotPath, `${JSON.stringify([petcoTextSnapshot, petcoTextSnapshot], null, 2)}\n`, "utf8");
 
 const petcoArraySnapshotBatchImport = spawnSync(process.execPath, [
@@ -1633,7 +1635,7 @@ const petcoArraySnapshotBatchImport = spawnSync(process.execPath, [
   "--brand",
   "WholeHearted",
   "--output-dir",
-  "/private/tmp/woof-petco-array-snapshot-import-check",
+  `${tempRoot}/woof-petco-array-snapshot-import-check`,
 ], {
   encoding: "utf8",
 });
@@ -1645,7 +1647,7 @@ if (petcoArraySnapshotBatchImport.status !== 0) {
   requireSnippet("Petco array snapshot batch import output", petcoArraySnapshotBatchImport.stdout, "\"rows\": 2", "Petco array snapshot expanded feed rows");
 }
 
-const petcoTextSnapshotPath = "/private/tmp/woof-petco-snapshot-text-fixture.txt";
+const petcoTextSnapshotPath = `${tempRoot}/woof-petco-snapshot-text-fixture.txt`;
 fs.writeFileSync(petcoTextSnapshotPath, [
   `source_url: ${petcoTextSnapshot.source_url}`,
   `product_image_url: ${petcoTextSnapshot.product_image_url}`,
@@ -1661,7 +1663,7 @@ const petcoTextSnapshotBatchImport = spawnSync(process.execPath, [
   "--brand",
   "WholeHearted",
   "--output-dir",
-  "/private/tmp/woof-petco-text-snapshot-import-check",
+  `${tempRoot}/woof-petco-text-snapshot-import-check`,
 ], {
   encoding: "utf8",
 });
@@ -3143,7 +3145,7 @@ if (brothFixtureImport.status !== 0) {
   requireSnippet("official feed broth fixture output", brothFixtureImport.stdout, "non_product_catalog_row", "broth fixture excludes explicit broth topper");
 }
 
-const pastedFixtureDir = fs.mkdtempSync("/private/tmp/woof-catalog-pasted-fixture-");
+const pastedFixtureDir = fs.mkdtempSync(`${tempRoot}/woof-catalog-pasted-fixture-`);
 const pastedFixturePath = `${pastedFixtureDir}/official-feed-pasted.csv`;
 const pastedIngredient = "Beef, Chicken, Carrots, Potatoes, Beef Bone Broth, Sunflower Oil, Spinach, Potassium Chloride, Choline Chloride, Vitamins (Vitamin E Supplement, Thiamine Mononitrate, Niacin Supplement, Vitamin A Supplement), Minerals (Zinc Proteinate, Iron Proteinate, Copper Proteinate, Manganese Proteinate), Rosemary.";
 fs.writeFileSync(pastedFixturePath, [
@@ -3277,7 +3279,7 @@ if (fixtureRpcSqlExport.status !== 0) {
   requireSnippet("official feed fixture RPC SQL output", fixtureRpcSqlExport.stderr, "SQL mode: rpc", "fixture RPC SQL mode log");
 }
 
-const fixtureSqlDir = fs.mkdtempSync("/private/tmp/woof-catalog-quality-sql-chunks-");
+const fixtureSqlDir = fs.mkdtempSync(`${tempRoot}/woof-catalog-quality-sql-chunks-`);
 const staleFixtureChunk = `${fixtureSqlDir}/9999-fixture-rpc-offset-999-rows-99.sql`;
 fs.writeFileSync(staleFixtureChunk, "-- stale chunk should be removed\n", "utf8");
 const fixtureRpcSqlDirExport = spawnSync(process.execPath, [
@@ -3328,7 +3330,7 @@ if (fixtureRpcSqlDirExport.status !== 0) {
   }
 }
 
-const fixtureHexMcpDir = fs.mkdtempSync("/private/tmp/woof-catalog-quality-hex-mcp-");
+const fixtureHexMcpDir = fs.mkdtempSync(`${tempRoot}/woof-catalog-quality-hex-mcp-`);
 const fixtureHexMcpExport = spawnSync(process.execPath, [
   officialImportPath,
   "--file",
@@ -3392,7 +3394,7 @@ if (sourceFeedWorklistReport.status !== 0) {
   requireSnippet("source feed worklist output", sourceFeedWorklistReport.stdout, "catalog_acquisition_queue", "source feed worklist fallback SQL");
 }
 
-const sourceFeedWorklistFixtureDir = fs.mkdtempSync("/private/tmp/woof-catalog-source-feed-worklist-");
+const sourceFeedWorklistFixtureDir = fs.mkdtempSync(`${tempRoot}/woof-catalog-source-feed-worklist-`);
 const sourceFeedWorklistQueuePath = `${sourceFeedWorklistFixtureDir}/queue.json`;
 const sourceFeedWorklistOutputDir = `${sourceFeedWorklistFixtureDir}/output`;
 const sourceFeedWorklistImportRoot = `${sourceFeedWorklistFixtureDir}/import-root`;
