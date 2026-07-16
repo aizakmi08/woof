@@ -166,4 +166,19 @@ assert(
   "Expo config must reject placeholder Sentry auth tokens for production builds"
 );
 
+const base64SentryTokenRun = runExpoConfig({
+  ...REQUIRED_PUBLIC_EAS_ENV,
+  SENTRY_ORG: REQUIRED_PRIVATE_EAS_ENV.SENTRY_ORG,
+  SENTRY_PROJECT: REQUIRED_PRIVATE_EAS_ENV.SENTRY_PROJECT,
+  SENTRY_AUTH_TOKEN: "sntrys_eyJpYXQiOjE3ODQyNDI4NTcuODQxMTQ=_AbC+/def1234567890==",
+  EAS_BUILD: "true",
+  EAS_BUILD_PROFILE: "production",
+  EAS_BUILD_PLATFORM: "ios",
+}, { json: false });
+
+assert(
+  base64SentryTokenRun.status === 0,
+  `Expo config must accept standard Base64 characters in Sentry organization tokens. stdout=${base64SentryTokenRun.stdout} stderr=${base64SentryTokenRun.stderr}`
+);
+
 console.log("Expo config check passed");

@@ -20,7 +20,9 @@ const REQUIRED_SENTRY_EAS_ENV = [
 ];
 
 function isValidSentryAuthToken(value) {
-  return /^sntrys_[A-Za-z0-9_-]{20,}$/.test(value || "");
+  // Organization tokens contain URL metadata encoded with standard Base64,
+  // so valid values can include +, /, and = in addition to URL-safe chars.
+  return /^sntrys_[A-Za-z0-9_+/=-]{20,}$/.test(value || "");
 }
 
 function publicEnv(name) {
