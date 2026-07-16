@@ -35,6 +35,9 @@ jobs:
       - name: Check JavaScript syntax
         run: npm run check:syntax
 
+      - name: Install dependencies
+        run: npm ci
+
       - name: Check product resolver contract
         run: npm run check:resolver-contract
 
@@ -106,9 +109,6 @@ jobs:
 
       - name: Dry-run live Auth verifier
         run: npm run auth:verify-live -- --dry-run
-
-      - name: Install dependencies
-        run: npm ci
 
       - name: Check production dependency audit threshold
         run: npm run check:audit

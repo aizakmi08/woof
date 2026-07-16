@@ -5,14 +5,10 @@ const packageJson = JSON.parse(fs.readFileSync("package.json", "utf8"));
 const workflow = fs.readFileSync(".github/workflows/ci.yml", "utf8");
 const failures = [];
 
-const postInstallCommands = new Set([
-  "npm run check:audit",
-  "npm run check:expo-versions",
-  "npm run check:expo-config",
-  "npm run check:bundle",
-  "npm run check:prebuild",
-  "npm run check:release",
-  "npm run check:catalog-completeness",
+const preInstallCommands = new Set([
+  "git diff --check",
+  "npm run check:secrets",
+  "npm run check:syntax",
 ]);
 
 function fail(message) {
@@ -83,12 +79,12 @@ if (installIndex === -1) {
     const index = workflowCommands.indexOf(command);
     if (index === -1) continue;
 
-    if (postInstallCommands.has(command) && index < installIndex) {
-      fail(`${command} must run after npm ci in CI`);
+    if (preInstallCommands.has(command) && index > installIndex) {
+      fail(`${command} must run before npm ci in CI`);
     }
 
-    if (!postInstallCommands.has(command) && index > installIndex) {
-      fail(`${command} must run before npm ci in CI`);
+    if (!preInstallCommands.has(command) && index < installIndex) {
+      fail(`${command} must run after npm ci in CI`);
     }
   }
 }
