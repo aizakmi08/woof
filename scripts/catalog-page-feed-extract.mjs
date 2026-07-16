@@ -2850,13 +2850,19 @@ function applySourceOverrides(row, sourceOverrides = {}) {
   return output;
 }
 
-async function extractProduct(html, sourceUrl, { pageData = null, sourceOverrides = {} } = {}) {
+async function extractProduct(html, sourceUrl, {
+  pageData = null,
+  sourceOverrides = {},
+  allowRemoteEnrichment = false,
+} = {}) {
   const nodes = extractJsonLd(html);
   const product = productNode(nodes) || {};
   const gatsbyNode = pageDataNode(pageData);
   const nextDataProduct = extractNextDataProduct(html);
   const freshpetData = freshpetProductData(nextDataProduct);
-  const bundleFormulas = gatsbyNode ? await bundleFormulasFromGatsbyNode(gatsbyNode, sourceUrl) : [];
+  const bundleFormulas = allowRemoteEnrichment && gatsbyNode
+    ? await bundleFormulasFromGatsbyNode(gatsbyNode, sourceUrl)
+    : [];
   const bundleIngredients = bundleIngredientText(bundleFormulas);
   const bundlePanel = bundleNutrientPanel(bundleFormulas);
   const text = visibleText(html);
@@ -2872,10 +2878,16 @@ async function extractProduct(html, sourceUrl, { pageData = null, sourceOverride
     sourceUrl
   );
   const productUrl = absoluteUrl(rawProductUrl, sourceUrl);
-  const shopifyProduct = await fetchShopifyProductData(sourceUrl, html)
-    || (productUrl && productUrl !== sourceUrl ? await fetchShopifyProductData(productUrl, html) : null);
-  const officialLabelIngredients = await officialLabelPdfIngredients(gatsbyNode, productUrl || sourceUrl);
-  const officialPagePdf = await officialPagePdfIngredients(html, productUrl || sourceUrl);
+  const shopifyProduct = allowRemoteEnrichment
+    ? await fetchShopifyProductData(sourceUrl, html)
+      || (productUrl && productUrl !== sourceUrl ? await fetchShopifyProductData(productUrl, html) : null)
+    : null;
+  const officialLabelIngredients = allowRemoteEnrichment
+    ? await officialLabelPdfIngredients(gatsbyNode, productUrl || sourceUrl)
+    : { ingredientText: "", sourceUrl: "" };
+  const officialPagePdf = allowRemoteEnrichment
+    ? await officialPagePdfIngredients(html, productUrl || sourceUrl)
+    : { ingredientText: "", sourceUrl: "" };
   const rawProductName = firstText(
     petcoEvidence.productName,
     shopifyProduct?.title,
@@ -3205,7 +3217,11 @@ async function main() {
     try {
       if (index > 0) await sleep(fetchDelayMs);
       const { html, sourceUrl, pageData, sourceOverrides } = await readSource(source);
-      const row = await extractProduct(html, sourceUrl, { pageData, sourceOverrides });
+      const row = await extractProduct(html, sourceUrl, {
+        pageData,
+        sourceOverrides,
+        allowRemoteEnrichment: /^https?:\/\//i.test(source) || hasArg("--allow-remote-enrichment"),
+      });
       const missing = missingFields(row);
       if (missing.length > 0) {
         warnings.push(`${source}: missing ${missing.join(", ")}`);

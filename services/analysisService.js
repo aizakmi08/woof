@@ -31,7 +31,7 @@ const logger = createLogger("ANALYSIS");
 
 // Keep the client watchdog longer than the Edge Function's Claude timeout so
 // server-side scan reversal can come back before the app gives up locally.
-const ANALYSIS_TIMEOUT_MS = 135000;
+const ANALYSIS_TIMEOUT_MS = 60000;
 
 // Map<cacheKey, { status, result, error, dataSource, opffData, uri, mode, controller }>
 const analyses = new Map();

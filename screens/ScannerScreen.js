@@ -47,7 +47,7 @@ const TARGET_IMAGE_BASE64_LENGTH = 1_200_000;
 // Product identity is often split between the top and bottom of a tall bag.
 // Keep enough detail for the visual resolver to read both without sending an
 // unnecessarily large camera image.
-const TARGET_LABEL_IMAGE_BASE64_LENGTH = 620_000;
+const TARGET_LABEL_IMAGE_BASE64_LENGTH = 480_000;
 const MAX_CLIENT_IMAGE_BASE64_LENGTH = 2_400_000;
 const BARCODE_PREVIEW_TIMEOUT_MS = 700;
 const IMAGE_OPTIMIZATION_STEPS = [
@@ -57,9 +57,9 @@ const IMAGE_OPTIMIZATION_STEPS = [
   { width: 640, compress: 0.52 },
 ];
 const LABEL_IMAGE_OPTIMIZATION_STEPS = [
-  { width: 900, compress: 0.66 },
-  { width: 768, compress: 0.61 },
-  { width: 640, compress: 0.56 },
+  { width: 768, compress: 0.64 },
+  { width: 680, compress: 0.59 },
+  { width: 600, compress: 0.54 },
 ];
 const logger = createLogger("SCANNER");
 

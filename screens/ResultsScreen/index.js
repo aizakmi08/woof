@@ -92,7 +92,7 @@ import {
 const logger = createLogger("RESULTS");
 // Longer than the Edge Function timeout so server-side scan reversal can sync
 // back before the UI shows a local timeout.
-const RESULT_ANALYSIS_TIMEOUT_MS = 135000;
+const RESULT_ANALYSIS_TIMEOUT_MS = 60000;
 
 function shareUrlHost(value) {
   if (!value) return null;

@@ -1403,6 +1403,19 @@ async function searchWoofCatalogForLabelOcr(ocrText, queries, limit) {
   if (boundedQueries.length === 0) return [];
 
   const canonicalOcrText = normalizeLabelOcrText(ocrText);
+  const focusedBatches = await Promise.all(
+    boundedQueries
+      .slice(0, 4)
+      .map((query) => searchWoofCatalog(query, 25))
+  );
+  const focusedCandidates = rankProductsForOcr(
+    filterProductsForOcr(focusedBatches.flat(), canonicalOcrText),
+    canonicalOcrText
+  );
+  if (focusedCandidates.length > 0) {
+    return focusedCandidates;
+  }
+
   const { data: textData, error: textError } = await supabase.rpc(
     "search_verified_products_for_label_ocr_text",
     {

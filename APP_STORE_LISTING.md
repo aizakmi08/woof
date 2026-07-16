@@ -64,7 +64,7 @@ Why: uses natural dog food and cat food search language without claiming reviews
 
 ### Promotional Text
 
-`Scan dog and cat food labels, understand ingredients, and check common human foods. Start with 3 free scans, no account needed.`
+`Scan a front label or search by name to find verified dog and cat food ingredients in seconds. Barcode pickup is optional.`
 
 Use only after TestFlight confirms guest scanning works end to end.
 
@@ -109,30 +109,27 @@ Execution:
 ## Proposed Description
 
 ```text
-Woof is a pet food scanner for dog and cat parents who want a faster way to understand food labels, ingredients, and everyday snack questions.
+Woof helps dog and cat parents identify pet food from the front of the package and review source-backed product information in seconds.
 
-Point your camera at a dog or cat food label and get an AI-assisted report with:
+Scan the front label or search by product name, brand, recipe, flavor, life stage, or food type. When Woof finds a verified catalog match, the result includes:
+- The exact source-backed ingredient statement
 - A clear 0-100 food score
 - Ingredient notes and flags to review
-- Protein, fat, fiber, and calorie details when visible
+- Protein, fat, fiber, and calorie details when published
 - Filler, additive, and preservative context
-- Dog and cat food support
-- Common human food checks for quick "can my dog eat this?" moments
+- Product image, source, and verification details
+- Pet-profile ingredient checks
 - Scan history and shareable result cards
+
+Woof reads the product name from the package. A barcode is optional and is not required for front-label scanning. If a product is not verified yet, Woof can guide you to photograph the full ingredients panel for review instead of guessing the recipe.
 
 Start with 3 free scans. No account is needed to try Woof, and you can save your account later with Apple or Google if you want scan history across devices.
 
-Why pet parents use Woof:
-- Works from photos, not only barcodes
-- Helps compare pet food while shopping
-- Highlights ingredients that may deserve a closer look
-- Makes nutrition labels easier to scan
-- Gives simple guidance for common human foods like fruit, vegetables, meat, dairy, and snacks
-- Uses Open Pet Food Facts when product data is available
+Woof also includes AI-assisted guidance for common human-food questions such as whether a fruit, vegetable, meat, dairy item, or snack may be appropriate for a dog or cat.
 
 Woof Pro unlocks unlimited scans, deeper ingredient details, quality breakdowns, nutrition details, saved history, and shareable result cards.
 
-Woof is AI-assisted and informational only. It is not veterinary advice. Always consult your veterinarian about allergies, medical diets, symptoms, or major diet changes.
+Woof is informational only and is not veterinary advice. Product formulas can change, so confirm the current package label and consult your veterinarian about allergies, medical diets, symptoms, or major diet changes.
 ```
 
 ## Short Description Variants

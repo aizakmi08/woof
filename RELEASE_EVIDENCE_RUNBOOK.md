@@ -206,7 +206,7 @@ Capture steps:
 1. Run `npm run check:eas-versioning`.
 2. Run `npx eas-cli@latest build:version:get -p ios`.
 3. Confirm the next iOS build number is greater than App Store Connect build `31`.
-4. After build submission, confirm the App Store Connect/TestFlight row shows marketing version `1.2.0` and the expected new build number.
+4. After build submission, confirm the App Store Connect/TestFlight row shows marketing version `1.2.1` and the expected new build number.
 
 Minimum proof: sanitized EAS output timestamp plus App Store Connect/TestFlight build-row note.
 

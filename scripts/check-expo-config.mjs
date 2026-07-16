@@ -13,7 +13,7 @@ const REQUIRED_PUBLIC_EAS_ENV = {
 const REQUIRED_PRIVATE_EAS_ENV = {
   SENTRY_ORG: "ci-sentry-org",
   SENTRY_PROJECT: "ci-sentry-project",
-  SENTRY_AUTH_TOKEN: "ci-sentry-auth-token",
+  SENTRY_AUTH_TOKEN: "sntrys_ci_test_token_1234567890",
 };
 
 function assert(condition, message) {
@@ -71,7 +71,7 @@ assert(
 const expoConfig = parseJsonOutput(successRun.stdout);
 assert(expoConfig.name === "woof", "Expo config name changed unexpectedly");
 assert(expoConfig.slug === "woof", "Expo config slug changed unexpectedly");
-assert(expoConfig.version === "1.2.0", "Expo config version should match the live 1.2 release line");
+assert(expoConfig.version === "1.2.1", "Expo config version should match the 1.2.1 update release line");
 assert(expoConfig.ios?.bundleIdentifier === "io.woof.app", "Expo config iOS bundle identifier changed unexpectedly");
 assert(expoConfig.android?.package === "com.app.woof", "Expo config Android package changed unexpectedly");
 
@@ -148,6 +148,22 @@ const publicSentryTokenOutput = `${publicSentryTokenRun.stdout}\n${publicSentryT
 assert(
   publicSentryTokenRun.status !== 0 && publicSentryTokenOutput.includes("SENTRY_AUTH_TOKEN"),
   "Expo config must not accept EXPO_PUBLIC_SENTRY_AUTH_TOKEN for release Sentry auth validation"
+);
+
+const placeholderSentryTokenRun = runExpoConfig({
+  ...REQUIRED_PUBLIC_EAS_ENV,
+  SENTRY_ORG: REQUIRED_PRIVATE_EAS_ENV.SENTRY_ORG,
+  SENTRY_PROJECT: REQUIRED_PRIVATE_EAS_ENV.SENTRY_PROJECT,
+  SENTRY_AUTH_TOKEN: "Sentry ready",
+  EAS_BUILD: "true",
+  EAS_BUILD_PROFILE: "production",
+}, { json: false });
+
+const placeholderSentryTokenOutput = `${placeholderSentryTokenRun.stdout}\n${placeholderSentryTokenRun.stderr}`;
+assert(
+  placeholderSentryTokenRun.status !== 0 &&
+    placeholderSentryTokenOutput.includes("Sentry organization auth token"),
+  "Expo config must reject placeholder Sentry auth tokens for production builds"
 );
 
 console.log("Expo config check passed");

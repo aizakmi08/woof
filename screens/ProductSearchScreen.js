@@ -387,6 +387,12 @@ function resolveFastLabelLookup({ visualPromise, ocrPromise, signal }) {
               }, LABEL_RECONCILIATION_GRACE_MS);
               return;
             }
+            if (outcome.path === "on_device_ocr" && hasUsableLabelResult(outcome.result)) {
+              visualFallbackTimer = setTimeout(() => {
+                finish(pickBestLabelOutcome(outcomes));
+              }, LABEL_RECONCILIATION_GRACE_MS);
+              return;
+            }
             if (outcome.path === "cloud_image" && hasUsableLabelResult(outcome.result)) {
               visualFallbackTimer = setTimeout(() => {
                 finish(pickBestLabelOutcome(outcomes));

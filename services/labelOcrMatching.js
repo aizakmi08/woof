@@ -83,23 +83,31 @@ const MEASUREMENT_TERMS = new Set([
   "oz",
 ]);
 const OCR_TOKEN_ALIASES = new Map([
+  ["cats", "cat"],
+  ["dogs", "dog"],
   ["hearted", "wholehearted"],
+  ["ib", "lb"],
+  ["kittens", "kitten"],
   ["orien", "orijen"],
+  ["0z", "oz"],
+  ["puppies", "puppy"],
   ["bravor", "brown"],
   ["recipo", "recipe"],
   ["rico", "rice"],
   ["webdar", "cheddar"],
 ]);
 const OCR_PHRASE_ALIASES = new Map([
+  ["grand chien", "large dog"],
   ["good gut", "goodgut"],
+  ["hill s", "hill"],
   ["raw mix", "rawmix"],
   ["whole hearted", "wholehearted"],
 ]);
 const IDENTITY_HINTS = new Set([
-  "adult", "ancient", "beef", "bison", "brown", "cat", "cheddar", "chicken", "cod",
+  "adult", "ancient", "beef", "bison", "brown", "cat", "cheddar", "chicken", "cod", "consult",
   "dehydrated", "dog", "duck", "fish", "free", "grain", "grains", "gravy", "indoor", "kitten",
-  "lamb", "large", "liver", "mature", "mousse", "oatmeal", "pate", "prairie", "puppy", "pumpkin", "rabbit",
-  "rice", "salmon", "senior", "sensitive", "small", "stew", "sweet", "trout", "tuna", "turkey",
+  "goodgut", "lamb", "large", "liver", "mature", "mousse", "oatmeal", "pate", "prairie", "puppy", "pumpkin", "rabbit",
+  "rawmix", "rice", "salmon", "senior", "sensitive", "small", "stew", "sweet", "trout", "tuna", "turkey",
   "urinary", "venison", "whitefish",
 ]);
 const MAX_QUERY_COUNT = 8;
@@ -107,16 +115,38 @@ const MIN_CANDIDATE_SCORE = 0.34;
 const AUTO_OPEN_SCORE = 0.68;
 const AUTO_OPEN_MARGIN = 0.09;
 const BRAND_NOISE = new Set(["and", "food", "foods", "nutrition", "pet", "pets", "the"]);
+const KNOWN_BRAND_PHRASES = [
+  "hill science diet",
+  "purina pro plan",
+  "purina one",
+  "fancy feast",
+  "royal canin",
+  "stella chewy",
+  "the honest kitchen",
+  "blue buffalo",
+  "open farm",
+  "wholehearted",
+  "wellness",
+  "instinct",
+  "orijen",
+  "acana",
+];
+const SEARCH_BRAND_ALIASES = new Map([
+  ["hill science diet", "science diet"],
+]);
+const LIFE_STAGE_TERMS = new Set([
+  "kitten", "mature", "puppy", "senior",
+]);
 const PRIMARY_RECIPE_TERMS = new Set([
   "beef", "bison", "chicken", "cod", "crab", "duck", "fish", "goat", "lamb", "liver",
   "mackerel", "pollock", "quail", "rabbit", "salmon", "sardine", "sardines", "shrimp",
   "trout", "tuna", "turkey", "venison", "whitefish",
 ]);
 const REQUIRED_OCR_VARIANT_TERMS = new Set([
-  "95", "ancient", "coat", "core", "cravings", "digestive", "digestion", "freshdried",
-  "game", "harvest", "healthy", "indoor", "large", "mixers", "peakboost",
-  "perfect", "prescription", "puppy", "rawmix", "reserve", "senior", "sensitive", "skin",
-  "small", "toy", "urinary", "weight", "wild", "wilderness",
+  "95", "ancient", "coat", "consult", "core", "cravings", "digestive", "digestion", "freshdried", "goodgut",
+  "game", "harvest", "healthy", "indoor", "kitten", "large", "mixers", "peakboost",
+  "mature", "perfect", "prairie", "prescription", "puppy", "rawmix", "reserve", "senior", "sensitive", "skin",
+  "small", "toy", "urinary", "weight", "wilderness",
 ]);
 const CANDIDATE_ONLY_VARIANT_TERMS = new Set([
   "95", "healthy", "indoor", "large", "prescription", "puppy", "senior", "small", "toy",
@@ -177,9 +207,9 @@ function inferredPetType(value) {
 
 function inferredFoodForm(value) {
   const text = normalizeText(value);
+  if (/\b(dry|kibble)\b/.test(text)) return "dry";
   if (/\b(freeze dried|freshdried|dehydrated|air dried)\b/.test(text)) return "freeze_dried";
   if (/\b(wet|canned|pate|loaf|mousse|stew|gravy|sauce|morsels|shreds|cuts|pouch|tray)\b/.test(text)) return "wet";
-  if (/\b(dry|kibble)\b/.test(text)) return "dry";
   if (/\b(fresh|refrigerated|frozen)\b/.test(text)) return "fresh";
   return "";
 }
@@ -206,6 +236,11 @@ function hasCompatibleOcrIdentity(product = {}, ocrText = "") {
 
   const ocrTokens = normalizedTokens(ocrText);
   const productTokens = normalizedTokens(productIdentityText(product));
+  const productVisibleIdentityTokens = normalizedTokens([
+    product.productName,
+    product.productLine,
+    product.flavor,
+  ].join(" "));
   const ocrRecipeTerms = [...PRIMARY_RECIPE_TERMS].filter((term) => ocrTokens.has(term));
   const productRecipeTerms = [...PRIMARY_RECIPE_TERMS].filter((term) => productTokens.has(term));
   if (
@@ -220,7 +255,10 @@ function hasCompatibleOcrIdentity(product = {}, ocrText = "") {
     if (ocrTokens.has(term) && !productTokens.has(term)) return false;
   }
   for (const term of CANDIDATE_ONLY_VARIANT_TERMS) {
-    if (productTokens.has(term) && !ocrTokens.has(term)) return false;
+    if (productVisibleIdentityTokens.has(term) && !ocrTokens.has(term)) return false;
+  }
+  if (ocrTokens.has("wild") && ocrTokens.has("game") && !productTokens.has("wild")) {
+    return false;
   }
 
   return true;
@@ -307,6 +345,33 @@ export function labelOcrSearchQueries(ocrText, ocrLines = []) {
   if (identityHints.includes("puppy") || identityHints.includes("kitten")) {
     identityHints = identityHints.filter((token) => token !== "adult");
   }
+  const normalizedOcr = normalizeText(ocrText);
+  const detectedBrand = KNOWN_BRAND_PHRASES.find((brand) => normalizedOcr.includes(brand)) || "";
+  const focusedIdentityHints = identityHints.filter((token) => (
+    !["adult", "free", "grain", "grains", "gravy", "wet", "dry"].includes(token)
+  ));
+  if (detectedBrand) {
+    const speciesHints = focusedIdentityHints.filter((token) => token === "cat" || token === "dog");
+    const variantHints = focusedIdentityHints.filter((token) => token !== "cat" && token !== "dog");
+    const prioritizedVariantHints = [
+      ...variantHints.filter((token) => LIFE_STAGE_TERMS.has(token)),
+      ...variantHints.filter((token) => PRIMARY_RECIPE_TERMS.has(token)),
+      ...variantHints.filter((token) => (
+        !LIFE_STAGE_TERMS.has(token) && !PRIMARY_RECIPE_TERMS.has(token)
+      )),
+    ];
+    const searchBrandAlias = SEARCH_BRAND_ALIASES.get(detectedBrand);
+    if (searchBrandAlias && prioritizedVariantHints.length > 0) {
+      add(`${searchBrandAlias} ${prioritizedVariantHints.slice(0, 2).join(" ")}`, 510);
+      add(`${searchBrandAlias} ${prioritizedVariantHints.slice(0, 2).join(" ")} ${speciesHints.join(" ")}`, 508);
+    }
+    add(`${detectedBrand} ${prioritizedVariantHints.join(" ")} ${speciesHints.join(" ")}`, 500);
+    if (prioritizedVariantHints.length > 0) {
+      add(`${detectedBrand} ${prioritizedVariantHints[0]}`, 498);
+      add(`${detectedBrand} ${prioritizedVariantHints[0]} ${speciesHints.join(" ")}`, 496);
+      add(`${detectedBrand} ${prioritizedVariantHints.slice(0, 2).join(" ")} ${speciesHints.join(" ")}`, 494);
+    }
+  }
 
   if (sourceLines.length > 0) {
     add(`${sourceLines.slice(0, 3).join(" ")} ${identityHints.join(" ")}`, 300);
@@ -326,6 +391,26 @@ export function labelOcrSearchQueries(ocrText, ocrLines = []) {
   if (sourceLines.length >= 2) add(sourceLines.slice(0, 3).join(" "), 170);
   for (let index = 2; index < Math.min(sourceLines.length, 8); index += 1) {
     add(`${sourceLines[0]} ${sourceLines[index]}`, 145 - index);
+  }
+
+  const focusedLines = sourceLines.filter((line) => {
+    const tokens = normalizeText(line).split(" ").filter(Boolean);
+    if (tokens.length === 0 || tokens.length > 5) return false;
+    return tokens.length <= 3 || tokens.some((token) => IDENTITY_HINTS.has(token));
+  });
+  if (focusedLines.length > 0) {
+    add(`${focusedLines.slice(0, 5).join(" ")} ${identityHints.join(" ")}`, 360);
+    add(focusedLines.slice(0, 5).join(" "), 355);
+    focusedLines.forEach((line, leftIndex) => {
+      for (
+        let rightIndex = leftIndex + 1;
+        rightIndex < Math.min(focusedLines.length, leftIndex + 4);
+        rightIndex += 1
+      ) {
+        add(`${line} ${focusedLines[rightIndex]} ${identityHints.join(" ")}`, 330 - leftIndex * 4);
+        add(`${line} ${focusedLines[rightIndex]}`, 345 - leftIndex * 4);
+      }
+    });
   }
 
   const deduped = new Map();
@@ -351,12 +436,20 @@ export function labelOcrProductMatchScore(product = {}, ocrText = "") {
   const identityCoverage = tokenCoverage(identity, normalizedOcr);
   const normalizedName = normalizeText(product.productName);
   const exactNameBonus = normalizedName.length >= 8 && normalizedOcr.includes(normalizedName) ? 0.14 : 0;
+  const packageSize = normalizeText(product.packageSize);
+  const packageSizeMatch = packageSize.match(/\b(\d+(?:\.\d+)?)\s*(lb|lbs|oz|kg|g)\b/);
+  const packageSizeBonus = packageSizeMatch && new RegExp(
+    `\\b${packageSizeMatch[1].replace(".", "\\.")}\\s*${packageSizeMatch[2]}s?\\b`
+  ).test(normalizedOcr)
+    ? 0.12
+    : 0;
 
   return Math.min(1, (
     brandCoverage * 0.26 +
     nameCoverage * 0.46 +
     identityCoverage * 0.28 +
-    exactNameBonus
+    exactNameBonus +
+    packageSizeBonus
   ));
 }
 

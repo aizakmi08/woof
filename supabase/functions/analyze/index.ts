@@ -21,7 +21,7 @@ const CORS_HEADERS = {
 };
 
 const FUNCTION_NAME = "analyze";
-const FUNCTION_AUDIT_VERSION = "2026-06-20-edge-verified-provenance-v1";
+const FUNCTION_AUDIT_VERSION = "2026-07-16-edge-bounded-analysis-v2";
 const DEPLOYMENT_HEADERS = {
   "X-Woof-Function-Name": FUNCTION_NAME,
   "X-Woof-Function-Audit-Version": FUNCTION_AUDIT_VERSION,
@@ -34,8 +34,10 @@ const DEPLOYMENT_HEADERS = {
 // image payloads to Claude, which directly increases Supabase egress.
 const MAX_IMAGE_B64_LENGTH = 2_400_000; // ~1.8 MB decoded
 const MAX_FIELD_LENGTH = 10_000;
-const CLAUDE_TIMEOUT_MS = 120_000;
-const STREAM_CACHE_TIMEOUT_MS = 120_000;
+// Stay well below Supabase's 150-second free-tier request ceiling. A bounded
+// failure lets scan usage reverse cleanly instead of ending as a platform 503.
+const CLAUDE_TIMEOUT_MS = 45_000;
+const STREAM_CACHE_TIMEOUT_MS = 50_000;
 
 const OPFF_ALLOWED_FIELDS = new Set([
   "productName", "brand", "petType", "ingredientsText",

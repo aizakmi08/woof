@@ -7,12 +7,11 @@ import { createLogger } from "./logger";
 const ANALYZE_URL = `${SUPABASE_URL}/functions/v1/analyze`;
 const LABEL_LOOKUP_URL = `${SUPABASE_URL}/functions/v1/label-lookup`;
 const logger = createLogger("CLAUDE");
-// Must exceed the Edge Function Claude timeout so counted scans can be reversed
+// Must exceed the Edge Function timeout so counted scans can be reversed
 // server-side before the client aborts the request.
-const CLIENT_ANALYSIS_TIMEOUT_MS = 135000;
-// Allows the Edge Function to make one safe model fallback when the primary
-// provider is temporarily slow or unavailable.
-const LABEL_LOOKUP_TIMEOUT_MS = 22000;
+const CLIENT_ANALYSIS_TIMEOUT_MS = 55000;
+// On-device OCR is the fast path; the cloud resolver is a short visual fallback.
+const LABEL_LOOKUP_TIMEOUT_MS = 6500;
 const AUTH_REFRESH_TIMEOUT_MS = 12000;
 
 // Detect streaming capability at module load

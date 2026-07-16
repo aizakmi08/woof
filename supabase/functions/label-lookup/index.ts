@@ -1,13 +1,13 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const FUNCTION_NAME = "label-lookup";
-const FUNCTION_AUDIT_VERSION = "2026-07-15-edge-label-species-evidence-v15";
+const FUNCTION_AUDIT_VERSION = "2026-07-16-edge-label-single-attempt-v16";
 const MAX_IMAGE_B64_LENGTH = 2_400_000;
-// Build 35 cancels label requests after ten seconds. Two short attempts are
-// more reliable than one long request, while keeping the response actionable.
-const CLAUDE_ATTEMPT_TIMEOUT_MS = 4_500;
+// On-device OCR runs in parallel and handles the common fast path. Keep the
+// visual fallback bounded so a provider slowdown cannot double scan latency.
+const CLAUDE_ATTEMPT_TIMEOUT_MS = 3_200;
 const PRIMARY_LABEL_MODEL = Deno.env.get("LABEL_LOOKUP_MODEL") || "claude-haiku-4-5-20251001";
-const LABEL_MAX_TOKENS = 240;
+const LABEL_MAX_TOKENS = 180;
 
 const DEFAULT_BROWSER_ORIGINS = new Set([
   "http://localhost:19006",
@@ -310,39 +310,34 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const models = [PRIMARY_LABEL_MODEL, PRIMARY_LABEL_MODEL];
-    let lastStatus = 502;
-    let lastError = "";
-
-    for (const model of models) {
-      try {
-        const attempt = await requestLabelLookup({
-          model,
-          anthropicKey,
-          imageBase64,
-        });
-        if (attempt.lookup) {
-          return json(attempt.lookup, 200, { "X-Woof-Label-Model": model });
-        }
-        lastStatus = attempt.response.status;
-        lastError = attempt.errorText || "";
-        console.error(
-          "[LABEL_LOOKUP] Claude API error:",
-          model,
-          lastStatus,
-          lastError.slice(0, 300),
-        );
-        if ([401, 403].includes(lastStatus)) break;
-      } catch (err) {
-        lastError = (err as Error).message;
-        console.error("[LABEL_LOOKUP] Model response failed:", model, lastError);
+    try {
+      const attempt = await requestLabelLookup({
+        model: PRIMARY_LABEL_MODEL,
+        anthropicKey,
+        imageBase64,
+      });
+      if (attempt.lookup) {
+        return json(attempt.lookup, 200, { "X-Woof-Label-Model": PRIMARY_LABEL_MODEL });
       }
+      const status = attempt.response.status;
+      console.error(
+        "[LABEL_LOOKUP] Claude API error:",
+        PRIMARY_LABEL_MODEL,
+        status,
+        (attempt.errorText || "").slice(0, 300),
+      );
+      return json(
+        { error: "Label lookup failed. Please try again." },
+        status >= 500 ? 502 : status,
+      );
+    } catch (err) {
+      console.error(
+        "[LABEL_LOOKUP] Model response failed:",
+        PRIMARY_LABEL_MODEL,
+        (err as Error).message,
+      );
+      return json({ error: "Label lookup timed out. Search by name or try again." }, 504);
     }
-
-    return json(
-      { error: "Label lookup failed. Please try again." },
-      lastStatus >= 500 ? 502 : lastStatus,
-    );
   } catch (err) {
     console.error("[LABEL_LOOKUP] Failed:", (err as Error).message);
     return json({ error: "Label lookup failed. Please try again." }, 502);

@@ -89,6 +89,17 @@ for (const envName of ["SENTRY_DSN", "SENTRY_ORG", "SENTRY_PROJECT", "SENTRY_AUT
 }
 
 for (const snippet of [
+  "isValidSentryAuthToken",
+  "^sntrys_",
+  "Sentry organization auth token",
+]) {
+  assert(
+    appConfigSource.includes(snippet),
+    `app.config.js must enforce the production Sentry token contract with ${snippet}`
+  );
+}
+
+for (const snippet of [
   "@sentry/react-native",
   "Sentry.init",
   "SENTRY_DSN",

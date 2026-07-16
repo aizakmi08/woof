@@ -165,7 +165,8 @@ if (keywords.includes(" ")) {
 
 assertIncludes(description, "AI-assisted", "Description");
 assertIncludes(description, "not veterinary advice", "Description");
-assertIncludes(description, "Open Pet Food Facts", "Description");
+assertIncludes(description, "exact source-backed ingredient statement", "Description");
+assertIncludes(description, "instead of guessing the recipe", "Description");
 assertIncludes(description, "3 free scans", "Description");
 assertIncludes(description, "No account", "Description");
 
@@ -237,7 +238,7 @@ const storeKeywords = Array.isArray(storeInfo.keywords) ? storeInfo.keywords.joi
 const storeMetadata = [
   storeInfo.title,
   storeInfo.subtitle,
-  storeInfo.promotionalText,
+  storeInfo.promoText,
   storeInfo.description,
   storeInfo.releaseNotes,
   storeKeywords,
@@ -246,8 +247,8 @@ const storeMetadata = [
 if (storeConfig.configVersion !== 0) {
   fail("store.config.json: expected configVersion 0");
 }
-if (storeApple.version !== "1.2") {
-  fail(`store.config.json: expected existing App Store version 1.2, got ${storeApple.version || "missing"}`);
+if (storeApple.version !== "1.2.1") {
+  fail(`store.config.json: expected update version 1.2.1, got ${storeApple.version || "missing"}`);
 }
 if (storeApple.release?.automaticRelease !== false) {
   fail("store.config.json: keep automatic release disabled until final approval");
@@ -255,7 +256,7 @@ if (storeApple.release?.automaticRelease !== false) {
 for (const [label, actual, expected] of [
   ["title", storeInfo.title, appName],
   ["subtitle", storeInfo.subtitle, subtitle],
-  ["promotional text", storeInfo.promotionalText, promotionalText],
+  ["promotional text", storeInfo.promoText, promotionalText],
   ["description", storeInfo.description, description],
   ["keywords", storeKeywords, keywords],
 ]) {
@@ -263,14 +264,17 @@ for (const [label, actual, expected] of [
     fail(`store.config.json: ${label} must match APP_STORE_LISTING.md`);
   }
 }
-if (!storeInfo.releaseNotes?.includes("source-backed ingredient statements")) {
+if (!storeInfo.releaseNotes?.toLowerCase().includes("source-backed ingredient statements")) {
   fail("store.config.json: release notes must describe the verified-catalog change");
 }
 if (storeApple.review) {
-  fail("store.config.json: keep App Review contact details and notes in APP_STORE_RELEASE_1.2.0.md, not the repository config");
+  fail("store.config.json: keep App Review contact details and notes in APP_STORE_RELEASE_1.2.1.md, not the repository config");
 }
 if (storeInfo.screenshots) {
   fail("store.config.json: do not replace screenshots until TestFlight evidence is captured");
+}
+if (storeInfo.promotionalText) {
+  fail("store.config.json: EAS Metadata uses promoText, not promotionalText");
 }
 assertNoBlockedClaims(storeMetadata, "store.config.json");
 

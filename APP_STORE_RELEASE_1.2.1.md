@@ -1,23 +1,26 @@
-# Woof 1.2.0 App Store Release Candidate
+# Woof 1.2.1 App Store Release Candidate
 
-Prepared: 2026-07-11.
+Prepared: 2026-07-16.
 
 Status: build-ready after the external release gates below are completed. This document does not authorize a public submission or automatic App Store release.
 
 ## Prepared In This Candidate
 
-- iOS marketing version: `1.2.0`.
-- EAS production build counter: `32`; production `autoIncrement` means the next build will receive a higher build number.
+- iOS marketing version: `1.2.1`.
+- Latest known App Store Connect/TestFlight build: `41`; production `autoIncrement` means the next build must receive build number `42` or higher.
 - `store.config.json` contains the prepared US metadata and deliberately uses manual release after review.
 - The prepared product-page copy removes unsupported third-party-source, recall, guaranteed-safety, and medical claims.
 - `outputs/app-store/screenshots/2026-06-30-premium/` contains the reviewed six-screen App Store package for iPhone and iPad; do not replace the live gallery until its states are confirmed against the TestFlight candidate.
 - `APP_PRIVACY_DISCLOSURE.md` is the source of truth for the App Store Connect privacy form.
+- App Store Connect metadata for marketing version `1.2.1` was pushed from `store.config.json` on 2026-07-16.
+- Supabase `label-lookup` version 16 and `analyze` version 73 are active. The label fixture audit passes 12/12 with a 2.07-second p95 pipeline, and analysis work is bounded before the platform timeout.
+- The refreshed strict catalog has 8,336 `verified_ready` products. The remaining acquisition queue affects 3,855 products and must not be described as complete US-market coverage.
 
 ## App Review Notes
 
 Enter the following in App Store Connect together with the existing reviewer contact details. Do not add private contact details to this repository.
 
-> Woof is AI-assisted and informational, not veterinary advice. Pet food scans analyze photos of packaging and labels and may use Open Pet Food Facts when available. Human food checks are informational and include safety caveats. Users can start with anonymous guest auth and later save their account with Apple or Google. Woof Pro unlocks unlimited scans and deeper report sections. RevenueCat products: Weekly, Monthly, and Annual.
+> Woof is informational, not veterinary advice. Pet food scans identify the product from its front label and use source-backed catalog ingredients for verified matches; Woof does not guess an unverified recipe. Human food checks are AI-assisted and include safety caveats. Users can start with anonymous guest auth and later save their account with Apple or Google. Woof Pro unlocks unlimited scans and deeper report sections. RevenueCat products: Weekly, Monthly, and Annual.
 
 ## Required External Gates
 

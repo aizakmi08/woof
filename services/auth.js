@@ -524,7 +524,7 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, s) => {
+      (event, s) => {
         if (!mounted) return;
 
         setSession(s);
@@ -538,7 +538,14 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
             trigger: event,
           });
 
-          await runSignedInSetup(s.user, () => mounted);
+          // Supabase holds an auth lock while this callback runs. Defer any
+          // database/auth work so sign-in can finish and startup cannot stall.
+          setTimeout(() => {
+            if (!mounted) return;
+            runSignedInSetup(s.user, () => mounted).catch((err) => {
+              logger.debug("[AUTH] Signed-in setup error:", err.message);
+            });
+          }, 0);
         }
 
         if (event === "SIGNED_OUT") {
@@ -548,7 +555,11 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
           setIsPro(false);
           setIsAnonymous(false);
           setScanCount(0);
-          await resetPurchases();
+          setTimeout(() => {
+            resetPurchases().catch((err) => {
+              logger.debug("[AUTH] Purchase reset error:", err.message);
+            });
+          }, 0);
         }
       }
     );

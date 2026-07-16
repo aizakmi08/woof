@@ -19,6 +19,10 @@ const REQUIRED_SENTRY_EAS_ENV = [
   "SENTRY_AUTH_TOKEN",
 ];
 
+function isValidSentryAuthToken(value) {
+  return /^sntrys_[A-Za-z0-9_-]{20,}$/.test(value || "");
+}
+
 function publicEnv(name) {
   return process.env[`EXPO_PUBLIC_${name}`] || process.env[name];
 }
@@ -40,6 +44,12 @@ function assertReleaseEnv() {
   if (missing.length > 0) {
     throw new Error(
       `Missing required EAS environment variables for ${buildProfile || "release"} build: ${missing.join(", ")}`
+    );
+  }
+
+  if (!isValidSentryAuthToken(process.env.SENTRY_AUTH_TOKEN)) {
+    throw new Error(
+      `Invalid SENTRY_AUTH_TOKEN for ${buildProfile || "release"} build. Replace the placeholder with a Sentry organization auth token.`
     );
   }
 }

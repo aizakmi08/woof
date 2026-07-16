@@ -52,7 +52,7 @@ Observed page: App Store Connect Distribution, iOS app version `1.2`, status `Re
 - Support URL points to `https://aizakmi08.github.io/woof/support.html`.
 - Marketing URL points to `https://aizakmi08.github.io/woof/`.
 - The 1.2 version record shows build `31` with build version `1.1.1`, so EAS/App Store remote versioning should be checked before the next submission.
-- Use `EAS_RELEASE_VERSIONING.md` and `npm run check:eas-versioning` before the next build; save `npx eas-cli@latest build:version:get -p ios` output and confirm the submitted build row shows marketing version `1.2.0` with a build number greater than `31`.
+- Use `EAS_RELEASE_VERSIONING.md` and `npm run check:eas-versioning` before the next build; save `npx eas-cli@latest build:version:get -p ios` output and confirm the submitted build row shows marketing version `1.2.1` with a build number greater than `41`.
 - Version release is configured for automatic release after review.
 
 Risk:

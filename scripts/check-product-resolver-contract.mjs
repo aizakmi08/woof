@@ -181,7 +181,7 @@ function checkLabelOcrMatchingCases(api) {
     "on-device OCR must combine nearby brand and product-line text"
   );
   assert(
-    queries.some((query) => /open farm goodgut beef/i.test(query)),
+    queries.some((query) => /open farm.*goodgut.*beef/i.test(query)),
     "on-device OCR must preserve recipe terms for variant retrieval"
   );
 

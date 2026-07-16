@@ -81,7 +81,9 @@ The page extractor now rejects marketing prose and page/navigation copy as ingre
 
 On June 22, the later PetSmart Authority, Simply Nourish, Bil-Jac, Meow Mix, Purina Cat Chow, 9Lives, FirstMate, KOHA, Jinx, RAWZ, Health Extension, Nature's Recipe, NutriSource, Primal, Nature's Logic, Fussie Cat, Annamaet, Go! Solutions, and Now Fresh batches were applied live through reviewed source-scoped paths. The temporary RPC wrappers used for source imports were revoked, dropped, and verified absent. Petcurean added 72 manufacturer rows: 43 Go! Solutions and 29 Now Fresh, with zero suspicious ingredient matches. A scoped live identity update filled 20 Petcurean URL-derived life-stage values, and exact searches for `go solutions salmon cod grain free dry cat food` and `now fresh turkey salmon duck kitten` now rank manufacturer rows first with verified ingredients and product images.
 
-The 2026-07-16 live catalog audit has 17,694 `product_data` rows, 13,123 dog/cat rows, 17,067 rows with product images, and 11,416 rows that meet the broad complete-food/ingredient-count gate. The strict source-backed contract has 8,297 `verified_ready` rows: 4,947 dog and 3,350 cat. The current quality states are 1,143 `needs_ingredients`, 914 `identity_only`, 7,340 `excluded`, and 8,297 `verified_ready`. `catalog_acquisition_queue` has 4,788 open/in-progress rows affecting 7,866 products. Do not claim complete US dog/cat food coverage yet; the remaining work is source-backed acquisition and review, not blind row insertion.
+The refreshed 2026-07-16 live catalog audit has 17,719 `product_data` rows, 13,148 dog/cat rows, 17,092 rows with product images, and 11,441 rows that meet the broad complete-food/ingredient-count gate. The strict source-backed contract has 8,336 `verified_ready` rows: 4,975 dog and 3,361 cat. The current quality states are 1,034 `needs_ingredients`, 909 `identity_only`, 7,440 `excluded`, and 8,336 `verified_ready`. `catalog_acquisition_queue` has 2,683 open/in-progress rows affecting 3,855 products after the reviewed 39-row production delta and bounded reconciliation. Do not claim complete US dog/cat food coverage yet; the remaining work is source-backed acquisition and review, not blind row insertion.
+
+The same production refresh deployed `label-lookup` version 16 and `analyze` version 73. The compiled Apple Vision label fixture audit passes 12/12 exact products with a 2,070 ms p95 OCR-to-ranked-result pipeline, below the 3,000 ms target. The analysis Edge path now bounds provider work at 45 seconds, bounds streamed cache work at 50 seconds, and the app applies a 60-second watchdog, preventing the previous 160-second request from running until a platform 503.
 
 The current local bulk feed dry-run validates 59 candidate feed directories and 3,802 normalized manufacturer/retailer rows after excluding multi-formula packs and allowing valid ingredient parentheticals such as `source of Omega 3 Fatty Acids`. Run it again before live bulk import because generated source outputs change as source sites and local guards change.
 
@@ -403,6 +405,7 @@ Apply migrations in numeric order. The key audit migrations are:
 299_expand_verified_catalog_search_identity.sql
 300_durable_scan_history_product_images.sql
 301_normalize_wellness_stew_identity.sql
+302_correct_open_farm_life_stage_metadata.sql
 ```
 
 Command reminder:
@@ -912,7 +915,7 @@ Do not submit the next production build until:
 - `npm run check:live-listing -- --guest-validated` passes after App Store Connect metadata is updated and publicly visible, proving the live US App Store description no longer contains unsupported source, recall, or overbroad safety claims.
 - `APP_STORE_LISTING.md` replacement metadata has been applied or intentionally superseded in App Store Connect.
 - `APP_PRIVACY_DISCLOSURE.md` has been applied or intentionally superseded in App Store Connect, including `Data Used to Track You: No`, No IDFA/no tracking SDKs, linked-data categories, third-party processors, and Sentry Crash Data status.
-- `npm run check:eas-versioning` passes, `npx eas-cli@latest build:version:get -p ios` output is saved, and the submitted App Store Connect/TestFlight build row shows marketing version `1.2.0` with a build number greater than `31`.
+- `npm run check:eas-versioning` passes, `npx eas-cli@latest build:version:get -p ios` output is saved, and the submitted App Store Connect/TestFlight build row shows marketing version `1.2.1` with a build number greater than `41`.
 - `npm run edge:verify-live` passes against the live Supabase functions host, proving OPTIONS responses expose the expected `X-Woof-Function-Name` and `X-Woof-Function-Audit-Version` values for the tracked build.
 - `npm run check:edge-types` passes with Deno, proving the tracked Edge Functions type-check in the Deno runtime before deployment.
 - `npm run check:audit` passes after `npm ci`, proving production dependency advisories have no high/critical findings and have not regressed above the tracked moderate baseline.

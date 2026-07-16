@@ -14,7 +14,7 @@ const REQUIRED_PUBLIC_EAS_ENV = {
 const REQUIRED_PRIVATE_EAS_ENV = {
   SENTRY_ORG: "ci-sentry-org",
   SENTRY_PROJECT: "ci-sentry-project",
-  SENTRY_AUTH_TOKEN: "ci-sentry-auth-token",
+  SENTRY_AUTH_TOKEN: "sntrys_ci_test_token_1234567890",
 };
 
 const skipEntries = new Set([

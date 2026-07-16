@@ -32,8 +32,8 @@ const projectContext = readText("PROJECT_CONTEXT.md");
 const rootLockVersion = packageLock.packages?.[""]?.version;
 const expoVersion = appJson.expo?.version;
 
-if (packageJson.version !== "1.2.0") {
-  fail(`package.json version should stay on the audited 1.2.0 release line, got ${packageJson.version}`);
+if (packageJson.version !== "1.2.1") {
+  fail(`package.json version should stay on the audited 1.2.1 release line, got ${packageJson.version}`);
 }
 
 if (rootLockVersion !== packageJson.version) {
@@ -67,11 +67,11 @@ for (const [source, context, snippets] of [
     [
       "npx eas-cli@latest build:version:get",
       "npx eas-cli@latest build:version:get -p ios",
-      "npx eas-cli@latest build:version:set -p ios --build-number 32",
+      "npx eas-cli@latest build:version:set -p ios --build-number 42",
       "build `31`",
       "build version `1.1.1`",
       "Remote EAS app version must match",
-      "greater than App Store Connect build `31`",
+      "greater than App Store Connect/TestFlight build `41`",
       "Save the command output",
     ],
   ],
@@ -81,7 +81,7 @@ for (const [source, context, snippets] of [
     [
       "EAS_RELEASE_VERSIONING.md",
       "npx eas-cli@latest build:version:get -p ios",
-      "build number greater than `31`",
+      "build number greater than `41`",
     ],
   ],
   [
