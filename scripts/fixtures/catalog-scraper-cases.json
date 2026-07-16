@@ -1,0 +1,600 @@
+[
+  {
+    "name": "freshpet official short complete food ingredients",
+    "ok": true,
+    "candidate": {
+      "cache_key": "freshpet:627975012045",
+      "gtin": "627975012045",
+      "product_name": "Small Dog Bite Size Chicken Recipe",
+      "brand": "Freshpet",
+      "product_line": "Small Dog Bite Size",
+      "flavor": "Chicken Recipe",
+      "package_size": "1 lb bag",
+      "pet_type": "dog",
+      "ingredient_text": "Chicken, chicken liver, carrots, cranberries, eggs, natural flavors, pea protein, pea fiber, vinegar, salt, spinach, potassium chloride, fish oil, beta-carotene, celery powder",
+      "front_image_url": "https://cdn.builder.io/api/v1/image/assets%2F1c8ef3f695f2487f915df3885427baf6%2Fa0862055b4dc48809b3fb2934e6897de",
+      "source": "freshpet",
+      "source_quality": "manufacturer",
+      "source_url": "https://www.freshpet.com/products/small-dog-bite-size-chicken-recipe",
+      "ingredient_verification_status": "manufacturer",
+      "image_verification_status": "manufacturer",
+      "is_complete_food": true,
+      "guaranteed_analysis": "Crude Fiber % max 1.5%, Crude Fat % min 12%, Crude Protein % min 16%, Calories kcal/kg 1960 kcal/kg, Moisture % max 63%",
+      "nutritional_info": {
+        "source": "freshpet_official_next_data",
+        "nutritionalAnalysisDisclaimer": "*This product is formulated to meet the nutritional levels established by the AAFCO Dog Food Nutrient Profiles for all life stages, except the growth of large size dogs (70 lbs or more as an adult)."
+      },
+      "verified_at": "2026-06-25T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "lotus official raw cat food short complete ingredients",
+    "ok": true,
+    "candidate": {
+      "cache_key": "lotus-pet-foods:cat-raw-lamb",
+      "product_name": "Cat Raw Food Lamb",
+      "brand": "Lotus",
+      "product_line": "Cat Raw Food",
+      "flavor": "Lamb",
+      "food_form": "raw",
+      "pet_type": "cat",
+      "ingredient_text": "Lamb, Lamb Hearts, Water sufficient for dry ingredient hydration, Lamb Liver, Torula Yeast, Dried Egg Yolk, Tricalcium Phosphate, Organic Dried Dulse Powder, Dried Miscanthus Grass, Gelatin, Psyllium Husk, Dried Egg Shell, Salt, Vita min E Supplement, Maganese Amino Acid Chelate",
+      "front_image_url": "https://lotus-pet-foods-product-images.s3-us-west-1.amazonaws.com/cat-top-lamb-1240-06-24-2022.png",
+      "source": "lotus-pet-foods",
+      "source_quality": "manufacturer",
+      "source_url": "https://www.lotuspetfoods.com/product-view/cat/raw-food/lamb-54",
+      "ingredient_verification_status": "manufacturer",
+      "image_verification_status": "manufacturer",
+      "is_complete_food": true,
+      "guaranteed_analysis": "{\"calories\":{\"kg\":\"1562\"},\"protein\":\"14.00\",\"fiber\":\"1.00\",\"fat\":\"6.00\",\"moisture\":\"75.00\"}",
+      "nutritional_info": {
+        "as_fed": {
+          "taurine": "0.05"
+        },
+        "description": [
+          "All Life Stage Raw Lamb Recipe for Cats"
+        ]
+      },
+      "verified_at": "2026-06-25T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "lotus short raw ingredients without life-stage evidence rejected",
+    "ok": false,
+    "reason": "incomplete_ingredient_statement",
+    "candidate": {
+      "cache_key": "lotus-pet-foods:cat-raw-missing-evidence",
+      "product_name": "Cat Raw Food Lamb",
+      "brand": "Lotus",
+      "pet_type": "cat",
+      "ingredient_text": "Lamb, Lamb Hearts, Water sufficient for dry ingredient hydration, Lamb Liver, Torula Yeast, Dried Egg Yolk, Tricalcium Phosphate, Organic Dried Dulse Powder, Dried Miscanthus Grass, Gelatin, Psyllium Husk, Dried Egg Shell, Salt, Vita min E Supplement, Maganese Amino Acid Chelate",
+      "front_image_url": "https://lotus-pet-foods-product-images.s3-us-west-1.amazonaws.com/cat-top-lamb-1240-06-24-2022.png",
+      "source": "lotus-pet-foods",
+      "source_quality": "manufacturer",
+      "source_url": "https://www.lotuspetfoods.com/product-view/cat/raw-food/lamb-54",
+      "ingredient_verification_status": "manufacturer",
+      "image_verification_status": "manufacturer",
+      "is_complete_food": true,
+      "guaranteed_analysis": "{\"calories\":{\"kg\":\"1562\"},\"protein\":\"14.00\",\"fiber\":\"1.00\",\"fat\":\"6.00\",\"moisture\":\"75.00\"}",
+      "verified_at": "2026-06-25T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "verified complete dog food",
+    "ok": true,
+    "candidate": {
+      "cache_key": "fixture:dog-food",
+      "product_name": "Fixture Adult Chicken Recipe Dry Dog Food",
+      "brand": "Fixture",
+      "flavor": "Chicken",
+      "pet_type": "dog",
+      "ingredient_text": "Chicken, chicken meal, brown rice, barley, oatmeal, chicken fat, natural flavor, flaxseed, dried beet pulp, salt, potassium chloride, vitamin E supplement, zinc sulfate, ferrous sulfate, copper sulfate",
+      "front_image_url": "https://example.com/images/fixture-adult-chicken-front.jpg",
+      "source": "fixture-manufacturer",
+      "source_quality": "manufacturer",
+      "source_url": "https://example.com/products/fixture-adult-chicken",
+      "ingredient_verification_status": "manufacturer",
+      "image_verification_status": "manufacturer",
+      "is_complete_food": true,
+      "verified_at": "2026-06-25T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "earthborn official new-look front can image",
+    "ok": true,
+    "candidate": {
+      "cache_key": "earthborn-holistic-midwestern:catalina-catch",
+      "product_name": "Catalina Catch",
+      "brand": "Earthborn Holistic",
+      "product_line": "Cat Food Grain Free",
+      "flavor": "Catalina Catch",
+      "pet_type": "cat",
+      "ingredient_text": "Mackerel, Fish Broth, Potatoes, Sunflower Oil, Dried Egg Product, Pumpkin, Apples, Blueberries, Carrots, Cranberries, Spinach, Tricalcium Phosphate, Guar Gum, Potassium Chloride, Choline Chloride, Salt, Vitamins, Minerals, Taurine",
+      "front_image_url": "https://www.earthbornholisticpetfood.com/wp-content/uploads/2021/01/earthborn-holistic-catalina-catch-can-front-new-look-coming-soon.webp",
+      "source": "earthborn-holistic-midwestern",
+      "source_quality": "manufacturer",
+      "source_url": "https://www.earthbornholisticpetfood.com/product/cat-food/cat-food-grain-free/catalina-catch/",
+      "ingredient_verification_status": "manufacturer",
+      "image_verification_status": "manufacturer",
+      "is_complete_food": true,
+      "guaranteed_analysis": "Crude Protein 8.00% min; Crude Fat 3.00% min; Crude Fiber 1.50% max; Moisture 82.00% max",
+      "verified_at": "2026-06-25T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "canidae farm to bowl complete food name",
+    "ok": true,
+    "candidate": {
+      "cache_key": "canidae:farm-to-bowl-salmon",
+      "product_name": "Pure Farm to Bowl Wild-Caught Salmon & Barley Recipe",
+      "brand": "CANIDAE",
+      "product_line": "Pure Farm to Bowl",
+      "flavor": "Wild-Caught Salmon & Barley Recipe",
+      "pet_type": "dog",
+      "ingredient_text": "Salmon, salmon meal, barley, peas, oatmeal, canola oil, flaxseed, natural flavor, potassium chloride, salt, choline chloride, vitamin E supplement, zinc sulfate, ferrous sulfate, copper sulfate, niacin supplement",
+      "front_image_url": "https://cdn11.bigcommerce.com/s-canidae/images/stencil/1280x1280/products/885/2725/farm-to-bowl-salmon-front.png",
+      "source": "canidae",
+      "source_quality": "manufacturer",
+      "source_url": "https://canidae.com/pure-farm-to-bowl-wild-caught-salmon-barley-recipe/",
+      "ingredient_verification_status": "manufacturer",
+      "image_verification_status": "manufacturer",
+      "is_complete_food": true,
+      "verified_at": "2026-06-25T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "koha poke bowl complete food name",
+    "ok": true,
+    "candidate": {
+      "cache_key": "koha:poke-bowl-tuna-beef",
+      "product_name": "Poke Bowl Tuna & Beef Entree in Gravy for Cats",
+      "brand": "KOHA",
+      "product_line": "Poke Bowl",
+      "flavor": "Tuna & Beef",
+      "pet_type": "cat",
+      "ingredient_text": "Tuna, tuna broth, beef, pumpkin, carrots, dried egg product, sunflower oil, agar-agar, tricalcium phosphate, potassium chloride, salt, choline chloride, taurine, zinc sulfate, vitamin E supplement, niacin supplement",
+      "front_image_url": "https://kohapet.com/cdn/shop/files/poke-bowl-tuna-beef-front.png",
+      "source": "koha",
+      "source_quality": "manufacturer",
+      "source_url": "https://kohapet.com/products/poke-bowl-tuna-beef-entree-in-gravy",
+      "ingredient_verification_status": "manufacturer",
+      "image_verification_status": "manufacturer",
+      "is_complete_food": true,
+      "verified_at": "2026-06-25T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "nutro toy breed complete food name",
+    "ok": true,
+    "candidate": {
+      "cache_key": "nutro:toy-breed-adult",
+      "product_name": "Toy Breed Adult Superfood Plate with a Trio of Proteins from Chicken Lamb and Salmon",
+      "brand": "NUTRO",
+      "product_line": "Toy Breed",
+      "flavor": "Chicken Lamb and Salmon",
+      "pet_type": "dog",
+      "ingredient_text": "Chicken, chicken meal, brewers rice, whole grain barley, split peas, chicken fat, lamb meal, salmon meal, dried plain beet pulp, natural flavor, flaxseed, potassium chloride, salt, choline chloride, vitamin E supplement, zinc sulfate",
+      "front_image_url": "https://www.nutro.com/cdn-cgi/image/width=1200/products/toy-breed-adult-superfood-plate-front.png",
+      "source": "nutro",
+      "source_quality": "manufacturer",
+      "source_url": "https://www.nutro.com/products/dry/toy-breed-adult-superfood-plate-trio-proteins-chicken-lamb-and-salmon",
+      "ingredient_verification_status": "manufacturer",
+      "image_verification_status": "manufacturer",
+      "is_complete_food": true,
+      "verified_at": "2026-06-25T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "complete balanced puree wet cat food accepted",
+    "ok": true,
+    "candidate": {
+      "cache_key": "fixture:complete-puree-cat",
+      "product_name": "Fixture Chicken Dinner in a Hydrating Purée Wet Cat Food",
+      "brand": "Fixture",
+      "product_line": "Hydrating Purée",
+      "flavor": "Chicken Dinner",
+      "pet_type": "cat",
+      "ingredient_text": "Chicken, chicken broth, turkey, locust bean gum, sunflower seed oil, calcium lactate, guar gum, xanthan gum, fish oil, potassium chloride, tricalcium phosphate, choline chloride, taurine, zinc sulfate, vitamin E supplement, ferrous sulfate, manganese proteinate, calcium pantothenate, vitamin A supplement, thiamine mononitrate, pyridoxine hydrochloride, riboflavin supplement, vitamin D3 supplement, folic acid, copper sulfate, potassium iodide, sodium selenite, biotin, vitamin B12 supplement",
+      "front_image_url": "https://example.com/images/complete-puree-front.jpg",
+      "source": "fixture-manufacturer",
+      "source_quality": "manufacturer",
+      "source_url": "https://example.com/products/complete-puree-cat-food",
+      "ingredient_verification_status": "manufacturer",
+      "image_verification_status": "manufacturer",
+      "is_complete_food": true,
+      "guaranteed_analysis": "Crude Protein 8% min, Crude Fat 2.5% min, Crude Fiber 0.5% max, Moisture 85% max. Features Complete & Balanced.",
+      "verified_at": "2026-06-25T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "hydration kit rejected as non complete identity",
+    "ok": false,
+    "reason": "non_complete_identity",
+    "candidate": {
+      "cache_key": "fixture:hydration-kit",
+      "product_name": "Fixture Hydration Kit",
+      "brand": "Fixture",
+      "product_line": "Hydration Kit",
+      "pet_type": "cat",
+      "ingredient_text": "Chicken, chicken bone broth, turkey bone broth, chicken liver, dried egg whites, turkey, duck, pumpkin, organic oats, cranberries, natural flavor, salt, sodium phosphate, guar gum, salmon oil, potassium chloride, minerals, choline chloride, vitamins, taurine",
+      "front_image_url": "https://example.com/images/hydration-kit-front.png",
+      "source": "fixture-manufacturer",
+      "source_quality": "manufacturer",
+      "source_url": "https://example.com/products/hydration-kit",
+      "ingredient_verification_status": "manufacturer",
+      "image_verification_status": "manufacturer",
+      "is_complete_food": true,
+      "verified_at": "2026-06-25T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "dog bowl accessory rejected",
+    "ok": false,
+    "reason": "non_complete_identity",
+    "candidate": {
+      "cache_key": "fixture:dog-bowl",
+      "product_name": "Stainless Steel Dog Bowl",
+      "brand": "Fixture",
+      "pet_type": "dog",
+      "ingredient_text": "Chicken, rice, barley, oatmeal, chicken fat, natural flavor, flaxseed, salt, vitamins, minerals",
+      "front_image_url": "https://example.com/images/dog-bowl-front.jpg",
+      "source": "fixture-manufacturer",
+      "source_quality": "manufacturer",
+      "source_url": "https://example.com/products/dog-bowl",
+      "ingredient_verification_status": "manufacturer",
+      "image_verification_status": "manufacturer",
+      "is_complete_food": true,
+      "verified_at": "2026-06-25T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "dog toy accessory rejected",
+    "ok": false,
+    "reason": "non_complete_identity",
+    "candidate": {
+      "cache_key": "fixture:dog-toy",
+      "product_name": "Squeaky Dog Toy",
+      "brand": "Fixture",
+      "pet_type": "dog",
+      "ingredient_text": "Chicken, rice, barley, oatmeal, chicken fat, natural flavor, flaxseed, salt, vitamins, minerals",
+      "front_image_url": "https://example.com/images/dog-toy-front.jpg",
+      "source": "fixture-manufacturer",
+      "source_quality": "manufacturer",
+      "source_url": "https://example.com/products/dog-toy",
+      "ingredient_verification_status": "manufacturer",
+      "image_verification_status": "manufacturer",
+      "is_complete_food": true,
+      "verified_at": "2026-06-25T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "marketing copy as ingredients",
+    "ok": false,
+    "reason": "marketing_copy_as_ingredients",
+    "candidate": {
+      "cache_key": "fixture:marketing",
+      "product_name": "Fixture Salmon Recipe Cat Food",
+      "brand": "Fixture",
+      "pet_type": "cat",
+      "ingredient_text": "Premium quality recipe made without corn, wheat, soy and supports healthy skin with benefits cats love",
+      "front_image_url": "https://example.com/images/fixture-salmon-front.jpg",
+      "source": "fixture-manufacturer",
+      "source_quality": "manufacturer",
+      "source_url": "https://example.com/products/fixture-salmon",
+      "ingredient_verification_status": "manufacturer",
+      "image_verification_status": "manufacturer",
+      "is_complete_food": true,
+      "verified_at": "2026-06-25T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "treat excluded",
+    "ok": false,
+    "reason": "non_complete_identity",
+    "candidate": {
+      "cache_key": "fixture:treat",
+      "product_name": "Fixture Chicken Dental Treats",
+      "brand": "Fixture",
+      "pet_type": "dog",
+      "ingredient_text": "Chicken, rice flour, glycerin, gelatin, natural flavor, salt, mixed tocopherols",
+      "front_image_url": "https://example.com/images/fixture-treat-front.jpg",
+      "source": "fixture-manufacturer",
+      "source_quality": "manufacturer",
+      "source_url": "https://example.com/products/fixture-treat",
+      "ingredient_verification_status": "manufacturer",
+      "image_verification_status": "manufacturer",
+      "is_complete_food": true,
+      "verified_at": "2026-06-25T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "missing front image",
+    "ok": false,
+    "reason": "missing_front_image_url",
+    "candidate": {
+      "cache_key": "fixture:no-image",
+      "product_name": "Fixture Beef Recipe Wet Dog Food",
+      "brand": "Fixture",
+      "pet_type": "dog",
+      "ingredient_text": "Beef, beef broth, liver, potatoes, carrots, peas, guar gum, potassium chloride, salt, vitamins, minerals",
+      "source": "fixture-manufacturer",
+      "source_quality": "manufacturer",
+      "source_url": "https://example.com/products/fixture-beef",
+      "ingredient_verification_status": "manufacturer",
+      "image_verification_status": "manufacturer",
+      "is_complete_food": true,
+      "verified_at": "2026-06-25T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "unreviewed ocr rejected",
+    "ok": false,
+    "reason": "unverified_ingredient_status",
+    "candidate": {
+      "cache_key": "fixture:ocr",
+      "product_name": "Fixture Turkey Recipe Cat Food",
+      "brand": "Fixture",
+      "pet_type": "cat",
+      "ingredient_text": "Turkey, turkey broth, liver, dried egg product, carrots, natural flavor, guar gum, salt, vitamins, minerals",
+      "front_image_url": "https://example.com/images/fixture-turkey-front.jpg",
+      "source": "fixture-manufacturer",
+      "source_quality": "manufacturer",
+      "source_url": "https://example.com/products/fixture-turkey",
+      "ingredient_verification_status": "label_ocr_candidate",
+      "image_verification_status": "manufacturer",
+      "is_complete_food": true,
+      "verified_at": "2026-06-25T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "missing source url",
+    "ok": false,
+    "reason": "missing_source_url",
+    "candidate": {
+      "cache_key": "fixture:no-source",
+      "product_name": "Fixture Lamb Recipe Dog Food",
+      "brand": "Fixture",
+      "pet_type": "dog",
+      "ingredient_text": "Lamb, lamb meal, peas, rice, barley, chicken fat, natural flavor, salt, vitamins, minerals",
+      "front_image_url": "https://example.com/images/fixture-lamb-front.jpg",
+      "source": "fixture-manufacturer",
+      "source_quality": "manufacturer",
+      "ingredient_verification_status": "manufacturer",
+      "image_verification_status": "manufacturer",
+      "is_complete_food": true,
+      "verified_at": "2026-06-25T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "variant flavor must match ingredient recipe prefix",
+    "ok": false,
+    "reason": "variant_ingredient_mismatch",
+    "candidate": {
+      "cache_key": "fixture:variant-ingredient-mismatch",
+      "product_name": "Fixture Chicken Recipe Dry Dog Food",
+      "brand": "Fixture",
+      "flavor": "Chicken",
+      "pet_type": "dog",
+      "ingredient_text": "Salmon Recipe: Salmon, salmon meal, brown rice, barley, oatmeal, chicken fat, natural flavor, flaxseed, dried beet pulp, salt, potassium chloride, vitamin E supplement, zinc sulfate, ferrous sulfate, copper sulfate, manganese sulfate",
+      "front_image_url": "https://example.com/images/fixture-chicken-front.jpg",
+      "source": "fixture-manufacturer",
+      "source_quality": "manufacturer",
+      "source_url": "https://example.com/products/fixture-chicken-recipe-dog-food",
+      "ingredient_verification_status": "manufacturer",
+      "image_verification_status": "manufacturer",
+      "is_complete_food": true,
+      "verified_at": "2026-06-25T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "variant package size recipe must match leading ingredients",
+    "ok": false,
+    "reason": "variant_ingredient_mismatch",
+    "candidate": {
+      "cache_key": "fixture:variant-leading-ingredient-mismatch",
+      "product_name": "Fixture Every Dog Health",
+      "brand": "Fixture",
+      "package_size": "5 lb / Chicken Recipe",
+      "pet_type": "dog",
+      "ingredient_text": "Beef, organic oats, bovine plasma, organic barley, organic spelt, organic triticale, organic kamut, carrots, tricalcium phosphate, potatoes, sweet potatoes, cranberries, coconut, chia seeds, pumpkin, green beans, zinc proteinate, iron proteinate, taurine, vitamin E supplement",
+      "front_image_url": "https://example.com/images/fixture-every-dog-health-chicken-front.png",
+      "source": "fixture-manufacturer",
+      "source_quality": "manufacturer",
+      "source_url": "https://example.com/products/fixture-every-dog-health",
+      "ingredient_verification_status": "manufacturer",
+      "image_verification_status": "manufacturer",
+      "is_complete_food": true,
+      "verified_at": "2026-06-25T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "variant flavor must match nutrient recipe label",
+    "ok": false,
+    "reason": "variant_nutrient_mismatch",
+    "candidate": {
+      "cache_key": "fixture:variant-nutrient-mismatch",
+      "product_name": "Fixture Chicken Recipe Dry Dog Food",
+      "brand": "Fixture",
+      "flavor": "Chicken",
+      "pet_type": "dog",
+      "ingredient_text": "Chicken, chicken meal, brown rice, barley, oatmeal, chicken fat, natural flavor, flaxseed, dried beet pulp, salt, potassium chloride, vitamin E supplement, zinc sulfate, ferrous sulfate, copper sulfate, manganese sulfate",
+      "front_image_url": "https://example.com/images/fixture-chicken-front.jpg",
+      "source": "fixture-manufacturer",
+      "source_quality": "manufacturer",
+      "source_url": "https://example.com/products/fixture-chicken-recipe-dog-food",
+      "ingredient_verification_status": "manufacturer",
+      "image_verification_status": "manufacturer",
+      "is_complete_food": true,
+      "guaranteed_analysis": "Salmon Recipe Crude Protein 26% min; Crude Fat 14% min; Crude Fiber 4% max; Moisture 10% max. Formulated to meet AAFCO nutrient profiles for adult maintenance.",
+      "verified_at": "2026-06-25T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "variant flavor must match source url",
+    "ok": false,
+    "reason": "variant_source_url_mismatch",
+    "candidate": {
+      "cache_key": "fixture:variant-source-url-mismatch",
+      "product_name": "Fixture Chicken Recipe Dry Dog Food",
+      "brand": "Fixture",
+      "flavor": "Chicken",
+      "pet_type": "dog",
+      "ingredient_text": "Chicken, chicken meal, brown rice, barley, oatmeal, chicken fat, natural flavor, flaxseed, dried beet pulp, salt, potassium chloride, vitamin E supplement, zinc sulfate, ferrous sulfate, copper sulfate, manganese sulfate",
+      "front_image_url": "https://example.com/images/fixture-chicken-front.jpg",
+      "source": "fixture-manufacturer",
+      "source_quality": "manufacturer",
+      "source_url": "https://example.com/products/fixture-salmon-recipe-dog-food",
+      "ingredient_verification_status": "manufacturer",
+      "image_verification_status": "manufacturer",
+      "is_complete_food": true,
+      "verified_at": "2026-06-25T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "contaminated ingredient text rejected",
+    "ok": false,
+    "reason": "contaminated_ingredient_statement",
+    "candidate": {
+      "cache_key": "fixture:contaminated-ingredients",
+      "product_name": "Fixture Beef Recipe Dry Dog Food",
+      "brand": "Fixture",
+      "flavor": "Beef",
+      "pet_type": "dog",
+      "ingredient_text": "Beef, beef meal, brown rice, barley, oatmeal, chicken fat, natural flavor, flaxseed, dried beet pulp see more, salt, potassium chloride, vitamin E supplement, zinc sulfate, ferrous sulfate, copper sulfate, manganese sulfate",
+      "front_image_url": "https://example.com/images/fixture-beef-front.jpg",
+      "source": "fixture-manufacturer",
+      "source_quality": "manufacturer",
+      "source_url": "https://example.com/products/fixture-beef-recipe-dog-food",
+      "ingredient_verification_status": "manufacturer",
+      "image_verification_status": "manufacturer",
+      "is_complete_food": true,
+      "verified_at": "2026-06-25T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "unbalanced ingredient parenthesis rejected",
+    "ok": false,
+    "reason": "unbalanced_ingredient_parentheses",
+    "candidate": {
+      "cache_key": "fixture:unbalanced-ingredient-parentheses",
+      "product_name": "Fixture Chopped Ground Dinner Wet Dog Food",
+      "brand": "Fixture",
+      "flavor": "Beef",
+      "pet_type": "dog",
+      "ingredient_text": "Chicken, Sufficient Water for Processing, Meat By-Products, Animal Liver, Brewers Rice, Beef, Wheat Flour, Minerals (Potassium Chloride, Zinc Sulfate), Carrageenan, Vitamins (Choline Chloride, Vitamin E Supplement, Vitamin B12 Supplement, Natural Beef Flavor, Guar Gum, Sodium Nitrite (For Color Retention)",
+      "front_image_url": "https://example.com/images/fixture-chopped-ground-dinner-front.jpg",
+      "source": "fixture-manufacturer",
+      "source_quality": "manufacturer",
+      "source_url": "https://example.com/products/fixture-chopped-ground-dinner-dog-food",
+      "ingredient_verification_status": "label_ocr_verified",
+      "image_verification_status": "manufacturer",
+      "is_complete_food": true,
+      "verified_at": "2026-06-25T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "guaranteed analysis copy in ingredients rejected",
+    "ok": false,
+    "reason": "analysis_copy_in_ingredients",
+    "candidate": {
+      "cache_key": "fixture:analysis-copy-ingredients",
+      "product_name": "Fixture Whitefish Salmon Entree Wet Dog Food",
+      "brand": "Fixture",
+      "flavor": "Whitefish Salmon",
+      "pet_type": "dog",
+      "ingredient_text": "Chicken Broth, Whitefish, Carrots, Turkey, Potatoes, Green Beans, Pea Protein, Salmon, Potato Starch, Dried Egg Product, Chicken Fat, Sunflower Oil, Natural Chicken Liver Flavor, Guar Gum, Salt, Potassium Chloride, Vitamins, Minerals, Taurine, Guaranteed Analysis: Crude Protein (Min) 4.0%, Crude Fat (Min) 3.0%, Crude Fiber (Max) 1.0%, Moisture (Max) 78.0%",
+      "front_image_url": "https://example.com/images/fixture-whitefish-salmon-front.jpg",
+      "source": "fixture-manufacturer",
+      "source_quality": "manufacturer",
+      "source_url": "https://example.com/products/fixture-whitefish-salmon-entree-dog-food",
+      "ingredient_verification_status": "manufacturer",
+      "image_verification_status": "manufacturer",
+      "is_complete_food": true,
+      "verified_at": "2026-06-25T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "ingredient OCR artifact text rejected",
+    "ok": false,
+    "reason": "ingredient_ocr_artifact",
+    "candidate": {
+      "cache_key": "fixture:ingredient-ocr-artifact",
+      "product_name": "Fixture Healthy Weight Adult Chicken Dry Dog Food",
+      "brand": "Fixture",
+      "flavor": "Chicken",
+      "pet_type": "dog",
+      "ingredient_text": "Chicken, Ground Barley, Ground Whole Grain Corn, Chicken By-Product Meal, Fructooli9osaccharides, Vitamins {Vitamin E Supplement, L-Ascorbyl-2-Polyphosphate IVitamin Cl, Bacillus subtillis, Cooper Sulfate, Magnesium Sufate, Potassium Chioride, Nacin Supplement, Calcium Pantothenate, Minerals IFerrous Sulfate, Manganese5e Sulfate, Minerals 9potassium Chloride, Vitamin D3 Supplement(), Mixed Tocopherols {preserNative), Rosemary Extract",
+      "front_image_url": "https://example.com/images/fixture-healthy-weight-front.jpg",
+      "source": "fixture-manufacturer",
+      "source_quality": "manufacturer",
+      "source_url": "https://example.com/products/fixture-healthy-weight-adult-chicken",
+      "ingredient_verification_status": "label_ocr_verified",
+      "image_verification_status": "manufacturer",
+      "is_complete_food": true,
+      "verified_at": "2026-06-25T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "mars ocr misspelled micronutrients rejected",
+    "ok": false,
+    "reason": "ingredient_ocr_artifact",
+    "candidate": {
+      "cache_key": "fixture:mars-ocr-misspelled-micronutrients",
+      "product_name": "Fixture Filets in Gravy Wood Grilled Chicken Flavor Wet Dog Food",
+      "brand": "Fixture",
+      "flavor": "Wood Grilled Chicken",
+      "pet_type": "dog",
+      "ingredient_text": "Chicken, Chicken Broth, Meat By-Products, Animal Liver, Wheat Gluten, Potsssium Chloride, Carrageenan, Salt, Choline Chloride, Vitsmin B12 Supplement, D.Calcium Pantothenate, Vitamin D3 Supplement",
+      "front_image_url": "https://example.com/images/fixture-filets-gravy-front.jpg",
+      "source": "fixture-manufacturer",
+      "source_quality": "manufacturer",
+      "source_url": "https://example.com/products/fixture-filets-gravy-wood-grilled-chicken",
+      "ingredient_verification_status": "label_ocr_verified",
+      "image_verification_status": "manufacturer",
+      "is_complete_food": true,
+      "verified_at": "2026-06-25T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "multi formula variety pack rejected",
+    "ok": false,
+    "reason": "multi_formula_or_variety_pack",
+    "candidate": {
+      "cache_key": "fixture:multi-formula",
+      "product_name": "Fixture Sensitive Stomach Superhero Dog Food",
+      "brand": "Fixture",
+      "pet_type": "dog",
+      "ingredient_text": "(3) Chicken Recipe: Chicken, chicken broth, rice, pumpkin, flaxseed, chia seed, calcium lactate, potassium chloride, zinc amino acid complex, choline chloride, vitamin E supplement. (3) Beef Recipe: Beef, beef broth, rice, pumpkin, flaxseed, chia seed, calcium lactate, potassium chloride, zinc amino acid complex, choline chloride, vitamin E supplement.",
+      "front_image_url": "https://example.com/images/fixture-multi-formula-front.jpg",
+      "source": "fixture-manufacturer",
+      "source_quality": "manufacturer",
+      "source_url": "https://example.com/products/fixture-sensitive-stomach-superhero",
+      "ingredient_verification_status": "manufacturer",
+      "image_verification_status": "manufacturer",
+      "is_complete_food": true,
+      "verified_at": "2026-06-25T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "official source dry wet form conflict rejected",
+    "ok": false,
+    "reason": "food_form_source_mismatch",
+    "candidate": {
+      "cache_key": "blue-buffalo-general-mills:blue-natural-veterinary-diet-wm-conflict",
+      "product_name": "BLUE Natural Veterinary Diet Dry Dog Food Weight Management + Mobility Support",
+      "brand": "Blue Buffalo",
+      "product_line": "BLUE Natural Veterinary Diet Dry Weight Management + Mobility Support",
+      "food_form": "dry",
+      "pet_type": "dog",
+      "ingredient_text": "Whitefish, Potatoes, Chicken Broth, Water, Chicken Liver, Chicken, Peas, Powdered Cellulose, Pea Fiber, Flaxseed, Fish Oil, Natural Flavor, Gelatin, Shrimp Meal, Carrageenan, Dried Chicory Root, Salt, Guar Gum, Betaine Anhydrous, Taurine, Potassium Chloride, Cassia Gum, L-Threonine, Cranberries, DL-Methionine, Turmeric, Choline Chloride, L-Tryptophan, Vitamin E Supplement, Zinc Amino Acid Chelate, Chondroitin Sulfate, Iron Amino Acid Chelate, L-Ascorbyl-2-Polyphosphate, L-Carnitine, Thiamine Mononitrate, Copper Amino Acid Chelate, Manganese Amino Acid Chelate, Sodium Selenite",
+      "front_image_url": "https://www.bluebuffalo.com/globalassets/product-detail-pages/dog-wet-food/natural-veterinary-diet/share-product-image/share_nvd_dog_wm_wet.png",
+      "source": "blue-buffalo-general-mills",
+      "source_quality": "manufacturer",
+      "source_url": "https://www.bluebuffalo.com/wet-dog-food/natural-veterinary-diet/wm-wet-food-for-dogs/",
+      "ingredient_verification_status": "manufacturer",
+      "image_verification_status": "manufacturer",
+      "is_complete_food": true,
+      "verified_at": "2026-06-25T00:00:00.000Z"
+    }
+  }
+]

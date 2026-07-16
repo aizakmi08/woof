@@ -1,0 +1,104 @@
+[
+  {
+    "name": "missing profile stays explicitly general",
+    "profile": {},
+    "result": {
+      "petType": "dog",
+      "petSafety": { "level": "safe" },
+      "ingredients": [{ "name": "Chicken" }, { "name": "Brown Rice" }]
+    },
+    "expectedLevel": "safe",
+    "expectedPersonalized": false,
+    "expectedMatches": []
+  },
+  {
+    "name": "saved chicken avoidance matches chicken meal",
+    "profile": {
+      "name": "Luna",
+      "petType": "dog",
+      "lifeStage": "adult",
+      "avoidIngredients": ["chicken"]
+    },
+    "result": {
+      "petType": "dog",
+      "lifeStage": "Adult",
+      "petSafety": { "level": "safe" },
+      "ingredients": [{ "name": "Chicken Meal" }, { "name": "Brown Rice" }]
+    },
+    "expectedLevel": "avoid",
+    "expectedPersonalized": true,
+    "expectedMatches": ["chicken"]
+  },
+  {
+    "name": "dairy alias matches whey",
+    "profile": {
+      "name": "Milo",
+      "petType": "cat",
+      "lifeStage": "adult",
+      "avoidIngredients": ["dairy"]
+    },
+    "result": {
+      "petType": "cat",
+      "lifeStage": "Adult",
+      "petSafety": { "level": "safe" },
+      "ingredients": [{ "name": "Dried Whey" }, { "name": "Turkey" }]
+    },
+    "expectedLevel": "avoid",
+    "expectedPersonalized": true,
+    "expectedMatches": ["dairy"]
+  },
+  {
+    "name": "species mismatch blocks product",
+    "profile": {
+      "name": "Luna",
+      "petType": "dog",
+      "lifeStage": "adult",
+      "avoidIngredients": []
+    },
+    "result": {
+      "petType": "cat",
+      "lifeStage": "Adult",
+      "petSafety": { "level": "safe" },
+      "ingredients": [{ "name": "Turkey" }]
+    },
+    "expectedLevel": "avoid",
+    "expectedPersonalized": true,
+    "expectedMatches": []
+  },
+  {
+    "name": "young pet and adult formula warns",
+    "profile": {
+      "name": "Poppy",
+      "petType": "dog",
+      "lifeStage": "young",
+      "avoidIngredients": []
+    },
+    "result": {
+      "petType": "dog",
+      "lifeStage": "Adult Maintenance",
+      "petSafety": { "level": "safe" },
+      "ingredients": [{ "name": "Turkey" }]
+    },
+    "expectedLevel": "caution",
+    "expectedPersonalized": true,
+    "expectedMatches": []
+  },
+  {
+    "name": "verified formula with no saved conflict remains clear",
+    "profile": {
+      "name": "Luna",
+      "petType": "dog",
+      "lifeStage": "adult",
+      "avoidIngredients": ["beef"]
+    },
+    "result": {
+      "petType": "dog",
+      "lifeStage": "Adult",
+      "petSafety": { "level": "safe" },
+      "ingredients": [{ "name": "Chicken" }, { "name": "Brown Rice" }]
+    },
+    "expectedLevel": "safe",
+    "expectedPersonalized": true,
+    "expectedMatches": []
+  }
+]

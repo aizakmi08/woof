@@ -1,12 +1,14 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import {
-  Text,
   View,
+  Image,
+  Pressable,
   TouchableOpacity,
   Share,
-  Alert,
   Platform,
+  Alert,
 } from "react-native";
+import { AppText as Text } from "../../components/AppText";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, {
@@ -17,14 +19,36 @@ import Animated, {
   Extrapolation,
   FadeInUp,
 } from "react-native-reanimated";
-import { ChevronLeft, Share2, Utensils, X, AlertTriangle, CheckCircle2, AlertCircle, ShieldCheck, Calendar } from "lucide-react-native";
+import { ChevronLeft, Share2, Utensils, X, AlertTriangle, CheckCircle2, AlertCircle, ShieldCheck, Calendar, PawPrint } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { captureRef } from "react-native-view-shot";
 import * as Sharing from "expo-sharing";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import { getCachedAnalysis } from "../../services/cache";
 import * as analysisService from "../../services/analysisService";
+import { getHistoryResultSnapshot } from "../../services/history";
+import {
+  catalogProductToVerifiedProduct,
+  findVerifiedCatalogProductByBarcode,
+  findVerifiedCatalogProductForLookup,
+  getCatalogProduct,
+} from "../../services/productCatalog";
+import { buildVerifiedPetFoodAnalysis } from "../../services/verifiedScoring";
 import { useAuth } from "../../services/auth";
+import { trackEvent } from "../../services/analytics";
+import { submitCatalogIngredientCapture } from "../../services/catalogCoverage";
+import { createLogger } from "../../services/logger";
+import { WOOF_SHARE_URL } from "../../config/env";
+import {
+  hasSeenGuestSavePrompt,
+  markGuestSavePromptSeen,
+} from "../../services/guestSavePrompt";
+import {
+  hasSeenFirstScanToast,
+  hasSeenPostScanPrompt,
+  markFirstScanToastSeen,
+  markPostScanPromptSeen,
+} from "../../services/resultPromptState";
 import { getScoreConfig, Colors, Spacing, Shadows } from "../../theme";
 import {
   StreamSection,
@@ -37,8 +61,6 @@ import {
   SkeletonCircle,
   CategoryBar,
   NutritionFacts,
-  ReviewsSection,
-  RecallCard,
   ScanAnotherButton,
   ShareCard,
   IngredientsSection,
@@ -51,14 +73,176 @@ import {
   ScanLimitBanner,
   ProGateOverlay,
   PostScanPrompt,
+  GuestSavePrompt,
   FirstScanToast,
   SafetyBadge,
+  ReviewPrompt,
 } from "./components";
 import { useStyles } from "./styles";
+import {
+  dismissReviewPrompt,
+  maybeShowReviewPrompt,
+  openStoreReview,
+} from "../../services/reviewPrompt";
+import {
+  normalizePetProfile,
+  personalizePetSafety,
+} from "../../services/petProfile";
+
+const logger = createLogger("RESULTS");
+// Longer than the Edge Function timeout so server-side scan reversal can sync
+// back before the UI shows a local timeout.
+const RESULT_ANALYSIS_TIMEOUT_MS = 135000;
+
+function shareUrlHost(value) {
+  if (!value) return null;
+  try {
+    return new URL(value).hostname.replace(/^www\./, "");
+  } catch {
+    return null;
+  }
+}
+
+function shareUrlDisplay(value) {
+  if (!value) return "";
+  return value.replace(/^https?:\/\//i, "").replace(/\/$/, "");
+}
+
+function titleCaseStatus(value) {
+  return String(value || "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+    .trim();
+}
+
+function dateDisplay(value) {
+  if (!value) return "Not dated";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "Not dated";
+  return parsed.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function shareResultProperties(result = {}) {
+  const action = typeof result?.action === "string" ? result.action : null;
+  const activityType = typeof result?.activityType === "string"
+    ? result.activityType.slice(0, 120)
+    : null;
+
+  return {
+    share_action: action,
+    share_activity_type: activityType,
+  };
+}
+
+function shareWasDismissed(result = {}) {
+  return result?.action === Share.dismissedAction;
+}
+
+function scanFailureCategory({ errorCode, errorStatus, message } = {}) {
+  const code = String(errorCode || "").toUpperCase();
+  const text = String(message || "").toLowerCase();
+
+  if (code === "SCAN_LIMIT_REACHED" || errorStatus === 402) return "scan_limit";
+  if (code === "ANALYSIS_IMAGE_RETRY_SUPPRESSED") return "upload_retry_suppressed";
+  if (code === "ANALYSIS_TIMEOUT" || text.includes("too long") || text.includes("timeout")) return "timeout";
+  if (errorStatus === 401 || errorStatus === 403 || text.includes("session expired") || text.includes("not authenticated")) return "auth";
+  if (errorStatus === 413 || text.includes("too large")) return "payload_size";
+  if (errorStatus === 429 || text.includes("rate limit")) return "rate_limit";
+  if (errorStatus >= 500) return "backend";
+  if (code === "ANALYSIS_RESULT_ERROR" || text.includes("missing") || text.includes("invalid") || text.includes("parse")) return "ai_validation";
+  if (text.includes("network") || text.includes("fetch") || text.includes("offline")) return "network";
+  return "unknown";
+}
+
+function scanFailureProperties({ mode, scan_mode: scanMode, event = {}, extra = {} }) {
+  const errorStatus = Number.isFinite(event.errorStatus) ? event.errorStatus : null;
+  const errorCode = event.errorCode || null;
+  const message = event.error || null;
+
+  return {
+    mode,
+    scan_mode: scanMode,
+    scan_id: event.scanId || event.scanUsage?.scan_id || null,
+    message,
+    error_code: errorCode,
+    http_status: errorStatus,
+    failure_category: scanFailureCategory({ errorCode, errorStatus, message }),
+    scan_usage_reason: event.scanUsage?.reason || null,
+    scan_usage_reversed: event.scanUsage?.reversed ?? null,
+    ...extra,
+  };
+}
+
+function scanIdFromAnalysis(key) {
+  if (!key) return null;
+  return analysisService.getAnalysis(key)?.scanId || null;
+}
+
+function compactUrl(value) {
+  const text = String(value || "").trim();
+  if (!text || /^data:/i.test(text)) return null;
+  return text;
+}
+
+function productImageUri({ result, opffData, uri }) {
+  return (
+    compactUrl(opffData?.imageUrl) ||
+    compactUrl(opffData?.image_url) ||
+    compactUrl(opffData?.image_front_url) ||
+    compactUrl(result?.imageUrl) ||
+    compactUrl(result?.productImageUrl) ||
+    compactUrl(uri)
+  );
+}
+
+function productVariantSummary(result = {}, productName = "") {
+  const product = result || {};
+  const normalizedName = String(productName || "").toLowerCase();
+  const seen = new Set();
+  return [
+    product.productLine,
+    product.flavor,
+    product.lifeStage,
+    product.foodForm,
+    product.packageSize,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter((value) => value && value.toLowerCase() !== "other")
+    .filter((value) => !normalizedName.includes(value.toLowerCase()))
+    .filter((value) => {
+      const key = value.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .join(" • ");
+}
 
 export default function ResultsScreen({ route, navigation }) {
-  const { mode, barcode, base64, uri, cacheKey, petType: routePetType, scanMode } = route.params;
+  const {
+    mode,
+    barcode,
+    base64,
+    uri,
+    cacheKey,
+    petType: routePetType,
+    petName: routePetName,
+    scanMode,
+    catalogProduct,
+    acquisitionQuery,
+    candidateProduct,
+    labelIdentification,
+    sourceSurface,
+    historyEntryId,
+    historyProductName,
+    historyResultSnapshot,
+  } = route.params;
   const isHumanFood = mode === "human_food" || scanMode === "human_food";
+  const isIngredientCapture = mode === "ingredient_capture";
   const petType = routePetType; // May also come from result.petType for history
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
@@ -69,9 +253,26 @@ export default function ResultsScreen({ route, navigation }) {
   const [opffData, setOpffData] = useState(null);
   const [fromCache, setFromCache] = useState(false);
   const [scanCounted, setScanCounted] = useState(false);
+  const [scanUsage, setScanUsage] = useState(null);
+  const [scanLimitReached, setScanLimitReached] = useState(false);
+  const displayProductName = String(opffData?.productName || result?.productName || "").trim();
+  const displayResult = result && displayProductName
+    ? { ...result, productName: displayProductName }
+    : result;
+  const variantSummary = productVariantSummary(result, displayProductName);
   const { styles, theme } = useStyles();
   const insets = useSafeAreaInsets();
-  const { isPro, incrementScanCount, remainingScans } = useAuth();
+  const {
+    isPro,
+    isAnonymous,
+    user,
+    incrementScanCount,
+    remainingScans,
+    refreshProStatus,
+    signInWithApple,
+    signInWithGoogle,
+    profile,
+  } = useAuth();
 
   // Reanimated scroll
   const scrollY = useSharedValue(0);
@@ -99,6 +300,8 @@ export default function ResultsScreen({ route, navigation }) {
   const analysisStartedRef = useRef(false);
   const timerRef = useRef({ start: 0 });
   const redirectTimerRef = useRef(null);
+  const scanLimitRecoveryRef = useRef(false);
+  const ingredientSubmissionRef = useRef(false);
 
   // Throttled setState from service events
   const throttleRef = useRef({ lastTime: 0, timer: null });
@@ -121,6 +324,79 @@ export default function ResultsScreen({ route, navigation }) {
 
   // Track the service cacheKey so we can match events
   const serviceKeyRef = useRef(null);
+  const cancelRequestedRef = useRef(false);
+  const reviewPromptCheckedRef = useRef(false);
+
+  const cancelRunningAnalysis = useCallback((source) => {
+    if (mode === "history" || done || cancelRequestedRef.current) return;
+
+    const key = serviceKeyRef.current;
+    const cancelled = analysisService.cancelAnalysis(key, source);
+    if (!cancelled) return;
+
+    cancelRequestedRef.current = true;
+    trackEvent("scan_analysis_cancelled", {
+      mode,
+      scan_mode: isHumanFood ? "human_food" : mode,
+      scan_id: scanIdFromAnalysis(key),
+      source,
+    });
+  }, [mode, done, isHumanFood]);
+
+  const retryAfterEntitlementRefresh = useCallback(async () => {
+    if (scanLimitRecoveryRef.current || mode === "history") return false;
+    scanLimitRecoveryRef.current = true;
+
+    setLoadingStatus("Refreshing Pro access...");
+    setStreaming(true);
+    setDone(false);
+    setError(null);
+    setScanLimitReached(false);
+    setScanUsage(null);
+
+    trackEvent("scan_limit_recovery_started", {
+      mode,
+      scan_mode: isHumanFood ? "human_food" : mode,
+    });
+
+    const pro = await refreshProStatus({ source: "scan_limit_recovery" });
+    if (!pro) {
+      trackEvent("scan_limit_recovery_not_pro", {
+        mode,
+        scan_mode: isHumanFood ? "human_food" : mode,
+      });
+      return false;
+    }
+
+    const key = analysisService.startAnalysis({ mode, base64, barcode, uri, petType, catalogProduct });
+    if (!key) {
+      trackEvent("scan_limit_recovery_retry_unavailable", {
+        mode,
+        scan_mode: isHumanFood ? "human_food" : mode,
+      });
+      return false;
+    }
+
+    timerRef.current.start = Date.now();
+    serviceKeyRef.current = key;
+    const retryScanId = scanIdFromAnalysis(key);
+    setResult({});
+    trackEvent("scan_limit_recovery_retried", {
+      mode,
+      scan_mode: isHumanFood ? "human_food" : mode,
+      scan_id: retryScanId,
+    });
+    trackEvent("scan_analysis_started", {
+      mode,
+      scan_mode: isHumanFood ? "human_food" : mode,
+      pet_type: petType,
+      has_barcode: !!barcode,
+      has_photo: !!base64,
+      scan_id: retryScanId,
+      recovery_retry: true,
+    });
+    return true;
+  }, [mode, isHumanFood, refreshProStatus, base64, barcode, uri, petType, catalogProduct]);
 
   useEffect(() => {
     if (analysisStartedRef.current) return;
@@ -129,6 +405,13 @@ export default function ResultsScreen({ route, navigation }) {
 
     // History mode: simple cache lookup, no background service needed
     if (mode === "history") {
+      trackEvent("history_result_requested", {
+        mode,
+        scan_mode: isHumanFood ? "human_food" : mode,
+        pet_type: petType,
+        has_barcode: !!barcode,
+        has_photo: !!base64,
+      });
       setLoadingStatus("Loading cached result...");
 
       // Check if there's a running analysis for this cacheKey
@@ -158,49 +441,144 @@ export default function ResultsScreen({ route, navigation }) {
       }
 
       // Layer 2: AsyncStorage (instant, offline-capable)
-      // Layer 3: Supabase cache (network, shared)
+      // Layer 3: user-owned history snapshot or verified catalog rebuild
+      // Layer 4: Supabase cache (network, shared)
       (async () => {
         try {
+          const applyHistoryResult = ({ analysis, source, nextDataSource = "ai", nextOpffData = null }) => {
+            if (!analysis || typeof analysis !== "object" || !(analysis.productName || analysis.foodName)) {
+              return false;
+            }
+            setResult(analysis);
+            setDataSource(nextDataSource);
+            if (nextOpffData) setOpffData(nextOpffData);
+            setFromCache(true);
+            setDone(true);
+            trackEvent("history_result_loaded", {
+              source,
+              scan_mode: scanMode || mode,
+            });
+            return true;
+          };
+
           // Try local result first
           const local = await analysisService.getLocalResult(cacheKey);
           if (local?.analysis) {
-            setResult(local.analysis);
-            setDataSource(local.dataSource || "ai");
-            if (local.opffData) setOpffData(local.opffData);
-            setFromCache(true);
-            setDone(true);
+            if (applyHistoryResult({
+              analysis: local.analysis,
+              source: "local",
+              nextDataSource: local.dataSource || "ai",
+              nextOpffData: local.opffData || null,
+            })) return;
+          }
+
+          if (isHumanFood && applyHistoryResult({
+            analysis: historyResultSnapshot,
+            source: "local_history_snapshot",
+            nextDataSource: "ai",
+          })) {
             return;
+          }
+
+          if (isHumanFood && historyEntryId) {
+            const durableSnapshot = await getHistoryResultSnapshot(historyEntryId);
+            if (applyHistoryResult({
+              analysis: durableSnapshot,
+              source: "supabase_history_snapshot",
+              nextDataSource: "ai",
+            })) return;
+          }
+
+          if (!isHumanFood) {
+            let catalogMatch = await getCatalogProduct(cacheKey);
+            if (!catalogMatch && /^\d{8,14}$/.test(String(cacheKey || ""))) {
+              catalogMatch = await findVerifiedCatalogProductByBarcode(cacheKey);
+            }
+            if (!catalogMatch && historyProductName) {
+              catalogMatch = await findVerifiedCatalogProductForLookup({
+                productName: historyProductName,
+                petType,
+              });
+            }
+
+            if (catalogMatch) {
+              const verifiedProduct = catalogProductToVerifiedProduct(catalogMatch);
+              const rebuilt = buildVerifiedPetFoodAnalysis(verifiedProduct);
+              if (applyHistoryResult({
+                analysis: rebuilt,
+                source: "verified_catalog_rebuild",
+                nextDataSource: "verified",
+                nextOpffData: verifiedProduct,
+              })) return;
+            }
           }
 
           // Fall back to Supabase
           const cached = await getCachedAnalysis(cacheKey);
           if (cached.hit) {
-            setResult(cached.analysis);
-            setDataSource(cached.dataSource || "ai");
-            if (cached.opffData) setOpffData(cached.opffData);
-            setFromCache(true);
-            setDone(true);
-            return;
+            if (applyHistoryResult({
+              analysis: cached.analysis,
+              source: "supabase_cache",
+              nextDataSource: cached.dataSource || "ai",
+              nextOpffData: cached.opffData || null,
+            })) return;
           }
 
-          setError("This result is no longer available. Cached results expire after 7 days.");
+          setError("This older saved result could not be restored. Scan it again to refresh your saved result.");
           setDone(true);
+          trackEvent("history_result_unavailable", { scan_mode: scanMode || mode });
         } catch (err) {
-          console.log("[RESULTS] Error loading cached result:", err.message);
+          logger.debug("[RESULTS] Error loading cached result:", err.message);
           setError("Failed to load result. Please try scanning again.");
           setDone(true);
+          trackEvent("history_result_failed", {
+            scan_mode: scanMode || mode,
+            message: err.message,
+          });
         }
       })();
       return;
     }
 
     // Photo / barcode mode: delegate to analysis service
-    setLoadingStatus(isHumanFood ? "Checking food safety..." : (mode === "barcode" ? "Looking up barcode..." : "Analyzing product..."));
+    setLoadingStatus(
+      isHumanFood
+        ? "Checking food safety..."
+        : (mode === "barcode"
+          ? "Looking up product..."
+          : (mode === "catalog"
+            ? "Scoring product..."
+            : (isIngredientCapture ? "Reading ingredients..." : "Analyzing product...")))
+    );
     setStreaming(true);
     setResult({});
 
-    const key = analysisService.startAnalysis({ mode, base64, barcode, uri, petType });
+    const key = analysisService.startAnalysis({ mode, base64, barcode, uri, petType, catalogProduct });
     serviceKeyRef.current = key;
+    if (!key) {
+      setError("Could not start this scan. Please try again.");
+      setStreaming(false);
+      setDone(true);
+      trackEvent("scan_analysis_failed", {
+        mode,
+        scan_mode: isHumanFood ? "human_food" : mode,
+        failure_category: "start_unavailable",
+        has_barcode: !!barcode,
+        has_photo: !!base64,
+        has_catalog_product: !!catalogProduct,
+      });
+      return;
+    }
+    const scanId = scanIdFromAnalysis(key);
+    trackEvent("scan_analysis_started", {
+      mode,
+      scan_mode: isHumanFood ? "human_food" : mode,
+      pet_type: petType,
+      has_barcode: !!barcode,
+      has_photo: !!base64,
+      has_catalog_product: !!catalogProduct,
+      scan_id: scanId,
+    });
 
     // If service already had a completed result (re-scan dedup), apply immediately
     const existing = analysisService.getAnalysis(key);
@@ -212,10 +590,53 @@ export default function ResultsScreen({ route, navigation }) {
       setStreaming(false);
       setDone(true);
     }
-  }, [mode, barcode, base64, cacheKey, uri, throttledSetResult]);
+  }, [mode, barcode, base64, cacheKey, uri, petType, isHumanFood, isIngredientCapture, scanMode, catalogProduct, throttledSetResult, historyEntryId, historyProductName, historyResultSnapshot]);
+
+  useEffect(() => {
+    if (!isIngredientCapture || !done || error || !result || ingredientSubmissionRef.current) return;
+    ingredientSubmissionRef.current = true;
+    const scanId = scanIdFromAnalysis(serviceKeyRef.current);
+
+    submitCatalogIngredientCapture({
+      analysis: result,
+      query: acquisitionQuery,
+      candidateProduct,
+      identification: labelIdentification,
+      source: "ingredient_capture_result",
+      sourceSurface,
+      scanId,
+    }).then((submission) => {
+      if (submission?.reason === "not_authenticated") {
+        setShowGuestSavePrompt(true);
+      }
+      trackEvent("catalog_ingredient_capture_submitted", {
+        submitted: submission?.submitted === true,
+        reason: submission?.reason || null,
+        scan_id: scanId,
+        source_surface: sourceSurface || null,
+        product_name_present: !!result?.productName,
+        ingredient_count: Array.isArray(result?.ingredients) ? result.ingredients.length : 0,
+      });
+    }).catch((err) => {
+      trackEvent("catalog_ingredient_capture_submit_failed", {
+        message: err.message,
+        scan_id: scanId,
+      });
+    });
+  }, [
+    isIngredientCapture,
+    done,
+    error,
+    result,
+    acquisitionQuery,
+    candidateProduct,
+    labelIdentification,
+    sourceSurface,
+  ]);
 
   // Subscribe to service events
   useEffect(() => {
+    let subscribed = true;
     const unsub = analysisService.subscribe((event) => {
       const myKey = serviceKeyRef.current;
       if (!myKey) return;
@@ -232,14 +653,39 @@ export default function ResultsScreen({ route, navigation }) {
         setDataSource(event.dataSource);
         if (event.opffData) setOpffData(event.opffData);
         setFromCache(!!event.fromCache);
+        if (event.scanUsage) setScanUsage(event.scanUsage);
         setStreaming(false);
         setDone(true);
+        trackEvent("scan_analysis_completed", {
+          mode,
+          scan_mode: isHumanFood ? "human_food" : mode,
+          scan_id: event.scanId || event.scanUsage?.scan_id || null,
+          data_source: event.dataSource,
+          from_cache: !!event.fromCache,
+          score: event.result?.overallScore ?? null,
+          safety_level: event.result?.safetyLevel,
+          ingredient_count: event.result?.ingredients?.length || 0,
+          scan_usage_reason: event.scanUsage?.reason || null,
+          scan_usage_reversed: event.scanUsage?.reversed ?? null,
+        });
       } else if (event.type === "barcode_not_found") {
         // Graceful redirect: show brief message then send user back to photo mode
+        const needsVerification = event.reason === "verification_required";
         setResult(null);
         setStreaming(false);
-        setLoadingStatus("Barcode not in database — redirecting to camera...");
+        setLoadingStatus(needsVerification
+          ? "Ingredients not verified yet — scan the ingredient label..."
+          : "Barcode not in database — redirecting to camera...");
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        trackEvent("barcode_not_found", {
+          mode,
+          scan_mode: "barcode",
+          scan_id: event.scanId || null,
+          failure_category: needsVerification ? "verification_required" : "product_not_found",
+          reason: event.reason || null,
+          product_name_present: !!event.productName,
+          brand_present: !!event.brand,
+        });
         redirectTimerRef.current = setTimeout(() => {
           navigation.reset({
             index: 1,
@@ -250,13 +696,43 @@ export default function ResultsScreen({ route, navigation }) {
           });
         }, 1500);
       } else if (event.type === "error") {
+        if (event.errorCode === "SCAN_LIMIT_REACHED") {
+          retryAfterEntitlementRefresh().then((recovered) => {
+            if (!subscribed) return;
+            if (recovered) return;
+            if (event.scanUsage) setScanUsage(event.scanUsage);
+            setScanLimitReached(true);
+            setError(event.error);
+            setStreaming(false);
+            setDone(true);
+            trackEvent("scan_analysis_failed", scanFailureProperties({
+              mode,
+              scan_mode: isHumanFood ? "human_food" : mode,
+              event,
+              extra: {
+                scan_id: event.scanId || event.scanUsage?.scan_id || null,
+                entitlement_recovery_attempted: scanLimitRecoveryRef.current,
+              },
+            }));
+          });
+          return;
+        }
+
+        if (event.scanUsage) setScanUsage(event.scanUsage);
+        setScanLimitReached(false);
         setError(event.error);
         setStreaming(false);
         setDone(true);
+        trackEvent("scan_analysis_failed", scanFailureProperties({
+          mode,
+          scan_mode: isHumanFood ? "human_food" : mode,
+          event,
+        }));
       }
     });
 
     return () => {
+      subscribed = false;
       unsub();
       if (throttleRef.current.timer) {
         clearTimeout(throttleRef.current.timer);
@@ -265,7 +741,7 @@ export default function ResultsScreen({ route, navigation }) {
         clearTimeout(redirectTimerRef.current);
       }
     };
-  }, [throttledSetResult]);
+  }, [throttledSetResult, retryAfterEntitlementRefresh, mode, isHumanFood]);
 
   const [isSlowLoading, setIsSlowLoading] = useState(false);
 
@@ -280,15 +756,24 @@ export default function ResultsScreen({ route, navigation }) {
         setIsSlowLoading(true);
       }, 15000),
       setTimeout(() => setLoadingStatus("Almost there..."), 25000),
-      // Hard timeout after 120 seconds
+      // Hard timeout after the server has had a chance to return reversed usage
       setTimeout(() => {
         if (!done) {
-          console.log("[RESULTS] Analysis timeout — showing error");
+          logger.debug("[RESULTS] Analysis timeout — showing error");
           setError("Analysis is taking too long. Please try again.");
           setStreaming(false);
           setDone(true);
+          trackEvent("scan_analysis_timeout", scanFailureProperties({
+            mode,
+            scan_mode: isHumanFood ? "human_food" : mode,
+            event: {
+              error: "Analysis is taking too long. Please try again.",
+              errorCode: "RESULT_ANALYSIS_TIMEOUT",
+              scanId: scanIdFromAnalysis(serviceKeyRef.current),
+            },
+          }));
         }
-      }, 120000),
+      }, RESULT_ANALYSIS_TIMEOUT_MS),
     ];
     return () => timers.forEach(clearTimeout);
   }, [streaming, done]);
@@ -305,56 +790,215 @@ export default function ResultsScreen({ route, navigation }) {
     if (!done || !timerRef.current.start) return;
     const totalMs = Date.now() - timerRef.current.start;
     const totalSec = (totalMs / 1000).toFixed(1);
-    console.log(`[TIMER] Full analysis complete: ${totalMs}ms (${totalSec}s)`);
+    logger.debug(`[TIMER] Full analysis complete: ${totalMs}ms (${totalSec}s)`);
   }, [done]);
 
   // Increment scan count for free users when a new analysis completes
   useEffect(() => {
-    if (!done || scanCounted || isPro || mode === "history") return;
+    if (!done || error || !result || scanCounted || isPro || mode === "history") return;
     setScanCounted(true);
     try {
-      incrementScanCount();
+      incrementScanCount(scanUsage);
+      trackEvent(scanUsage ? "free_scan_count_synced" : "free_scan_count_incremented", {
+        mode,
+        scan_mode: isHumanFood ? "human_food" : mode,
+        scan_count: scanUsage?.scan_count,
+        remaining: scanUsage?.remaining,
+        source: scanUsage ? "server" : "legacy_client",
+      });
     } catch (err) {
-      console.log("[RESULTS] Error incrementing scan count:", err.message);
+      logger.debug("[RESULTS] Error incrementing scan count:", err.message);
     }
-  }, [done, scanCounted, isPro, mode, incrementScanCount]);
+  }, [done, error, result, scanCounted, isPro, mode, incrementScanCount, scanUsage]);
+
+  // Sync server scan count on failures too, including reversed scans.
+  useEffect(() => {
+    if (!done || !error || !scanUsage || scanCounted || isPro || mode === "history") return;
+    setScanCounted(true);
+    try {
+      incrementScanCount(scanUsage);
+      trackEvent("free_scan_count_synced_after_failure", {
+        mode,
+        scan_mode: isHumanFood ? "human_food" : mode,
+        scan_count: scanUsage.scan_count,
+        remaining: scanUsage.remaining,
+        reason: scanUsage.reason,
+        reversed: !!scanUsage.reversed,
+      });
+    } catch (err) {
+      logger.debug("[RESULTS] Error syncing failed scan count:", err.message);
+    }
+  }, [done, error, scanUsage, scanCounted, isPro, mode, incrementScanCount, isHumanFood]);
 
   // History saving is now handled by analysisService on completion
 
   const shareCardRef = useRef();
   const [selectedIngredient, setSelectedIngredient] = useState(null);
   const [showPostScanPrompt, setShowPostScanPrompt] = useState(false);
+  const [showReviewPrompt, setShowReviewPrompt] = useState(false);
+  const [showGuestSavePrompt, setShowGuestSavePrompt] = useState(false);
+  const [savingGuestProvider, setSavingGuestProvider] = useState(null);
+  const hasCompletedResultForPrompt = Boolean(
+    result?.overallScore != null ||
+    result?.safetyLevel ||
+    result?.foodName ||
+    result?.productName
+  );
 
   // First scan toast (one-time celebratory message)
   const [showFirstScanToast, setShowFirstScanToast] = useState(false);
   useEffect(() => {
     if (!done || isPro || mode === "history" || !result?.overallScore) return;
     let showTimer, hideTimer;
-    AsyncStorage.getItem("@woof_first_scan_toast_shown").then((val) => {
-      if (val) return;
-      AsyncStorage.setItem("@woof_first_scan_toast_shown", "true").catch(() => {});
+    hasSeenFirstScanToast(user?.id || null).then((seen) => {
+      if (seen) return;
+      markFirstScanToastSeen(user?.id || null).catch(() => {});
       showTimer = setTimeout(() => setShowFirstScanToast(true), 1200);
       hideTimer = setTimeout(() => setShowFirstScanToast(false), 4200);
     }).catch(() => {});
     return () => { clearTimeout(showTimer); clearTimeout(hideTimer); };
-  }, [done, isPro, mode, result?.overallScore]);
+  }, [done, isPro, mode, result?.overallScore, user?.id]);
 
   // Check if post-scan prompt should show (once, after 2+ scans, free users only)
   useEffect(() => {
     if (!done || isPro || mode === "history") return;
     const scansUsed = 3 - remainingScans();
     if (scansUsed < 2) return;
-    AsyncStorage.getItem("@woof_post_scan_prompt_shown").then((val) => {
-      if (!val) setShowPostScanPrompt(true);
+    hasSeenPostScanPrompt(user?.id || null).then((seen) => {
+      if (!seen) {
+        setShowPostScanPrompt(true);
+        trackEvent("post_scan_prompt_viewed", {
+          scans_used: scansUsed,
+          prompt_state_scoped: !!user?.id,
+        });
+      }
     }).catch(() => {});
-  }, [done, isPro, mode]);
+  }, [done, isPro, mode, remainingScans, user?.id]);
 
   const dismissPostScanPrompt = () => {
     setShowPostScanPrompt(false);
-    AsyncStorage.setItem("@woof_post_scan_prompt_shown", "true");
+    markPostScanPromptSeen(user?.id || null).catch(() => {});
+    trackEvent("post_scan_prompt_dismissed", {
+      prompt_state_scoped: !!user?.id,
+    });
+  };
+
+  useEffect(() => {
+    if (
+      !done ||
+      error ||
+      streaming ||
+      mode === "history" ||
+      (user?.id && !isAnonymous) ||
+      !hasCompletedResultForPrompt ||
+      showFirstScanToast ||
+      showPostScanPrompt ||
+      showReviewPrompt
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      hasSeenGuestSavePrompt(user?.id || null)
+        .then((seen) => {
+          if (cancelled || seen) return;
+          setShowGuestSavePrompt(true);
+          trackEvent("guest_save_prompt_viewed", {
+            source: "results",
+            scan_mode: isHumanFood ? "human_food" : mode,
+            score: result?.overallScore ?? null,
+            safety_level: result?.safetyLevel || null,
+            remaining_scans: remainingScans(),
+            prompt_state_scoped: !!user?.id,
+          });
+        })
+        .catch(() => {});
+    }, 700);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [
+    done,
+    error,
+    streaming,
+    mode,
+    isAnonymous,
+    user?.id,
+    isHumanFood,
+    hasCompletedResultForPrompt,
+    result?.overallScore,
+    result?.safetyLevel,
+    remainingScans,
+    user?.id,
+    showFirstScanToast,
+    showPostScanPrompt,
+    showReviewPrompt,
+  ]);
+
+  const dismissGuestSavePrompt = () => {
+    setShowGuestSavePrompt(false);
+    markGuestSavePromptSeen(user?.id || null).catch(() => {});
+    trackEvent("guest_save_prompt_dismissed", {
+      source: "results",
+      scan_mode: isHumanFood ? "human_food" : mode,
+      prompt_state_scoped: !!user?.id,
+    });
+  };
+
+  const handleGuestSave = async (provider) => {
+    const signIn = provider === "apple" ? signInWithApple : signInWithGoogle;
+    setSavingGuestProvider(provider);
+    trackEvent("guest_save_prompt_provider_tapped", {
+      provider,
+      source: "results",
+      scan_mode: isHumanFood ? "human_food" : mode,
+    });
+
+    try {
+      await signIn();
+      await markGuestSavePromptSeen(user?.id || null);
+      setShowGuestSavePrompt(false);
+      trackEvent("guest_save_prompt_completed", {
+        provider,
+        source: "results",
+        scan_mode: isHumanFood ? "human_food" : mode,
+        prompt_state_scoped: !!user?.id,
+      });
+    } catch (err) {
+      if (err.code === "ERR_REQUEST_CANCELED") {
+        trackEvent("guest_save_prompt_cancelled", {
+          provider,
+          source: "results",
+          scan_mode: isHumanFood ? "human_food" : mode,
+        });
+      } else {
+        trackEvent("guest_save_prompt_failed", {
+          provider,
+          source: "results",
+          scan_mode: isHumanFood ? "human_food" : mode,
+          code: err.code,
+          message: err.message,
+        });
+        Alert.alert(
+          "Could Not Save Account",
+          err.message || "Please try again in a moment."
+        );
+      }
+    } finally {
+      setSavingGuestProvider(null);
+    }
   };
 
   const navigatePaywall = (source) => {
+    trackEvent("paywall_requested", {
+      source,
+      mode,
+      scan_mode: isHumanFood ? "human_food" : mode,
+      score: result?.overallScore ?? null,
+    });
     navigation.navigate("Paywall", {
       source,
       productName: result?.productName,
@@ -362,40 +1006,183 @@ export default function ResultsScreen({ route, navigation }) {
     });
   };
 
-  const handleScanAnother = () => navigation.popToTop();
-  const handleTakePhoto = () => navigation.popToTop();
-  const handleBack = () => {
-    navigation.popToTop();
-  };
+  const reviewContext = useCallback(() => ({
+    source: "results",
+    score: result?.overallScore ?? null,
+    scanMode: isHumanFood ? "human_food" : mode,
+    isPro,
+    userId: user?.id || null,
+    remainingScans: remainingScans(),
+    fromCache,
+    dataSource,
+  }), [result?.overallScore, isHumanFood, mode, isPro, user?.id, remainingScans, fromCache, dataSource]);
 
-  const handleShare = async () => {
-    if (!result?.productName || !result?.overallScore) return;
-
-    // Share gate for free users
-    if (!isPro) {
-      Alert.alert(
-        "Share with Woof Pro",
-        "Upgrade to Pro to share your scan results.",
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "See Plans",
-            onPress: () => navigatePaywall("share_gate"),
-          },
-        ]
-      );
+  useEffect(() => {
+    if (
+      reviewPromptCheckedRef.current ||
+      !done ||
+      error ||
+      streaming ||
+      mode === "history" ||
+      isHumanFood ||
+      !result?.overallScore ||
+      showFirstScanToast ||
+      showPostScanPrompt ||
+      showGuestSavePrompt
+    ) {
       return;
     }
 
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      reviewPromptCheckedRef.current = true;
+      maybeShowReviewPrompt(reviewContext())
+        .then((eligibility) => {
+          if (!cancelled && eligibility.show) {
+            setShowReviewPrompt(true);
+          }
+        })
+        .catch(() => {});
+    }, 4800);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [
+    done,
+    error,
+    streaming,
+    mode,
+    isHumanFood,
+    result?.overallScore,
+    showFirstScanToast,
+    showPostScanPrompt,
+    showGuestSavePrompt,
+    reviewContext,
+  ]);
+
+  const handleReviewDismiss = () => {
+    setShowReviewPrompt(false);
+    dismissReviewPrompt(reviewContext());
+  };
+
+  const handleReviewRate = async () => {
+    setShowReviewPrompt(false);
+    const opened = await openStoreReview(reviewContext());
+    if (!opened) {
+      Alert.alert(
+        "Could Not Open App Store",
+        "Ratings are available from the App Store version of Woof. Please try again later."
+      );
+    }
+  };
+
+  const handleScanAnother = () => {
+    trackEvent("scan_another_tapped", { mode });
+    navigation.popToTop();
+  };
+
+  const handleHistoryRecovery = () => {
+    const savedProfile = normalizePetProfile(profile?.pet_profile);
+    trackEvent("history_result_rescan_tapped", {
+      scan_mode: scanMode || "pet_food",
+      pet_type: petType || savedProfile.petType || null,
+    });
+
+    if (isHumanFood) {
+      resetToScanner({
+        mode: "human_food",
+        petType: petType || savedProfile.petType || "dog",
+        petName: savedProfile.name || undefined,
+      });
+      return;
+    }
+
+    resetToScanner({ mode: "label_lookup" });
+  };
+
+  const resetToScanner = (params = {}) => {
+    navigation.reset({
+      index: 1,
+      routes: [
+        { name: "Home" },
+        { name: "Scanner", params },
+      ],
+    });
+  };
+
+  const handleRetry = () => {
+    trackEvent("scan_retry_tapped", {
+      mode,
+      scan_mode: isHumanFood ? "human_food" : mode,
+      pet_type: petType,
+    });
+
+    if (isHumanFood) {
+      resetToScanner({ mode: "human_food", petType });
+      return;
+    }
+
+    if (isIngredientCapture) {
+      resetToScanner({
+        mode: "ingredient_capture",
+        acquisitionQuery,
+        candidateProduct,
+        labelIdentification,
+        sourceSurface,
+      });
+      return;
+    }
+
+    resetToScanner(mode === "barcode" ? { fallbackToPhoto: true } : {});
+  };
+
+  const handleTakePhoto = () => {
+    trackEvent("take_photo_again_tapped", { mode });
+    resetToScanner({ fallbackToPhoto: true });
+  };
+  const handleBack = () => {
+    cancelRunningAnalysis("back_button");
+    if (mode === "catalog" && navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+    navigation.popToTop();
+  };
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener("beforeRemove", () => {
+      cancelRunningAnalysis("navigation_leave");
+    });
+    return unsubscribe;
+  }, [navigation, cancelRunningAnalysis]);
+
+  const handleShare = async () => {
+    if (!displayProductName || !result?.overallScore) return;
+
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const shareUrl = typeof WOOF_SHARE_URL === "string" ? WOOF_SHARE_URL.trim() : "";
+    const shareProperties = {
+      score: result.overallScore,
+      is_pro: isPro,
+      scan_mode: mode,
+      data_source: dataSource,
+      share_url_attached: Boolean(shareUrl),
+      share_url_host: shareUrlHost(shareUrl),
+    };
+    trackEvent("share_started", shareProperties);
     const config = getScoreConfig(result.overallScore);
-    const cleanName = result.productName
+    const cleanName = displayProductName
       .replace(/[^a-zA-Z0-9\s]/g, "")
       .replace(/\s+/g, "-")
       .substring(0, 30)
       .toLowerCase();
     const desiredName = `Woof-${cleanName}-${result.overallScore}`;
-    const shareMessage = `${result.productName} scored ${result.overallScore}/100 (${config.label}) on Woof!`;
+    const shareMessage = [
+      `${displayProductName} scored ${result.overallScore}/100 (${config.label}) on Woof!`,
+      shareUrl ? `Scan your pet food with Woof: ${shareUrl}` : null,
+    ].filter(Boolean).join("\n\n");
     try {
       const tmpUri = await captureRef(shareCardRef, {
         format: "png",
@@ -406,23 +1193,44 @@ export default function ResultsScreen({ route, navigation }) {
       const cleanUri = `${FileSystem.cacheDirectory}${desiredName}.png`;
       await FileSystem.copyAsync({ from: tmpUri, to: cleanUri });
       if (Platform.OS === "ios") {
-        await Share.share({
+        const shareResult = await Share.share({
           url: cleanUri,
           message: shareMessage,
         });
+        const resultProperties = shareResultProperties(shareResult);
+        if (shareWasDismissed(shareResult)) {
+          trackEvent("share_dismissed", { ...shareProperties, ...resultProperties, method: "image" });
+          return;
+        }
+        trackEvent("share_completed", { ...shareProperties, ...resultProperties, method: "image" });
       } else {
         await Sharing.shareAsync(cleanUri, {
           mimeType: "image/png",
           dialogTitle: `Woof Score: ${result.overallScore}/100`,
         });
+        trackEvent("share_completed", { ...shareProperties, method: "image" });
       }
     } catch (err) {
-      console.log("[SHARE] Image share failed:", err.message);
+      logger.debug("[SHARE] Image share failed:", err.message);
+      trackEvent("share_image_failed", {
+        ...shareProperties,
+        error_name: err?.name || "unknown",
+      });
       // Fallback to text share
       try {
-        await Share.share({ message: shareMessage });
+        const shareResult = await Share.share({ message: shareMessage });
+        const resultProperties = shareResultProperties(shareResult);
+        if (shareWasDismissed(shareResult)) {
+          trackEvent("share_dismissed", { ...shareProperties, ...resultProperties, method: "text" });
+          return;
+        }
+        trackEvent("share_completed", { ...shareProperties, ...resultProperties, method: "text" });
       } catch (shareErr) {
-        console.log("[SHARE] Text share also failed:", shareErr.message);
+        logger.debug("[SHARE] Text share also failed:", shareErr.message);
+        trackEvent("share_failed", {
+          ...shareProperties,
+          error_name: shareErr?.name || "unknown",
+        });
       }
     }
   };
@@ -478,8 +1286,13 @@ export default function ResultsScreen({ route, navigation }) {
         <ErrorState
           error={error}
           mode={mode}
-          onRetry={handleScanAnother}
-          onScanAnother={mode === "barcode" ? handleTakePhoto : handleScanAnother}
+          isScanLimit={scanLimitReached}
+          onUpgrade={() => navigatePaywall("scan_limit")}
+          onRetry={handleRetry}
+          onScanAnother={mode === "history"
+            ? handleHistoryRecovery
+            : (mode === "barcode" ? handleTakePhoto : handleScanAnother)}
+          historyScanMode={scanMode}
         />
       </View>
     );
@@ -489,7 +1302,47 @@ export default function ResultsScreen({ route, navigation }) {
 
   // --- Derived data ---
   const hasScore = result?.overallScore != null;
-  const { nutritionAnalysis, customerRating, categories } = result || {};
+  const { nutritionAnalysis, categories } = result || {};
+  const hasGuaranteedAnalysis = nutritionAnalysis?.hasPublishedNutrients === true;
+  const remainingScanCount = remainingScans();
+  const hasFullResultAccess = isPro || !Number.isFinite(remainingScanCount);
+  const petFoodImageUri = !isHumanFood ? productImageUri({ result, opffData, uri }) : null;
+  const ingredientVerification = result?.ingredientVerification || {};
+  const savedPetProfile = normalizePetProfile(profile?.pet_profile);
+  const petSafety = !isHumanFood ? personalizePetSafety(result, savedPetProfile) : null;
+  const humanFoodPetName = routePetName || (
+    savedPetProfile.petType === (petType || result?.petType)
+      ? savedPetProfile.name
+      : ""
+  );
+  const petSafetyColor = petSafety?.personalized === false
+    ? theme.textSecondary
+    : petSafety?.level === "avoid"
+      ? Colors.scoreConcerning
+      : petSafety?.level === "caution"
+        ? Colors.scoreDecent
+        : Colors.scoreExcellent;
+  const verificationSource = isIngredientCapture
+    ? "User submission"
+    : titleCaseStatus(
+      ingredientVerification.sourceQuality ||
+      ingredientVerification.source ||
+      dataSource
+    );
+  const ingredientStatus = isIngredientCapture
+    ? "Pending review"
+    : titleCaseStatus(ingredientVerification.status || result?.verificationState?.ingredientVerificationStatus);
+  const imageStatus = isIngredientCapture
+    ? "User photo"
+    : titleCaseStatus(ingredientVerification.imageStatus || result?.verificationState?.imageVerificationStatus);
+  const sourceHost = shareUrlHost(ingredientVerification.sourceUrl || result?.sourceUrl);
+  const hasVerifiedCatalogEvidence = Boolean(
+    !isIngredientCapture &&
+    ingredientStatus &&
+    imageStatus &&
+    sourceHost &&
+    !/unverified|candidate|missing|pending/i.test(`${ingredientStatus} ${imageStatus}`)
+  );
 
   // --- Success — unified scrollable page ---
   return (
@@ -500,6 +1353,9 @@ export default function ResultsScreen({ route, navigation }) {
           style={styles.backButton}
           onPress={handleBack}
           activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          accessibilityHint="Returns to the previous screen"
         >
           <ChevronLeft size={24} color={theme.textPrimary} strokeWidth={2} />
         </TouchableOpacity>
@@ -518,7 +1374,7 @@ export default function ResultsScreen({ route, navigation }) {
               </Text>
             </Animated.View>
             <Text style={styles.headerProductName} numberOfLines={1}>
-              {result.productName}
+              {displayProductName}
             </Text>
           </Animated.View>
         ) : (
@@ -533,6 +1389,7 @@ export default function ResultsScreen({ route, navigation }) {
             disabled={!(done && hasScore)}
             accessibilityRole="button"
             accessibilityLabel="Share results"
+            accessibilityHint="Shares a Woof result card"
             accessibilityState={{ disabled: !(done && hasScore) }}
           >
             <Share2 size={24} color={theme.textPrimary} strokeWidth={2} />
@@ -553,7 +1410,11 @@ export default function ResultsScreen({ route, navigation }) {
             {/* Safety badge — hero */}
             {result.safetyLevel ? (
               <StreamSection visible delay={50}>
-                <SafetyBadge safetyLevel={result.safetyLevel} petType={petType || result.petType} />
+                <SafetyBadge
+                  safetyLevel={result.safetyLevel}
+                  petType={petType || result.petType}
+                  petName={humanFoodPetName}
+                />
               </StreamSection>
             ) : streaming ? (
               <View style={styles.heroSection}>
@@ -590,7 +1451,7 @@ export default function ResultsScreen({ route, navigation }) {
                   {/* Portions */}
                   <View style={{ flex: 1, backgroundColor: theme.card, borderRadius: 12, padding: 14, alignItems: "center", ...Shadows.card }}>
                     <Utensils size={18} color={result.portions === "Do not feed" ? Colors.scoreConcerning : Colors.scoreExcellent} strokeWidth={1.8} />
-                    <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "600", marginTop: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>Portion</Text>
+                    <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "600", marginTop: 8, textTransform: "uppercase", letterSpacing: 0 }}>Portion</Text>
                     <Text style={{ color: theme.textPrimary, fontSize: 13, fontWeight: "500", marginTop: 4, textAlign: "center" }} numberOfLines={2}>
                       {result.portions || "N/A"}
                     </Text>
@@ -598,7 +1459,7 @@ export default function ResultsScreen({ route, navigation }) {
                   {/* Preparation */}
                   <View style={{ flex: 1, backgroundColor: theme.card, borderRadius: 12, padding: 14, alignItems: "center", ...Shadows.card }}>
                     <ShieldCheck size={18} color={Colors.blue} strokeWidth={1.8} />
-                    <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "600", marginTop: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>Prep</Text>
+                    <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "600", marginTop: 8, textTransform: "uppercase", letterSpacing: 0 }}>Prep</Text>
                     <Text style={{ color: theme.textPrimary, fontSize: 13, fontWeight: "500", marginTop: 4, textAlign: "center" }} numberOfLines={2}>
                       {result.preparation || "N/A"}
                     </Text>
@@ -606,7 +1467,7 @@ export default function ResultsScreen({ route, navigation }) {
                   {/* Age */}
                   <View style={{ flex: 1, backgroundColor: theme.card, borderRadius: 12, padding: 14, alignItems: "center", ...Shadows.card }}>
                     <Calendar size={18} color={Colors.amber} strokeWidth={1.8} />
-                    <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "600", marginTop: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>Ages</Text>
+                    <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "600", marginTop: 8, textTransform: "uppercase", letterSpacing: 0 }}>Ages</Text>
                     <Text style={{ color: theme.textPrimary, fontSize: 13, fontWeight: "500", marginTop: 4, textAlign: "center" }} numberOfLines={2}>
                       {result.ageGuidance?.note || "All ages"}
                     </Text>
@@ -619,7 +1480,7 @@ export default function ResultsScreen({ route, navigation }) {
             {done && result.ageGuidance && (
               <StreamSection visible delay={200}>
                 <View style={{ backgroundColor: theme.card, borderRadius: Spacing.cardRadius, padding: 16, marginBottom: 12, ...Shadows.card }}>
-                  <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "600", letterSpacing: 1, textTransform: "uppercase", marginBottom: 12 }}>
+                  <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "600", letterSpacing: 0, textTransform: "uppercase", marginBottom: 12 }}>
                     Age Suitability
                   </Text>
                   {[
@@ -671,7 +1532,7 @@ export default function ResultsScreen({ route, navigation }) {
             {done && result.explanation ? (
               <StreamSection visible delay={300}>
                 <View style={{ backgroundColor: theme.card, borderRadius: Spacing.cardRadius, padding: 16, ...Shadows.card }}>
-                  <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "600", letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 }}>
+                  <Text style={{ color: theme.textTertiary, fontSize: 11, fontWeight: "600", letterSpacing: 0, textTransform: "uppercase", marginBottom: 8 }}>
                     Why?
                   </Text>
                   <Text style={{ color: theme.textPrimary, fontSize: 15, lineHeight: 23 }}>
@@ -687,7 +1548,7 @@ export default function ResultsScreen({ route, navigation }) {
                 <View style={{ backgroundColor: Colors.recallBackground, borderRadius: Spacing.cardRadius, padding: 16, marginTop: 12, borderLeftWidth: 3, borderLeftColor: Colors.scoreConcerning }}>
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
                     <AlertCircle size={16} color={Colors.scoreConcerning} strokeWidth={2} />
-                    <Text style={{ color: Colors.scoreConcerning, fontSize: 11, fontWeight: "700", letterSpacing: 1, textTransform: "uppercase" }}>
+                    <Text style={{ color: Colors.scoreConcerning, fontSize: 11, fontWeight: "700", letterSpacing: 0, textTransform: "uppercase" }}>
                       Symptoms to Watch
                     </Text>
                   </View>
@@ -727,21 +1588,39 @@ export default function ResultsScreen({ route, navigation }) {
         {/* === Pet Food Analysis Layout === */}
         {!isHumanFood && (
           <>
+            {petFoodImageUri ? (
+              <StreamSection visible delay={40}>
+                <View style={styles.productImageHero}>
+                  <Image
+                    source={{ uri: petFoodImageUri }}
+                    style={styles.productImage}
+                    resizeMode="contain"
+                    accessibilityLabel={`${displayProductName || "Product"} package image`}
+                  />
+                </View>
+              </StreamSection>
+            ) : null}
+
             {/* 1. Product Name */}
             {result.productName ? (
               <Animated.View entering={FadeInUp.delay(200).duration(400).damping(20).stiffness(300)}>
-                <Text style={styles.productName} numberOfLines={2}>
+                <Text style={styles.productName} numberOfLines={3}>
                   {streaming && !hasScore ? (
                     <StreamingText
-                      text={result.productName}
+                      text={displayProductName}
                       streaming
                       done={done}
                       style={styles.productName}
                     />
                   ) : (
-                    result.productName
+                    displayProductName
                   )}
                 </Text>
+                {variantSummary ? (
+                  <Text style={styles.productVariant} numberOfLines={2}>
+                    {variantSummary}
+                  </Text>
+                ) : null}
               </Animated.View>
             ) : streaming ? (
               <View style={{ alignItems: "center", paddingVertical: 8 }}>
@@ -763,8 +1642,8 @@ export default function ResultsScreen({ route, navigation }) {
             ) : null}
 
             {/* Scan limit banner (free users, new scans only) */}
-            {done && !isPro && mode !== "history" && hasScore && (
-              <ScanLimitBanner remaining={remainingScans()} />
+            {done && !hasFullResultAccess && mode !== "history" && hasScore && (
+              <ScanLimitBanner remaining={remainingScanCount} />
             )}
 
             {/* 3. Quick Stats */}
@@ -772,7 +1651,95 @@ export default function ResultsScreen({ route, navigation }) {
               <QuickStatsGrid nutrition={nutritionAnalysis} />
             </StreamSection>
 
-            {/* 4. AI Verdict */}
+            {/* 4. Verification and pet safety */}
+            <StreamSection visible={isIngredientCapture || !!ingredientVerification.status || !!petSafety} delay={150}>
+              <View style={{ backgroundColor: theme.card, borderRadius: Spacing.cardRadius, padding: 16, marginTop: 12, borderWidth: 1, borderColor: theme.separator }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                  <ShieldCheck size={18} color={petSafetyColor} strokeWidth={2.2} />
+                  <Text style={{ color: theme.textPrimary, fontSize: 16, fontWeight: "700", flex: 1 }}>
+                    {isIngredientCapture ? "Pending catalog verification" : petSafety?.label || "Verified catalog result"}
+                  </Text>
+                </View>
+                <Text style={{ color: theme.textSecondary, fontSize: 14, lineHeight: 20, marginBottom: 12 }}>
+                  {isIngredientCapture
+                    ? "This result uses the ingredients scanned from your photo. Woof has saved the submission for catalog review, but it is not verified yet."
+                    : petSafety?.summary || "Scored only from source-backed catalog ingredients and a verified product image."}
+                </Text>
+                {petSafety?.personalized ? (
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 12 }}>
+                    <PawPrint size={14} color={theme.textTertiary} strokeWidth={1.8} />
+                    <Text style={{ color: theme.textTertiary, fontSize: 12, fontWeight: "600", flex: 1 }}>
+                      {petSafety.profileLabel}
+                    </Text>
+                    <Pressable
+                      onPress={() => navigation.navigate("Profile", {
+                        openPetEditor: true,
+                        returnAfterPetSave: true,
+                      })}
+                      accessibilityRole="button"
+                      accessibilityLabel="Edit pet details"
+                    >
+                      <Text style={{ color: theme.textPrimary, fontSize: 12, fontWeight: "700" }}>Edit</Text>
+                    </Pressable>
+                  </View>
+                ) : (
+                  <Pressable
+                    onPress={() => navigation.navigate("Profile", {
+                      openPetEditor: true,
+                      returnAfterPetSave: true,
+                    })}
+                    style={({ pressed }) => ({
+                      minHeight: 40,
+                      borderRadius: 8,
+                      borderWidth: 1,
+                      borderColor: theme.separator,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      marginBottom: 12,
+                      opacity: pressed ? 0.65 : 1,
+                    })}
+                    accessibilityRole="button"
+                    accessibilityLabel="Add pet details"
+                    accessibilityHint="Opens Profile to set personalized ingredient checks"
+                  >
+                    <Text style={{ color: theme.textPrimary, fontSize: 14, fontWeight: "600" }}>Add Pet Details</Text>
+                  </Pressable>
+                )}
+                <View style={{ gap: 8 }}>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
+                    <Text style={{ color: theme.textTertiary, fontSize: 12, fontWeight: "600" }}>Ingredients</Text>
+                    <Text style={{ color: theme.textPrimary, fontSize: 12, fontWeight: "700", flexShrink: 1, textAlign: "right" }}>
+                      {ingredientStatus || "Not available"}
+                    </Text>
+                  </View>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
+                    <Text style={{ color: theme.textTertiary, fontSize: 12, fontWeight: "600" }}>Image</Text>
+                    <Text style={{ color: theme.textPrimary, fontSize: 12, fontWeight: "700", flexShrink: 1, textAlign: "right" }}>
+                      {imageStatus || "Not available"}
+                    </Text>
+                  </View>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
+                    <Text style={{ color: theme.textTertiary, fontSize: 12, fontWeight: "600" }}>Source</Text>
+                    <Text style={{ color: theme.textPrimary, fontSize: 12, fontWeight: "700", flexShrink: 1, textAlign: "right" }}>
+                      {[verificationSource, isIngredientCapture ? "" : sourceHost].filter(Boolean).join(" • ") || "Catalog"}
+                    </Text>
+                  </View>
+                  {!isIngredientCapture ? (
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+                        <Calendar size={13} color={theme.textTertiary} strokeWidth={2} />
+                        <Text style={{ color: theme.textTertiary, fontSize: 12, fontWeight: "600" }}>Verified</Text>
+                      </View>
+                      <Text style={{ color: theme.textPrimary, fontSize: 12, fontWeight: "700", flexShrink: 1, textAlign: "right" }}>
+                        {dateDisplay(ingredientVerification.verifiedAt)}
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+              </View>
+            </StreamSection>
+
+            {/* 5. Verdict */}
             <StreamSection visible={!!result.verdict} delay={200}>
               <VerdictCard
                 verdict={result.verdict}
@@ -783,29 +1750,27 @@ export default function ResultsScreen({ route, navigation }) {
               />
             </StreamSection>
 
-            {/* 5. Ingredients (pro: 5 + expand, free: 3 + fade) */}
+            {/* 6. Exact source-backed ingredients stay available to every user. */}
             <StreamSection visible={result.ingredients?.length > 0} delay={250}>
               <IngredientsSection
-                ingredients={isPro ? result.ingredients : result.ingredients?.slice(0, 3)}
+                ingredients={result.ingredients}
                 onIngredientPress={setSelectedIngredient}
-                totalCount={!isPro ? result.ingredients?.length : undefined}
-                fadeLastItem={!isPro && result.ingredients?.length > 3}
               />
             </StreamSection>
 
             {/* First scan toast (free users only) */}
-            <FirstScanToast visible={showFirstScanToast} />
+            <FirstScanToast visible={!hasFullResultAccess && showFirstScanToast} />
 
             {/* ProGateOverlay — shown for free users when analysis is done */}
-            {!isPro && done && hasScore && (
+            {!hasFullResultAccess && done && hasScore && !showPostScanPrompt && (
               <ProGateOverlay
                 onUpgrade={() => navigatePaywall("results_gate")}
-                remainingScans={remainingScans()}
+                remainingScans={remainingScanCount}
               />
             )}
 
             {/* Scan Another — below gate for free users */}
-            {done && !isPro && (
+            {done && !hasFullResultAccess && (
               <StreamSection visible delay={300}>
                 <ScanAnotherButton onPress={handleScanAnother} />
               </StreamSection>
@@ -835,19 +1800,10 @@ export default function ResultsScreen({ route, navigation }) {
                 </StreamSection>
 
                 {/* 7. Nutrition Facts */}
-                <StreamSection visible={!!nutritionAnalysis} delay={300}>
+                <StreamSection visible={hasGuaranteedAnalysis} delay={300}>
                   <NutritionFacts nutrition={nutritionAnalysis} />
                 </StreamSection>
 
-                {/* 9. Customer Reviews */}
-                <StreamSection visible={!!customerRating} delay={350}>
-                  <ReviewsSection customerRating={customerRating} />
-                </StreamSection>
-
-                {/* 10. Recall History */}
-                <StreamSection visible={!!result.recallHistory} delay={400}>
-                  <RecallCard recallHistory={result.recallHistory} />
-                </StreamSection>
               </>
             )}
 
@@ -877,27 +1833,45 @@ export default function ResultsScreen({ route, navigation }) {
               />
             )}
 
-            {/* AI disclaimer */}
+            {showReviewPrompt && (
+              <ReviewPrompt
+                onRate={handleReviewRate}
+                onDismiss={handleReviewDismiss}
+              />
+            )}
+
+            {/* Result disclosure */}
             {done && (
               <Text style={{ color: theme.textTertiary, fontSize: 12, lineHeight: 18, textAlign: "center", marginTop: 24, marginBottom: 8, paddingHorizontal: 20 }}>
-                AI-powered analysis may contain errors. Not a substitute for professional veterinary advice.
+                {hasVerifiedCatalogEvidence
+                  ? "Ingredient list and product image are source-backed catalog data. Scores are informational, not veterinary advice."
+                  : "AI-assisted analysis may contain errors. Not a substitute for professional veterinary advice."}
               </Text>
             )}
           </>
+        )}
+
+        {showGuestSavePrompt && (
+          <GuestSavePrompt
+            onSave={handleGuestSave}
+            onDismiss={dismissGuestSavePrompt}
+            savingProvider={savingGuestProvider}
+            showApple={Platform.OS === "ios"}
+          />
         )}
       </Animated.ScrollView>
 
       {/* Off-screen share card for view-shot capture */}
       {done && hasScore && (
         <View
-          style={{ position: "absolute", left: -9999, top: 0 }}
-          pointerEvents="none"
+          style={{ position: "absolute", left: -9999, top: 0, pointerEvents: "none" }}
           collapsable={false}
         >
           <ShareCard
             ref={shareCardRef}
-            result={result}
+            result={displayResult}
             nutrition={nutritionAnalysis}
+            shareUrl={shareUrlDisplay(WOOF_SHARE_URL)}
           />
         </View>
       )}

@@ -1,6 +1,6 @@
 const APP_NAME = "Woof";
 const SUPPORT_EMAIL = "woofapp.help@gmail.com";
-const EFFECTIVE_DATE = "March 16, 2026";
+const EFFECTIVE_DATE = "June 16, 2026";
 
 const baseStyles = `
   <style>
@@ -36,11 +36,11 @@ export const PRIVACY_HTML = `<!DOCTYPE html>
 
 <h2>Information We Collect</h2>
 <ul>
-  <li><strong>Account information:</strong> email address and display name when you sign in with Apple or Google.</li>
+  <li><strong>Guest and account information:</strong> a guest account identifier when you use the app without signing in, plus email address and display name if you later sign in with Apple or Google.</li>
   <li><strong>Photos:</strong> images of pet food labels you scan. Photos are sent to our servers for analysis and are not stored after processing.</li>
   <li><strong>Barcodes:</strong> barcode numbers you scan, used to look up product information.</li>
   <li><strong>Scan history:</strong> product names, scores, and analysis results are stored to provide your history.</li>
-  <li><strong>Device information:</strong> device type and OS version for app functionality and troubleshooting.</li>
+  <li><strong>Device information and crash reports:</strong> app version, device/platform details, errors, and crash diagnostics for app functionality and troubleshooting.</li>
 </ul>
 
 <h2>How We Use Your Information</h2>
@@ -49,6 +49,7 @@ export const PRIVACY_HTML = `<!DOCTYPE html>
   <li>Display your scan history.</li>
   <li>Cache analysis results to improve performance.</li>
   <li>Process subscription purchases.</li>
+  <li>Diagnose crashes, errors, and reliability issues.</li>
 </ul>
 
 <h2>AI-Generated Content</h2>
@@ -60,11 +61,12 @@ export const PRIVACY_HTML = `<!DOCTYPE html>
   <li><strong>Anthropic (Claude):</strong> AI-powered ingredient analysis. Label photos are sent to their API for processing.</li>
   <li><strong>Open Pet Food Facts:</strong> product database lookups by barcode.</li>
   <li><strong>RevenueCat:</strong> subscription management.</li>
-  <li><strong>Apple / Google:</strong> sign-in authentication.</li>
+  <li><strong>Sentry:</strong> crash reporting and error diagnostics.</li>
+  <li><strong>Apple / Google:</strong> optional sign-in authentication.</li>
 </ul>
 
 <h2>Data Retention</h2>
-<p>Your scan history and cached analyses are retained while your account is active. You can delete your account and all associated data at any time from the Profile screen in the app.</p>
+<p>Your scan history and cached analyses are retained while your guest profile or signed-in account is active. You can delete your guest data or account and associated data at any time from the Profile screen in the app. Deletion removes your account, scan history, scan usage records, linkable operational analytics, subscription webhook records associated with your app user ID, and local on-device scan/result caches. App Store or Google Play purchase records may remain with the store for billing and legal reasons.</p>
 
 <h2>Data Security</h2>
 <p>We use industry-standard security measures including encrypted connections (HTTPS), server-side API key management, and row-level security policies on our database.</p>
@@ -97,11 +99,11 @@ export const TERMS_HTML = `<!DOCTYPE html>
 <p>The information provided by ${APP_NAME} is for informational purposes only. It is not a substitute for professional veterinary advice, diagnosis, or treatment. Always consult your veterinarian with questions about your pet's diet. Do not make feeding decisions based solely on ${APP_NAME}'s AI-generated analysis.</p>
 
 <h2>Account</h2>
-<p>You must sign in with Apple or Google to use the App. You are responsible for maintaining the security of your account.</p>
+<p>You can use the App with a guest profile. Apple or Google sign-in is optional and helps preserve your scan history and subscription access across devices. You are responsible for maintaining the security of your signed-in account.</p>
 
 <h2>Free Scans & Subscriptions</h2>
 <ul>
-  <li>${APP_NAME} provides 3 free scans with limited results. Free scans show the overall score, quick stats, a summary verdict, and the first 3 ingredients. Full ingredient details, quality breakdown, reviews, and recall history require a paid subscription.</li>
+  <li>${APP_NAME} provides 3 free scans with limited results. Free scans show the overall score, quick stats, a summary verdict, and the first 3 ingredients. Full ingredient details, quality breakdown, nutrition details, and saved scan history require a paid subscription.</li>
   <li>Some features require a paid subscription (Woof Pro).</li>
   <li>Subscriptions are billed through Apple's App Store or Google Play. Some plans include a free trial period. If you cancel before the trial ends, you will not be charged. After the trial, your subscription renews automatically at the plan price until you cancel.</li>
   <li>Payment is charged to your Apple ID or Google Play account at confirmation of purchase, or at the end of the free trial period if applicable.</li>

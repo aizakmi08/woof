@@ -72,8 +72,8 @@ export const Colors = {
     card: "#2C2C2E",
     surface: "#3A3A3C",
     textPrimary: "#F5F5F5",
-    textSecondary: "#8E8E93",
-    textTertiary: "#48484A",
+    textSecondary: "#AEAEB2",
+    textTertiary: "#A3A3A8",
     separator: "#3A3A3C",
     fill: "rgba(255,255,255,0.06)",
     fillSecondary: "rgba(255,255,255,0.10)",
@@ -82,24 +82,24 @@ export const Colors = {
 };
 
 export const Typography = {
-  screenTitle: { fontSize: 34, fontWeight: "700", letterSpacing: -0.5 },
-  sectionHeader: { fontSize: 22, fontWeight: "600", letterSpacing: -0.3 },
+  screenTitle: { fontSize: 34, fontWeight: "700", letterSpacing: 0 },
+  sectionHeader: { fontSize: 22, fontWeight: "600", letterSpacing: 0 },
   cardTitle: { fontSize: 17, fontWeight: "600" },
   body: { fontSize: 15, fontWeight: "400", lineHeight: 22 },
   bodySecondary: { fontSize: 15, fontWeight: "400", lineHeight: 22 },
   caption: { fontSize: 13, fontWeight: "400" },
-  label: { fontSize: 11, fontWeight: "600", letterSpacing: 1.5, textTransform: "uppercase" },
-  scoreLarge: { fontSize: 48, fontWeight: "700", letterSpacing: -1 },
-  scoreLabel: { fontSize: 13, fontWeight: "600", letterSpacing: 2, textTransform: "uppercase" },
+  label: { fontSize: 11, fontWeight: "600", letterSpacing: 0, textTransform: "uppercase" },
+  scoreLarge: { fontSize: 48, fontWeight: "700", letterSpacing: 0 },
+  scoreLabel: { fontSize: 13, fontWeight: "600", letterSpacing: 0, textTransform: "uppercase" },
   statValue: { fontSize: 16, fontWeight: "600" },
-  statLabel: { fontSize: 11, fontWeight: "600", letterSpacing: 1, textTransform: "uppercase" },
-  button: { fontSize: 17, fontWeight: "600", letterSpacing: 0.5 },
+  statLabel: { fontSize: 11, fontWeight: "600", letterSpacing: 0, textTransform: "uppercase" },
+  button: { fontSize: 17, fontWeight: "600", letterSpacing: 0 },
 
   // Legacy aliases (used in ResultsScreen styles)
   bodyBold: { fontSize: 15, fontWeight: "600", lineHeight: 22 },
   captionBold: { fontSize: 13, fontWeight: "600" },
   smallLabel: { fontSize: 10, fontWeight: "700" },
-  score: { fontSize: 48, fontWeight: "700", letterSpacing: -1 },
+  score: { fontSize: 48, fontWeight: "700", letterSpacing: 0 },
 };
 
 export const Spacing = {
@@ -134,26 +134,12 @@ export const Spacing = {
 
 export const Shadows = {
   card: {
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 2,
+    boxShadow: "0 2px 8px rgba(0, 0, 0, 0.06)",
   },
   button: {
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 3,
+    boxShadow: "0 2px 12px rgba(0, 0, 0, 0.08)",
   },
-  scoreGlow: (color) => ({
-    shadowColor: color,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.08,
-    shadowRadius: 40,
-    elevation: 0,
-  }),
+  scoreGlow: (color) => ({ boxShadow: `0 0 40px ${color}14` }),
 };
 
 export const Animation = {

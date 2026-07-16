@@ -18,5 +18,6 @@ END;
 $$;
 
 -- Only authenticated users can call this
+REVOKE ALL ON FUNCTION public.delete_own_account() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.delete_own_account() FROM anon;
 GRANT EXECUTE ON FUNCTION public.delete_own_account() TO authenticated;

@@ -1,7 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   StyleSheet,
-  Text,
   View,
   Pressable,
   Alert,
@@ -9,6 +8,7 @@ import {
   Platform,
   Modal,
 } from "react-native";
+import { AppText as Text, MAX_FONT_SIZE_MULTIPLIER } from "../components/AppText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Animated, {
   useSharedValue,
@@ -18,11 +18,12 @@ import Animated, {
 } from "react-native-reanimated";
 import { WebView } from "react-native-webview";
 import Svg, { Path } from "react-native-svg";
-import { X } from "lucide-react-native";
+import { UserRound, X } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { useAuth } from "../services/auth";
 import { useTheme, Colors, Spacing, Shadows, Typography } from "../theme";
 import { PRIVACY_HTML, TERMS_HTML } from "../legal";
+import { trackEvent } from "../services/analytics";
 
 function AppLogo({ size = 48 }) {
   return (
@@ -54,32 +55,88 @@ function AuthButton({ onPress, onPressIn, onPressOut, style, children, disabled,
   );
 }
 
+function providerErrorCopy(provider, error) {
+  const code = String(error?.code || "").toLowerCase();
+  const message = String(error?.message || "").toLowerCase();
+
+  if (code === "err_request_canceled" || code === "err_request_cancelled") {
+    return null;
+  }
+
+  if (
+    provider === "apple" &&
+    (
+      code === "err_request_unknown" ||
+      message.includes("unknown reason") ||
+      message.includes("authorizationerror error 1000")
+    )
+  ) {
+    return {
+      title: "Apple Sign-In Unavailable",
+      message: "Apple Sign-In needs an Apple Account on this device. Sign in to iCloud in Settings or continue with Google.",
+    };
+  }
+
+  return {
+    title: "Sign In Failed",
+    message: `We couldn't sign you in with ${provider === "apple" ? "Apple" : "Google"}. Please try again or use another sign-in option.`,
+  };
+}
+
 export default function AuthScreen() {
   const theme = useTheme();
-  const { signInWithApple, signInWithGoogle } = useAuth();
+  const {
+    anonymousUnavailable,
+    signInWithApple,
+    signInWithGoogle,
+    startAnonymousSession,
+  } = useAuth();
   const [loadingApple, setLoadingApple] = useState(false);
   const [loadingGoogle, setLoadingGoogle] = useState(false);
+  const [loadingGuest, setLoadingGuest] = useState(false);
   const [legalModal, setLegalModal] = useState(null); // { title, html } or null
 
   const appleScale = useSharedValue(1);
   const googleScale = useSharedValue(1);
+  const guestScale = useSharedValue(1);
   const appleAnimStyle = useAnimatedStyle(() => ({
     transform: [{ scale: appleScale.value }],
   }));
   const googleAnimStyle = useAnimatedStyle(() => ({
     transform: [{ scale: googleScale.value }],
   }));
+  const guestAnimStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: guestScale.value }],
+  }));
 
   const spring = { damping: 15, stiffness: 150 };
+
+  useEffect(() => {
+    trackEvent("auth_viewed", {
+      guest_option_available: !anonymousUnavailable,
+      apple_available: Platform.OS === "ios",
+      google_available: true,
+    });
+  }, [anonymousUnavailable]);
 
   const handleApple = async () => {
     try {
       setLoadingApple(true);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      trackEvent("auth_sign_in_started", { provider: "apple" });
       await signInWithApple();
+      trackEvent("auth_sign_in_completed_client", { provider: "apple" });
     } catch (err) {
-      if (err.code !== "ERR_REQUEST_CANCELED") {
-        Alert.alert("Sign In Failed", err.message);
+      const errorCopy = providerErrorCopy("apple", err);
+      if (errorCopy) {
+        trackEvent("auth_sign_in_failed", {
+          provider: "apple",
+          code: err.code,
+          message: err.message,
+        });
+        Alert.alert(errorCopy.title, errorCopy.message);
+      } else {
+        trackEvent("auth_sign_in_cancelled", { provider: "apple" });
       }
     } finally {
       setLoadingApple(false);
@@ -90,15 +147,57 @@ export default function AuthScreen() {
     try {
       setLoadingGoogle(true);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      trackEvent("auth_sign_in_started", { provider: "google" });
       await signInWithGoogle();
+      trackEvent("auth_sign_in_completed_client", { provider: "google" });
     } catch (err) {
-      Alert.alert("Sign In Failed", err.message);
+      const errorCopy = providerErrorCopy("google", err);
+      if (!errorCopy) {
+        trackEvent("auth_sign_in_cancelled", { provider: "google" });
+      } else {
+        trackEvent("auth_sign_in_failed", {
+          provider: "google",
+          code: err.code,
+          message: err.message,
+        });
+        Alert.alert(errorCopy.title, errorCopy.message);
+      }
     } finally {
       setLoadingGoogle(false);
     }
   };
 
-  const isLoading = loadingApple || loadingGoogle;
+  const handleGuest = async () => {
+    if (anonymousUnavailable) {
+      Alert.alert(
+        "Guest Mode Unavailable",
+        "Please continue with Apple or Google so scans and product submissions can be saved."
+      );
+      return;
+    }
+
+    try {
+      setLoadingGuest(true);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      trackEvent("guest_continue_started", { source: "auth_screen" });
+      await startAnonymousSession({ automatic: false });
+      trackEvent("guest_continue_completed", { source: "auth_screen" });
+    } catch (err) {
+      trackEvent("guest_continue_failed", {
+        source: "auth_screen",
+        code: err.code,
+        message: err.message,
+      });
+      Alert.alert(
+        "Guest Mode Unavailable",
+        "Please continue with Apple or Google so scans and product submissions can be saved."
+      );
+    } finally {
+      setLoadingGuest(false);
+    }
+  };
+
+  const isLoading = loadingApple || loadingGoogle || loadingGuest;
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.bg }]}>
@@ -112,6 +211,7 @@ export default function AuthScreen() {
           <Text style={[styles.brand, { color: theme.textPrimary }]}>Woof</Text>
         </Animated.View>
         <Animated.Text
+          maxFontSizeMultiplier={MAX_FONT_SIZE_MULTIPLIER}
           entering={FadeInDown.delay(200).duration(500).springify()}
           style={[styles.tagline, { color: theme.textTertiary }]}
         >
@@ -191,9 +291,63 @@ export default function AuthScreen() {
           </AuthButton>
         </Animated.View>
 
+        <Animated.View
+          entering={FadeInDown.delay(Platform.OS === "ios" ? 500 : 400).duration(400).springify()}
+        >
+          {anonymousUnavailable ? (
+            <View
+              style={[
+                styles.guestUnavailable,
+                { backgroundColor: theme.surface, borderColor: theme.separator },
+              ]}
+              accessible
+              accessibilityRole="alert"
+              accessibilityLabel="Guest mode is temporarily unavailable. Continue with Apple or Google."
+            >
+              <UserRound size={19} color={theme.textSecondary} strokeWidth={2} />
+              <View style={styles.guestUnavailableCopy}>
+                <Text style={[styles.guestUnavailableTitle, { color: theme.textPrimary }]}>
+                  Guest mode temporarily unavailable
+                </Text>
+                <Text style={[styles.guestUnavailableBody, { color: theme.textSecondary }]}>
+                  Continue with Apple or Google
+                </Text>
+              </View>
+            </View>
+          ) : (
+            <AuthButton
+              onPress={handleGuest}
+              onPressIn={() => { guestScale.value = withSpring(0.97, spring); }}
+              onPressOut={() => { guestScale.value = withSpring(1, spring); }}
+              disabled={isLoading}
+              accessibilityLabel="Continue as guest"
+            >
+              <Animated.View
+                style={[
+                  styles.button,
+                  styles.guestButton,
+                  { backgroundColor: theme.surface, borderColor: theme.separator },
+                  guestAnimStyle,
+                ]}
+              >
+                {loadingGuest ? (
+                  <ActivityIndicator color={theme.textPrimary} />
+                ) : (
+                  <>
+                    <UserRound size={19} color={theme.textPrimary} strokeWidth={2} />
+                    <Text style={[styles.buttonText, { color: theme.textPrimary }]}>
+                      Continue as Guest
+                    </Text>
+                  </>
+                )}
+              </Animated.View>
+            </AuthButton>
+          )}
+        </Animated.View>
+
         {/* Legal */}
         <Animated.View
-          entering={FadeInDown.delay(500).duration(400).springify()}
+          entering={FadeInDown.delay(Platform.OS === "ios" ? 600 : 500).duration(400).springify()}
           style={styles.legalContainer}
         >
           <Text style={[styles.legalText, { color: theme.textTertiary }]}>
@@ -205,6 +359,8 @@ export default function AuthScreen() {
               setLegalModal({ title: "Terms of Use", html: TERMS_HTML });
             }}
             style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
+            accessibilityRole="link"
+            accessibilityLabel="Terms of Use"
           >
             <Text style={[styles.legalLink, { color: theme.textTertiary }]}>Terms</Text>
           </Pressable>
@@ -215,6 +371,8 @@ export default function AuthScreen() {
               setLegalModal({ title: "Privacy Policy", html: PRIVACY_HTML });
             }}
             style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
+            accessibilityRole="link"
+            accessibilityLabel="Privacy Policy"
           >
             <Text style={[styles.legalLink, { color: theme.textTertiary }]}>Privacy Policy</Text>
           </Pressable>
@@ -237,6 +395,8 @@ export default function AuthScreen() {
               onPress={() => setLegalModal(null)}
               hitSlop={12}
               style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
+              accessibilityRole="button"
+              accessibilityLabel="Close legal document"
             >
               <View style={[styles.modalClose, { backgroundColor: theme.surface }]}>
                 <X size={16} color={theme.textSecondary} strokeWidth={2} />
@@ -273,7 +433,7 @@ const styles = StyleSheet.create({
   brand: {
     fontSize: 48,
     fontWeight: "700",
-    letterSpacing: -1,
+    letterSpacing: 0,
   },
   tagline: {
     ...Typography.body,
@@ -295,6 +455,31 @@ const styles = StyleSheet.create({
   appleButton: {},
   googleButton: {
     borderWidth: 1,
+  },
+  guestButton: {
+    borderWidth: 1,
+  },
+  guestUnavailable: {
+    minHeight: Spacing.buttonHeight,
+    borderRadius: Spacing.buttonRadius,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
+  guestUnavailableCopy: {
+    flexShrink: 1,
+  },
+  guestUnavailableTitle: {
+    ...Typography.body,
+    fontWeight: "600",
+  },
+  guestUnavailableBody: {
+    ...Typography.caption,
+    marginTop: 2,
   },
   appleIcon: {
     fontSize: 20,
