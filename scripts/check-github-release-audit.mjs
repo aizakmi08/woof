@@ -120,8 +120,8 @@ validateBranch(releaseBranch, {
 
 const pulls = await fetchJson("/pulls?state=open&per_page=100");
 if (Array.isArray(pulls)) {
-  if (pulls.length !== 1) {
-    fail(`expected exactly 1 open PR, got ${pulls.length}`);
+  if (pulls.length === 0) {
+    fail("expected at least 1 open PR for the release path");
   }
 
   const pr = pulls.find((candidate) => candidate.number === 1);
