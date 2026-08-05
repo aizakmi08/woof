@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "program": "Codex 7-Day 90% Coverage Program",
+  "updated_at": "2026-08-05T02:23:08Z",
+  "baseline": {
+    "snapshot_id": 70,
+    "snapshot_key": "2026-08-05T01:01:53.615Z",
+    "denominator_formula_count": 9424,
+    "verified_formula_count": 6950,
+    "verified_formula_percent": 73.75,
+    "gap_count": 2474,
+    "conflicted_formula_count": 673,
+    "ordinary_unresolved_formula_count": 1801,
+    "complete_popular_brand_count": 48,
+    "popular_brand_count": 93,
+    "artifact": "outputs/catalog-independent-census/public-sprint-20260804-post-tiki-born-carnivore-baby-dry-reviewed-reconciliation/"
+  },
+  "target": {
+    "verified_formula_percent": 90,
+    "target_equivalent_units": 1532,
+    "equation": "V + 0.9 * D >= 1532",
+    "definitions": {
+      "V": "Net denominator formulas moved from unresolved/conflicted to exact ingredient-and-image ready.",
+      "D": "Evidence-backed denominator removals, including exact duplicate identities, package-size or multipack aliases, non-complete products, and proven delistings."
+    }
+  },
+  "current": {
+    "snapshot_id": 72,
+    "snapshot_key": "2026-08-05T02:03:36.264Z",
+    "denominator_formula_count": 9411,
+    "verified_formula_count": 6950,
+    "verified_formula_percent": 73.85,
+    "gap_count": 2461,
+    "conflicted_formula_count": 673,
+    "ordinary_unresolved_formula_count": 1788,
+    "complete_popular_brand_count": 48,
+    "popular_brand_count": 93,
+    "formula_key_md5": "9c2e9b32ced24119f30db703069b5bef",
+    "full_ledger_md5": "a481c77ae3b178e9c3c79111c744e414",
+    "artifact": "outputs/catalog-independent-census/public-sprint-20260804-post-tiki-retailer-identity-reconciliation/",
+    "snapshot_staging_artifact": "outputs/catalog-independent-census/staging-sql-post-tiki-retailer-identity-reconciliation-mcp-20260804/"
+  },
+  "arithmetic": {
+    "net_verified_gain_v": 0,
+    "evidence_backed_denominator_removals_d": 13,
+    "target_equivalent_progress": 11.7,
+    "target_equivalent_remaining": 1520.3,
+    "denominator_delta": -13,
+    "verified_delta": 0,
+    "gap_delta": -13,
+    "conflict_delta": 0,
+    "ordinary_unresolved_delta": -13,
+    "complete_popular_brand_delta": 0
+  },
+  "lane_totals": {
+    "lane_1_fresh_retailer_recensus_and_delisting": {
+      "verified_gain_v": 0,
+      "denominator_removals_d": 0,
+      "gap_closures": 0,
+      "status": "in_progress"
+    },
+    "lane_2_deterministic_reconciliation": {
+      "verified_gain_v": 0,
+      "denominator_removals_d": 13,
+      "gap_closures": 13,
+      "status": "in_progress"
+    },
+    "lane_3_official_manufacturer_acquisition": {
+      "verified_gain_v": 0,
+      "denominator_removals_d": 0,
+      "gap_closures": 0,
+      "status": "pending"
+    },
+    "lane_4_formula_version_conflict_triage": {
+      "verified_gain_v": 0,
+      "denominator_removals_d": 0,
+      "gap_closures": 0,
+      "status": "pending"
+    },
+    "lane_5_phantom_and_variant_identity_audit": {
+      "verified_gain_v": 0,
+      "denominator_removals_d": 0,
+      "gap_closures": 0,
+      "status": "pending"
+    },
+    "lane_6_authorized_feed_scaffolding": {
+      "verified_gain_v": 0,
+      "denominator_removals_d": 0,
+      "gap_closures": 0,
+      "status": "pending"
+    }
+  },
+  "entries": [
+    {
+      "entry_id": "2026-08-04-tiki-cat-retailer-identity-reconciliation",
+      "observed_date": "2026-08-04",
+      "lane": 2,
+      "change_type": "exact_duplicate_identity_reconciliation",
+      "brand": "Tiki Cat",
+      "verified_gain_v": 0,
+      "denominator_removals_d": 13,
+      "gap_closures": 13,
+      "conflict_closures": 0,
+      "ordinary_unresolved_closures": 13,
+      "reviewed_retailer_identities": 13,
+      "existing_verified_target_formulas": 12,
+      "notes": "Thirteen ordinary retailer identities were proven to be exact aliases of twelve existing manufacturer-current formulas. Retailer records remain identity-only evidence; no ingredient, image, formula-version, score, serving row, or matching threshold changed. Fifty Tiki Cat conflicts and fifty-three ordinary unresolved identities remained outside the accepted batch.",
+      "artifacts": [
+        "inputs/catalog-reviewed-tiki-cat-retailer-identity-aliases-20260804.json",
+        "outputs/catalog-tiki-cat-retailer-alias-audit/snapshot70-v1/",
+        "outputs/catalog-independent-census/public-sprint-20260804-post-tiki-retailer-identity-reconciliation/",
+        "outputs/catalog-independent-census/staging-sql-post-tiki-retailer-identity-reconciliation-mcp-20260804/"
+      ],
+      "migrations": [
+        "supabase/migrations/20260805014300_reconcile_tiki_cat_exact_retailer_identities.sql"
+      ],
+      "production_evidence": {
+        "remote_migration_version": "20260805015011",
+        "coverage_snapshot_id": 72,
+        "exact_top_one_pass_count": 13,
+        "hard_boundary_failure_count": 0,
+        "improper_ingredient_or_image_evidence_count": 0
+      }
+    }
+  ],
+  "release_gates": {
+    "source_panel_complete": false,
+    "coverage_at_least_90_percent": false,
+    "all_popular_brands_complete": false,
+    "two_censuses_at_least_seven_days_apart": false,
+    "eric_physical_device_validation_complete": false,
+    "overall_release_gate": false
+  }
+}
