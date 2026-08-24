@@ -2056,8 +2056,9 @@ function checkResolverWiring() {
   );
   assert(
     !/messages\[messageIndex % messages\.length\]/.test(resultsScreen)
-      && /messageIndex >= messages\.length - 1/.test(resultsScreen),
-    "results loading messages must stop at the final honest stage instead of wrapping"
+      && /messageIndex >= messages\.length/.test(resultsScreen)
+      && /SLOW_LOADING_THRESHOLD_MS = 12_000/.test(resultsScreen),
+    "results loading messages must stop at the final honest stage and preserve the 12-second slow threshold"
   );
   assert(
     /loggedCaptureStarts\.has\(startedAt\)/.test(performanceTimings)

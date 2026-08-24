@@ -111,7 +111,7 @@ async function callSearchRpc({ supabaseUrl, anonKey, accessToken, functionName, 
       "x-client-info": "woof-on-device-label-audit/1.0",
     },
     body: JSON.stringify(requestBody),
-    signal: AbortSignal.timeout(8_000),
+    signal: AbortSignal.timeout(4_500),
   });
   const elapsedMs = performance.now() - startedAt;
   const body = await response.json().catch(() => []);
@@ -122,38 +122,20 @@ async function callSearchRpc({ supabaseUrl, anonKey, accessToken, functionName, 
 }
 
 async function searchCatalog({ supabaseUrl, anonKey, accessToken, ocrText, queries, matching }) {
-  const focused = await Promise.all(
-    queries.slice(0, 4).map((query) => callSearchRpc({
-      supabaseUrl,
-      anonKey,
-      accessToken,
-      functionName: "search_verified_products",
-      body: { q: query, max_results: 25 },
-    }))
-  );
-  const primary = {
-    rows: focused.flatMap((result) => result.rows),
-    elapsedMs: Math.max(...focused.map((result) => result.elapsedMs)),
-  };
+  const primary = await callSearchRpc({
+    supabaseUrl,
+    anonKey,
+    accessToken,
+    functionName: "search_verified_product_identities_for_label",
+    body: { queries: queries.slice(0, 4), max_results: 32 },
+  });
   const primaryRanked = matching.rankProductsForOcr(
     matching.filterProductsForOcr(primary.rows.map(normalizeProduct), ocrText),
     ocrText
   );
-  if (primaryRanked[0]?.ocrMatchScore >= 0.34) {
-    return { ...primary, path: "focused", primaryTopScore: primaryRanked[0].ocrMatchScore };
-  }
-
-  const broad = await callSearchRpc({
-    supabaseUrl,
-    anonKey,
-    accessToken,
-    functionName: "search_verified_products_for_label_ocr_text",
-    body: { ocr_text: ocrText, max_results: 96 },
-  });
   return {
-    rows: broad.rows,
-    elapsedMs: primary.elapsedMs + broad.elapsedMs,
-    path: "broad",
+    ...primary,
+    path: "lightweight_identity_indexed",
     primaryTopScore: primaryRanked[0]?.ocrMatchScore || 0,
   };
 }
