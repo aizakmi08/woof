@@ -48,18 +48,20 @@ function listFunctionNames() {
     .sort();
 }
 
-function checkOrderedMentions(source, values, label) {
-  let lastIndex = -1;
-  for (const value of values) {
-    const index = source.indexOf(value);
-    if (index === -1) {
-      fail(`${label}: missing ${value}`);
+function checkMigrationLedger(files) {
+  const seenNumbers = new Map();
+  for (const fileName of files) {
+    const number = migrationNumber(fileName);
+    if (number === null) {
+      fail(`Migration ledger: ${fileName} must start with a numeric migration id`);
       continue;
     }
-    if (index < lastIndex) {
-      fail(`${label}: ${value} appears out of order`);
+    const existing = seenNumbers.get(number);
+    if (existing) {
+      fail(`Migration ledger: duplicate migration id ${number} in ${existing} and ${fileName}`);
+      continue;
     }
-    lastIndex = index;
+    seenNumbers.set(number, fileName);
   }
 }
 
@@ -330,7 +332,22 @@ if (/Pro unlocks[^\n.]*saved history/i.test(storeConfig?.apple?.info?.["en-US"]?
   fail("Store description must not describe free scan history as a Pro benefit");
 }
 
-checkOrderedMentions(migrationSection, auditMigrations, "Deployment migration order");
+checkMigrationLedger(migrations);
+requireSnippet(
+  migrationSection,
+  "20260820120000_add_fast_label_candidate_search.sql",
+  "Deployment checklist must include the fast label candidate search migration"
+);
+requireSnippet(
+  migrationSection,
+  "20260820121500_accelerate_legacy_label_search.sql",
+  "Deployment checklist must include the legacy label search acceleration migration"
+);
+requireSnippet(
+  migrationSection,
+  "20260820122500_tighten_label_resolution_budget.sql",
+  "Deployment checklist must include the label resolution budget migration"
+);
 
 for (const functionName of functionNames) {
   const indexPath = path.join(functionsDir, functionName, "index.ts");

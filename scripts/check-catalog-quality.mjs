@@ -41,8 +41,8 @@ requireSnippet(productCatalogPath, productCatalog, "function formulaDedupeKey", 
 requireSnippet(productCatalogPath, productCatalog, "verifiedIngredientSignature", "package merging requires an exact verified ingredient statement");
 requireSnippet(productCatalogPath, productCatalog, "function mergeFormulaPackageSizes", "formula matches retain their available package sizes");
 requireSnippet(productCatalogPath, productCatalog, "availablePackageSizes", "merged formula results expose package-size choices");
-requireSnippet(productCatalogPath, productCatalog, "supabase.rpc(\"search_verified_products\"", "app search uses strict verified RPC");
-requireSnippet(productCatalogPath, productCatalog, "search_verified_products error; falling back", "strict verified RPC fallback logging");
+requireRegex(productCatalogPath, productCatalog, /runCatalogRpc\(\s*"search_verified_products"/, "app search uses strict verified RPC");
+requireSnippet(productCatalogPath, productCatalog, "Verified search RPC unavailable; using legacy search:", "strict verified RPC fallback logging");
 requireSnippet(productCatalogPath, productCatalog, "productHasVerifiedIngredients(product)", "catalog search requires verified ingredients");
 requireSnippet(productCatalogPath, productCatalog, "productHasVerifiedImage(product)", "catalog search requires verified product image");
 requireSnippet(productCatalogPath, productCatalog, "Number(product.rank || 0) >= MIN_SCORABLE_CATALOG_RANK", "catalog search rejects weak verified siblings");
@@ -52,7 +52,7 @@ forbidSnippet(productCatalogPath, productCatalog, "queryContainsKnownImmediateGa
 forbidSnippet(productCatalogPath, productCatalog, "searchOpenPetFoodFacts", "typed product search community fallback");
 requireSnippet(productCatalogPath, productCatalog, "export async function findVerifiedCatalogProductForLookup", "barcode-to-catalog lookup helper");
 requireSnippet(productCatalogPath, productCatalog, "export async function findVerifiedCatalogProductByBarcode", "direct barcode-to-catalog GTIN lookup helper");
-requireSnippet(productCatalogPath, productCatalog, "const matches = await searchWoofCatalog(variant, 8)", "direct barcode lookup uses verified search RPC");
+requireSnippet(productCatalogPath, productCatalog, "const matches = await searchWoofCatalog(variant, 8, { signal })", "direct barcode lookup uses verified search RPC");
 requireSnippet(productCatalogPath, productCatalog, "const productBarcodes = barcodeVariants(product.gtin || product.barcode)", "direct barcode lookup checks GTIN variants");
 forbidSnippet(productCatalogPath, productCatalog, ".in(\"gtin\", variants)", "direct barcode lookup must not depend on product_data table Data API access");
 requireSnippet(productCatalogPath, productCatalog, "strongProductMatch(product, lookupProduct)", "strict verified catalog match");
@@ -70,7 +70,7 @@ requireSnippet(productCatalogPath, productCatalog, "function strongLabelProductM
 requireSnippet(productCatalogPath, productCatalog, "export function filterLabelCandidatesForIdentification", "label candidate list uses strict identity matching");
 requireSnippet(productCatalogPath, productCatalog, "function inferredFoodForm", "label matching rejects wet and dry sibling products");
 requireSnippet(productCatalogPath, productCatalog, "function labelBrandCompatible", "label matching rejects cross-brand sibling products");
-requireSnippet(productCatalogPath, productCatalog, "searchWoofCatalogForLabelIdentity(searchQueries, 96)", "label matching batches catalog identity queries");
+requireSnippet(productCatalogPath, productCatalog, "searchWoofCatalogForLabelIdentity(searchQueries, 48, signal)", "label matching batches catalog identity queries");
 requireSnippet(productCatalogPath, productCatalog, "export function nonCompleteFoodReason", "non-complete label products are detected before scoring");
 requireSnippet(productCatalogPath, productCatalog, "LABEL_REQUIRED_MATCH_TERMS", "label auto-open required recipe terms");
 requireSnippet(productCatalogPath, productCatalog, "\"wholemade\"", "label auto-open requires product-line terms");
@@ -192,7 +192,7 @@ const homeScreenPath = "screens/HomeScreen.js";
 const homeScreen = read(homeScreenPath);
 requireSnippet(homeScreenPath, homeScreen, "scan_mode: \"label_lookup\"", "home primary scan is front-label lookup");
 requireRegex(homeScreenPath, homeScreen, /navigation\.navigate\("Scanner", \{[\s\S]+mode: "label_lookup",[\s\S]+navigationTimingParams\(sourceSurface\)/, "home primary scan opens label lookup scanner");
-requireSnippet(homeScreenPath, homeScreen, "Scan Ingredients", "ingredient capture remains secondary");
+requireSnippet(homeScreenPath, homeScreen, "Can’t find it? Scan the ingredient panel", "ingredient capture remains secondary");
 requireSnippet(homeScreenPath, homeScreen, "mode: \"ingredient_capture\"", "home secondary scan opens ingredient capture mode");
 
 const coveragePath = "services/catalogCoverage.js";
@@ -231,13 +231,13 @@ requireSnippet(searchScreenPath, searchScreen, "function productVariantChips", "
 requireSnippet(searchScreenPath, searchScreen, "VARIANT_DISPLAY_LABELS", "search result variants use a display dictionary");
 requireSnippet(searchScreenPath, searchScreen, "Needs ingredients", "search results identify candidates without verified ingredient evidence");
 requireRegex(searchScreenPath, searchScreen, /logCatalogLookupEvent\(\{[\s\S]+source,[\s\S]+query:\s*term,[\s\S]+products:\s*result\.products/, "typed search coverage logging");
-requireRegex(searchScreenPath, searchScreen, /logCatalogLookupEvent\(\{[\s\S]+source:\s*recognitionPath === \"on_device_ocr\" \? \"label_scan_on_device\" : \"label_scan\"[\s\S]+identification:\s*result\.identification/, "label scan coverage logging");
+requireRegex(searchScreenPath, searchScreen, /logCatalogLookupEvent\(\{[\s\S]+source:\s*recognitionPath === \"on_device_ocr\" \? \"label_scan_on_device\" : \"label_scan\"[\s\S]+identification:\s*resultIdentification/, "label scan coverage logging");
 requireRegex(searchScreenPath, searchScreen, /logCatalogVerificationGapEvent\(\{[\s\S]+trigger:\s*\"search_results\"/, "typed search verification gap logging");
 requireRegex(searchScreenPath, searchScreen, /logCatalogVerificationGapEvent\(\{[\s\S]+source:\s*recognitionPath === \"on_device_ocr\" \? \"label_scan_on_device\" : \"label_scan\"[\s\S]+trigger:\s*result\.selectedProduct \? \"label_recommendation\" : \"label_results\"/, "label scan verification gap logging");
 requireRegex(searchScreenPath, searchScreen, /logCatalogVerificationGapEvent\(\{[\s\S]+trigger:\s*autoOpen \? \"auto_open_blocked\" : \"product_tapped\"/, "blocked product tap verification gap logging");
 requireSnippet(searchScreenPath, searchScreen, "catalog_label_auto_opened", "label auto-open telemetry");
 requireRegex(searchScreenPath, searchScreen, /if \(result\.selectedProduct\) \{[\s\S]+openProductResultRef\.current\(result\.selectedProduct/, "label scan auto-opens recommended product");
-requireSnippet(searchScreenPath, searchScreen, "uri: labelImageUri || product.imageUrl || null", "label scan image handoff");
+requireSnippet(searchScreenPath, searchScreen, "uri: labelImageUri || resolvedProduct.imageUrl || null", "label scan image handoff");
 requireRegex(searchScreenPath, searchScreen, /function productIsReady[\s\S]+productIsVerifiedReady\(product\)/, "search result readiness fails closed without ingredient provenance");
 requireRegex(searchScreenPath, searchScreen, /function ingredientStatusLabel[\s\S]+return ready \? "Verified" : "Needs ingredients"/, "search result status labels missing ingredient provenance as unverified");
 requireRegex(searchScreenPath, searchScreen, /const statusLabel = ingredientStatusLabel\(\{ exactConfirmed, ready \}\)/, "search result row derives its status from verified readiness");
@@ -249,7 +249,7 @@ const searchCachePath = "services/catalogSearchCache.js";
 const searchCache = read(searchCachePath);
 requireSnippet(searchCachePath, searchCache, "CACHE_TTL_MS", "catalog search cache TTL");
 requireSnippet(searchCachePath, searchCache, "MAX_CACHE_ENTRIES", "catalog search cache cap");
-requireSnippet(searchCachePath, searchCache, "@woof_catalog_search_cache_v6", "catalog search cache contract version");
+requireSnippet(searchCachePath, searchCache, "@woof_catalog_search_cache_v7", "catalog search cache contract version");
 requireSnippet(searchCachePath, searchCache, "ingredientVerificationStatus", "catalog cache preserves ingredient verification");
 requireSnippet(searchCachePath, searchCache, "imageVerificationStatus", "catalog cache preserves image verification");
 requireSnippet(searchCachePath, searchCache, "productLine", "catalog cache preserves product-line identity");
@@ -3388,6 +3388,16 @@ const sourceFeedWorklistReport = spawnSync(process.execPath, [
   sourceFeedWorklistPath,
 ], {
   encoding: "utf8",
+  env: {
+    ...process.env,
+    DOTENV_CONFIG_PATH: `${tempRoot}/missing-source-feed-env`,
+    SUPABASE_URL: "",
+    EXPO_PUBLIC_SUPABASE_URL: "",
+    SUPABASE_SERVICE_ROLE_KEY: "",
+    SUPABASE_SECRET_KEY: "",
+    SUPABASE_ANON_KEY: "",
+    EXPO_PUBLIC_SUPABASE_ANON_KEY: "",
+  },
 });
 
 if (sourceFeedWorklistReport.status !== 0) {

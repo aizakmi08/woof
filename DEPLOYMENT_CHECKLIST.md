@@ -406,7 +406,38 @@ Apply migrations in numeric order. The key audit migrations are:
 300_durable_scan_history_product_images.sql
 301_normalize_wellness_stew_identity.sql
 302_correct_open_farm_life_stage_metadata.sql
+303_label_resolution_runtime_config.sql
+304_repair_open_farm_and_eric_variant_metadata.sql
+305_repair_eric_visible_variant_identity.sql
+306_expand_named_nutrient_blend_groups.sql
+307_promote_reparsed_justfoodfordogs_rows.sql
+308_exclude_current_pedigree_variety_pack_alias.sql
+309_ignore_search_conjunction_tokens.sql
+310_independent_catalog_census.sql
+311_stage_independent_catalog_census.sql
+312_enforce_catalog_sku_gtin_consistency.sql
+313_quarantine_conflicting_census_observations.sql
+314_record_catalog_coverage_and_gate_promotion.sql
+315_refine_verified_catalog_formula_identities.sql
+316_reuse_serving_cache_key_when_promoting_catalog_formula.sql
+317_enforce_catalog_ingredient_artifact_gate.sql
+318_allow_clean_evidence_to_repair_quarantined_formula.sql
+319_refine_pedigree_visible_recipe_identity.sql
+320_reconcile_wellness_signature_selects_identity.sql
+321_add_catalog_brand_ranking_snapshots.sql
+322_unaccent_verified_product_search_document.sql
+323_reconcile_authoritative_formula_rekeys_by_gtin.sql
+324_defer_catalog_gtin_formula_consistency.sql
+325_link_staged_formula_to_exact_serving_gtin.sql
+20260724232100_catalog_release_durability.sql
+20260724235055_catalog_census_formula_ledger.sql
+20260724235554_catalog_durability_indexes.sql
+20260820120000_add_fast_label_candidate_search.sql
+20260820121500_accelerate_legacy_label_search.sql
+20260820122500_tighten_label_resolution_budget.sql
 ```
+
+The list above records the foundational audit series and the latest scan-reliability changes; it is not an exhaustive hand-maintained copy of the catalog migration ledger. Before every deploy, use `supabase migration list` to compare every local file in `supabase/migrations` with remote migration history, then use `supabase db push` so the CLI applies every pending file in ledger order. The deployment readiness check validates that every local migration has one unique numeric id and that the latest scan-reliability migrations remain called out here.
 
 Command reminder:
 

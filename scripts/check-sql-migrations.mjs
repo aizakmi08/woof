@@ -32,16 +32,26 @@ function hasRegex(sql, regex) {
 
 function checkFilenames(migrations) {
   const prefixes = [];
+  const versions = [];
 
   for (const migration of migrations) {
-    const match = migration.file.match(/^(\d{3})_[a-z0-9_]+\.sql$/);
-    if (!match) {
-      fail(`${migration.file}: migration filename must match 000_description.sql`);
+    const numericMatch = migration.file.match(/^(\d{3})_[a-z0-9_]+\.sql$/);
+    const timestampMatch = migration.file.match(/^(\d{14})_[a-z0-9_]+\.sql$/);
+    if (!numericMatch && !timestampMatch) {
+      fail(
+        `${migration.file}: migration filename must match 000_description.sql or YYYYMMDDHHMMSS_description.sql`
+      );
       continue;
     }
-    prefixes.push(Number(match[1]));
+    const version = numericMatch?.[1] || timestampMatch[1];
+    versions.push(version);
+    if (numericMatch) prefixes.push(Number(numericMatch[1]));
   }
 
+  const uniqueVersions = new Set(versions);
+  if (uniqueVersions.size !== versions.length) {
+    fail("Migration versions must be unique");
+  }
   const unique = new Set(prefixes);
   if (unique.size !== prefixes.length) {
     fail("Migration numeric prefixes must be unique");
