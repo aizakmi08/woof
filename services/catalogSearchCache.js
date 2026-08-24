@@ -3,8 +3,8 @@ import { productIsVerifiedReady } from "./catalogQuality";
 import { createLogger } from "./logger";
 
 const logger = createLogger("CATALOG_SEARCH_CACHE");
-const CACHE_PREFIX = "@woof_catalog_search_cache_v6:";
-const CACHE_INDEX_KEY = "@woof_catalog_search_cache_index_v6";
+const CACHE_PREFIX = "@woof_catalog_search_cache_v7:";
+const CACHE_INDEX_KEY = "@woof_catalog_search_cache_index_v7";
 const MAX_CACHE_ENTRIES = 50;
 const MAX_PRODUCTS_PER_ENTRY = 25;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -219,6 +219,9 @@ function serializeProduct(product = {}) {
     lifeStage: product.lifeStage || null,
     foodForm: product.foodForm || null,
     packageSize: product.packageSize || null,
+    availablePackageSizes: Array.isArray(product.availablePackageSizes)
+      ? product.availablePackageSizes.slice(0, 40)
+      : [],
     petType: product.petType || "unknown",
     imageUrl: product.imageUrl || null,
     imageSource: product.imageSource || null,
@@ -236,6 +239,8 @@ function serializeProduct(product = {}) {
     ingredientVerificationStatus: product.ingredientVerificationStatus || null,
     imageVerificationStatus: product.imageVerificationStatus || null,
     verifiedAt: product.verifiedAt || null,
+    formulaEvidenceTier: product.formulaEvidenceTier || null,
+    formulaVersionProvenance: product.formulaVersionProvenance || null,
     rank: Number(product.rank || 0),
     sourceKind: product.sourceKind || "catalog",
   };
