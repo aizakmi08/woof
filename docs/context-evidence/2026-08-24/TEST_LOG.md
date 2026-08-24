@@ -24,7 +24,7 @@
 
 ## Automated test tiers
 
-The requested cheapest-first order was followed. A failed suite was repaired and only that suite was rerun before continuing. `npm run verify` is reserved for the final gate after this evidence commit.
+The requested cheapest-first order was followed. A failed suite was repaired and only that suite was rerun before continuing. The single final `npm run verify` gate ran against evidence commit `52461a2e`; the commit after it changes this log only.
 
 | Tier | Check | Final status | Final time | Earlier attempt, when applicable |
 |---|---|---:|---:|---|
@@ -46,6 +46,7 @@ The requested cheapest-first order was followed. A failed suite was repaired and
 | Contract | `check:analytics` | PASS | 0.034 s | — |
 | Network | `check:live-listing` | PASS | 0.80 s | Initial run failed in 0.58 s because the gate expected the previous title; the live content itself was clean. |
 | Clean checkout | fresh `npm ci` + `expo export --platform ios` | PASS | not retained | Detached clean worktree at `7b9178e5`; iOS export completed and produced `dist`, then the worktree was removed. |
+| Final gate | `npm run verify` | PASS | 0.13 s | Run exactly once; project verification passed with 812 migrations. |
 
 ## Native build record
 
