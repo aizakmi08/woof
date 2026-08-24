@@ -1,8 +1,15 @@
 import { NativeModule, requireOptionalNativeModule } from 'expo';
 
-import { WoofLabelOcrResult } from './WoofLabelOcr.types';
+import { WoofLabelCropResult, WoofLabelOcrResult } from './WoofLabelOcr.types';
 
 declare class WoofLabelOcrModule extends NativeModule {
+  cropToNormalizedRegion(
+    imageUri: string,
+    normalizedX: number,
+    normalizedY: number,
+    normalizedWidth: number,
+    normalizedHeight: number
+  ): Promise<WoofLabelCropResult>;
   recognizeText(imageUri: string): Promise<WoofLabelOcrResult>;
 }
 

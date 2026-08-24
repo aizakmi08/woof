@@ -33,9 +33,16 @@ class WoofLabelOcrModule : Module() {
         .addOnSuccessListener { result ->
           val lines = result.textBlocks.flatMap { block ->
             block.lines.map { line ->
+              val frame = line.boundingBox
               mapOf<String, Any?>(
                 "text" to line.text,
                 "confidence" to null,
+                "bounds" to if (frame == null) null else mapOf(
+                  "x" to frame.left.toDouble() / image.width.toDouble(),
+                  "y" to frame.top.toDouble() / image.height.toDouble(),
+                  "width" to frame.width().toDouble() / image.width.toDouble(),
+                  "height" to frame.height().toDouble() / image.height.toDouble(),
+                ),
               )
             }
           }
