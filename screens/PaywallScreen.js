@@ -6,6 +6,7 @@ import {
   ActivityIndicator,
   Alert,
   ScrollView,
+  Linking,
 } from "react-native";
 import { AppText as Text, MAX_FONT_SIZE_MULTIPLIER } from "../components/AppText";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -47,6 +48,8 @@ import {
 import { createLogger } from "../services/logger";
 import { useTheme, getScoreConfig, Colors, Spacing } from "../theme";
 import { PRIVACY_HTML, TERMS_HTML } from "../legal";
+import { BRAND_PRO_NAME } from "../config/brand";
+import { reconcileRevenueCatProfile } from "../services/revenuecatSync";
 
 const logger = createLogger("PAYWALL");
 const LOCAL_PAYWALL_VARIANT = "monthly_default_v1";
@@ -152,7 +155,7 @@ const PAYWALL_CONTEXT_BY_SOURCE = {
   },
   default: {
     key: "general_upgrade",
-    label: "Woof Pro",
+    label: BRAND_PRO_NAME,
     detail: "Unlock unlimited checks and saved product decisions.",
   },
 };
@@ -419,6 +422,7 @@ function getPriceComparisons({ weeklyPkg, monthlyPkg, annualPkg, weeklyPrice, mo
 }
 
 function MiniScoreRing({ score, color }) {
+  const theme = useTheme();
   const size = 40;
   const strokeWidth = 3;
   const radius = (size - strokeWidth) / 2;
@@ -432,7 +436,7 @@ function MiniScoreRing({ score, color }) {
           cx={size / 2}
           cy={size / 2}
           r={radius}
-          stroke={Colors.divider}
+          stroke={theme.separator}
           strokeWidth={strokeWidth}
           fill="none"
         />
@@ -466,8 +470,8 @@ function TrialTimeline({ theme }) {
         <View style={[styles.timelineLineSegment, { borderColor: theme.fillSecondary }]} />
         <View style={styles.timelineStop}>
           <View style={[styles.timelineDot, { backgroundColor: theme.textTertiary }]} />
-          <Text style={[styles.timelineDotLabel, { color: theme.textPrimary }]}>Reminder</Text>
-          <Text style={[styles.timelineDotSub, { color: theme.textTertiary }]}>Before billing</Text>
+          <Text style={[styles.timelineDotLabel, { color: theme.textPrimary }]}>Before billing</Text>
+          <Text style={[styles.timelineDotSub, { color: theme.textTertiary }]}>Cancel anytime</Text>
         </View>
         <View style={[styles.timelineLineSegment, { borderColor: theme.fillSecondary }]} />
         <View style={styles.timelineStop}>
@@ -487,6 +491,8 @@ export default function PaywallScreen({ route, navigation }) {
 
   const [offerings, setOfferings] = useState(null);
   const [offeringsLoaded, setOfferingsLoaded] = useState(false);
+  const [offeringsError, setOfferingsError] = useState(false);
+  const [offeringReloadKey, setOfferingReloadKey] = useState(0);
   const [offeringMetadata, setOfferingMetadata] = useState({});
   const [offeringFetchAnalytics, setOfferingFetchAnalytics] = useState(() => (
     getOfferingFetchAnalytics(null, source)
@@ -496,6 +502,7 @@ export default function PaywallScreen({ route, navigation }) {
   const [selectedIndex, setSelectedIndex] = useState(() => getDefaultPlanIndex());
   const [purchasing, setPurchasing] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  const [activatingPurchase, setActivatingPurchase] = useState(false);
   const userSelectedPlanRef = useRef(false);
   const paywallOpenedAtRef = useRef(Date.now());
   const paywallExitTrackedRef = useRef(false);
@@ -530,6 +537,8 @@ export default function PaywallScreen({ route, navigation }) {
 
   useEffect(() => {
     let isActive = true;
+    setOfferingsLoaded(false);
+    setOfferingsError(false);
     const requestedPlacementIdentifier = getPaywallPlacementIdentifier(source);
     logger.debug("[PAYWALL] viewed", { source, productName, score });
     const revenueCatConfig = getRevenueCatConfigStatus();
@@ -561,6 +570,7 @@ export default function PaywallScreen({ route, navigation }) {
       }
       setOfferings(o);
       setOfferingsLoaded(true);
+      setOfferingsError(!o);
 
       trackEvent("paywall_variant_assigned", {
         source: source || "unknown",
@@ -649,6 +659,7 @@ export default function PaywallScreen({ route, navigation }) {
       }, source);
       setOfferings(null);
       setOfferingsLoaded(true);
+      setOfferingsError(true);
       setOfferingFetchAnalytics(fetchAnalytics);
       trackEvent("paywall_offerings_loaded", {
         source: source || "unknown",
@@ -672,7 +683,7 @@ export default function PaywallScreen({ route, navigation }) {
     return () => {
       isActive = false;
     };
-  }, [productName, score, source, user?.id]);
+  }, [productName, score, source, user?.id, offeringReloadKey]);
 
   const weeklyPkg = getWeeklyPackage(offerings);
   const monthlyPkg = getMonthlyPackage(offerings);
@@ -707,7 +718,7 @@ export default function PaywallScreen({ route, navigation }) {
   const scoreConfig = score ? getScoreConfig(score) : null;
   const headlineText = getContextualHeadline(source, productName, offeringMetadata);
   const isTrialPlan = selectedTrialInfo.canClaimTrial;
-  const controlsBusy = purchasing || restoring;
+  const controlsBusy = purchasing || restoring || activatingPurchase;
   const purchaseDisabled = controlsBusy || !selectedPkg;
   const revenueCatConfig = getRevenueCatConfigStatus();
   const requiresDevelopmentBuild = Boolean(
@@ -716,13 +727,15 @@ export default function PaywallScreen({ route, navigation }) {
     && !offerings
     && revenueCatConfig.requiresDevelopmentBuild
   );
-  const ctaText = !selectedPkg
+  const ctaText = activatingPurchase
+    ? "Activating Purchase..."
+    : !selectedPkg
     ? offeringsLoaded
-      ? requiresDevelopmentBuild ? "Development Build Required" : "Plan Unavailable"
+      ? "Plans Unavailable"
       : "Loading Plans..."
     : getCtaText(selectedPlan, selectedTrialInfo);
   const planDisclosure = requiresDevelopmentBuild
-    ? "Expo Go cannot load App Store products. Test purchases in a development build or TestFlight."
+    ? "Plans are not available in this preview. Try again in the App Store version."
     : getPlanDisclosure(selectedPlan, selectedPrice, selectedPeriod, selectedTrialInfo, offeringsLoaded);
 
   const getPlanAnalytics = (index = selectedIndex) => {
@@ -840,7 +853,7 @@ export default function PaywallScreen({ route, navigation }) {
       trackEvent("purchase_unavailable", {
         ...getPlanAnalytics(),
       });
-      Alert.alert("Not Available", "Subscriptions are loading. Please wait a moment and try again.\n\nIf this persists, check that your App Store Connect or Google Play Console subscription setup is active.");
+      Alert.alert("Plans Unavailable", "We couldn't load subscription plans. Check your connection and try again.");
       return;
     }
     logger.debug("[PAYWALL] purchase_started", { plan: selectedPlan.key });
@@ -858,7 +871,15 @@ export default function PaywallScreen({ route, navigation }) {
         ...getPlanAnalytics(),
         ...resultAnalytics,
       });
-      const proAfterRefresh = await refreshProStatus({ source: "purchase_success" });
+      let proAfterRefresh = await refreshProStatus({ source: "purchase_success" });
+      if (!proAfterRefresh) {
+        setPurchasing(false);
+        setActivatingPurchase(true);
+        const syncState = await reconcileRevenueCatProfile({ source: "purchase_activation" });
+        proAfterRefresh = syncState?.is_pro === true
+          || await refreshProStatus({ source: "purchase_activation_complete" });
+        setActivatingPurchase(false);
+      }
       trackEvent("purchase_entitlement_refreshed", {
         ...getPlanAnalytics(),
         ...resultAnalytics,
@@ -873,8 +894,8 @@ export default function PaywallScreen({ route, navigation }) {
         navigation.goBack();
       } else {
         Alert.alert(
-          "Purchase Received",
-          "Your purchase went through, but Pro access is still syncing. Please try Restore Purchases in a moment."
+          "Purchase Still Activating",
+          `Your purchase was received. ${BRAND_PRO_NAME} will unlock automatically as soon as the App Store confirms the entitlement.`
         );
       }
     } else if (result.cancelled) {
@@ -911,10 +932,23 @@ export default function PaywallScreen({ route, navigation }) {
         ...getPlanAnalytics(),
         ...resultAnalytics,
       });
-      Alert.alert(
-        "Purchase Pending",
-        "The purchase finished, but Pro access was not activated yet. Please try Restore Purchases in a moment."
-      );
+      setActivatingPurchase(true);
+      const syncState = await reconcileRevenueCatProfile({ source: "purchase_no_entitlement" });
+      const proAfterReconcile = syncState?.is_pro === true
+        || await refreshProStatus({ source: "purchase_no_entitlement_complete" });
+      setActivatingPurchase(false);
+      if (proAfterReconcile) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        paywallCloseReasonRef.current = "purchase_success";
+        paywallCloseOutcomeRef.current = "purchase_success";
+        trackPaywallExit("purchase_success", "purchase_success");
+        navigation.goBack();
+      } else {
+        Alert.alert(
+          "Purchase Still Activating",
+          `Your purchase was received. ${BRAND_PRO_NAME} will unlock automatically as soon as the App Store confirms the entitlement.`
+        );
+      }
     }
   };
 
@@ -941,10 +975,10 @@ export default function PaywallScreen({ route, navigation }) {
         trackPaywallExit("restore_success", "restore_success");
         navigation.goBack();
       } else {
-        Alert.alert(
-          "Restore Received",
-          "Your purchase was found, but Pro access is still syncing. Please try again in a moment."
-        );
+        Alert.alert("Restore Received", "Your purchase was found, but Pro access is still syncing.", [
+          { text: "Not Now", style: "cancel" },
+          { text: "Contact Support", onPress: () => Linking.openURL("mailto:woofapp.help@gmail.com?subject=Woof%20restore%20support") },
+        ]);
       }
     } else if (result.error) {
       setRestoring(false);
@@ -956,10 +990,10 @@ export default function PaywallScreen({ route, navigation }) {
     } else if (resultAnalytics.active_entitlement_count > 0 || resultAnalytics.active_subscription_count > 0) {
       setRestoring(false);
       trackEvent("restore_no_entitlement", getRestoreAnalytics(resultAnalytics));
-      Alert.alert(
-        "Restore Found",
-        "We found purchase activity, but Pro access was not activated. Please contact support if Restore Purchases does not resolve this shortly."
-      );
+      Alert.alert("Restore Found", "We found purchase activity, but Pro access was not activated.", [
+        { text: "Not Now", style: "cancel" },
+        { text: "Contact Support", onPress: () => Linking.openURL("mailto:woofapp.help@gmail.com?subject=Woof%20restore%20support") },
+      ]);
     } else {
       setRestoring(false);
       trackEvent("restore_no_purchases", getRestoreAnalytics(resultAnalytics));
@@ -1020,7 +1054,7 @@ export default function PaywallScreen({ route, navigation }) {
         style={({ pressed }) => [styles.closeButtonApple, { opacity: pressed ? 0.85 : 1 }]}
         accessibilityRole="button"
         accessibilityLabel="Close"
-        accessibilityHint="Dismisses the Woof Pro offer"
+        accessibilityHint={`Dismisses the ${BRAND_PRO_NAME} offer`}
       >
         <X size={20} color={theme.textTertiary} strokeWidth={2.5} />
       </Pressable>
@@ -1031,7 +1065,7 @@ export default function PaywallScreen({ route, navigation }) {
         bounces={false}
       >
         {/* Drag handle */}
-        <View style={[styles.dragHandle, { backgroundColor: Colors.divider }]} />
+        <View style={[styles.dragHandle, { backgroundColor: theme.separator }]} />
 
         {/* Unified content fade */}
         <Animated.View style={contentAnimStyle}>
@@ -1058,7 +1092,7 @@ export default function PaywallScreen({ route, navigation }) {
         <View
           style={[
             styles.sourceContextStrip,
-            { backgroundColor: theme.fillSecondary, borderColor: Colors.divider },
+            { backgroundColor: theme.fillSecondary, borderColor: theme.separator },
           ]}
           accessible
           accessibilityRole="summary"
@@ -1100,7 +1134,7 @@ export default function PaywallScreen({ route, navigation }) {
               <View key={plan.key} style={{ flex: plan.flex }}>
                 {/* Fixed-height spacer for all cards — badge overlaps into it for popular plan */}
                 {plan.badge ? (
-                  <View style={[styles.bestValueBadge, { opacity: isSelected ? 1 : 0 }]}>
+                  <View style={[styles.bestValueBadge, { opacity: isSelected ? 1 : 0.72 }]}>
                     <Text style={styles.bestValueText}>{plan.badge}</Text>
                   </View>
                 ) : (
@@ -1162,7 +1196,7 @@ export default function PaywallScreen({ route, navigation }) {
                   {/* Weekly: equivalent monthly cost */}
                   {plan.key === "weekly" && priceComparisons.weeklyMonthlyEquivalent && (
                     <>
-                      <View style={[styles.cardDivider, { backgroundColor: Colors.divider }]} />
+                      <View style={[styles.cardDivider, { backgroundColor: theme.separator }]} />
                       <Text style={[styles.planSubtext, { color: theme.textTertiary }]}>
                         {priceComparisons.weeklyMonthlyEquivalent}/mo
                       </Text>
@@ -1192,6 +1226,30 @@ export default function PaywallScreen({ route, navigation }) {
 
         {/* CTA button — Grok-style morph animation */}
         <View style={styles.ctaSection}>
+          {offeringsError ? (
+            <View style={{ alignItems: "center", marginBottom: 12, gap: 8 }}>
+              <Text style={{ color: theme.textSecondary, fontSize: 14, fontWeight: "600", textAlign: "center" }}>
+                Couldn't load plans
+              </Text>
+              <Pressable
+                onPress={() => setOfferingReloadKey((value) => value + 1)}
+                style={({ pressed }) => ({
+                  minHeight: 44,
+                  paddingHorizontal: 20,
+                  borderRadius: 12,
+                  borderWidth: 1,
+                  borderColor: theme.separator,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  opacity: pressed ? 0.6 : 1,
+                })}
+                accessibilityRole="button"
+                accessibilityLabel="Retry loading subscription plans"
+              >
+                <Text style={{ color: theme.textPrimary, fontSize: 15, fontWeight: "700" }}>Retry</Text>
+              </Pressable>
+            </View>
+          ) : null}
           <Pressable
             onPress={handlePurchase}
             onPressIn={() => { if (!purchaseDisabled) ctaScale.value = withSpring(0.97, { damping: 20, stiffness: 300 }); }}
@@ -1217,7 +1275,7 @@ export default function PaywallScreen({ route, navigation }) {
                 ctaAnimStyle,
               ]}
             >
-              {purchasing ? (
+              {purchasing || activatingPurchase ? (
                 <Animated.View key="loader" entering={FadeIn.duration(200)}>
                   <ActivityIndicator color={theme.buttonText} />
                 </Animated.View>
@@ -1234,6 +1292,14 @@ export default function PaywallScreen({ route, navigation }) {
               )}
             </Animated.View>
           </Pressable>
+          {activatingPurchase ? (
+            <View style={{ flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 8, marginTop: 12 }}>
+              <ActivityIndicator size="small" color={theme.textSecondary} />
+              <Text style={{ color: theme.textSecondary, fontSize: 14, fontWeight: "600" }}>
+                Activating your purchase…
+              </Text>
+            </View>
+          ) : null}
         </View>
 
         {/* Timeline + trust text */}
@@ -1263,7 +1329,7 @@ export default function PaywallScreen({ route, navigation }) {
           <View
             style={[
               styles.debugPanel,
-              { backgroundColor: theme.card, borderColor: Colors.divider },
+              { backgroundColor: theme.card, borderColor: theme.separator },
             ]}
           >
             <Pressable
@@ -1301,7 +1367,7 @@ export default function PaywallScreen({ route, navigation }) {
                     </Text>
                   </View>
                 ))}
-                <View style={[styles.debugDivider, { backgroundColor: Colors.divider }]} />
+                <View style={[styles.debugDivider, { backgroundColor: theme.separator }]} />
                 {debugPackageRows.map((line) => (
                   <Text
                     key={line}
@@ -1324,7 +1390,7 @@ export default function PaywallScreen({ route, navigation }) {
             style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
             accessibilityRole="button"
             accessibilityLabel="Restore purchases"
-            accessibilityHint="Checks App Store or Google Play purchases for an active Woof Pro subscription"
+            accessibilityHint={`Checks App Store or Google Play purchases for an active ${BRAND_PRO_NAME} subscription`}
             accessibilityState={{ disabled: controlsBusy }}
           >
             {restoring ? (
@@ -1345,7 +1411,7 @@ export default function PaywallScreen({ route, navigation }) {
             ]}
             accessibilityRole="button"
             accessibilityLabel="Not now"
-            accessibilityHint="Dismisses the Woof Pro offer"
+            accessibilityHint={`Dismisses the ${BRAND_PRO_NAME} offer`}
             accessibilityState={{ disabled: controlsBusy }}
           >
             <Text style={[styles.footerDismissText, { color: theme.textSecondary }]}>

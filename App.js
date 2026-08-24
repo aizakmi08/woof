@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, Component } from "react";
-import { View, Pressable } from "react-native";
+import { ActivityIndicator, View, Pressable } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { NavigationContainer } from "@react-navigation/native";
+import { DefaultTheme, NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { StatusBar } from "expo-status-bar";
 import Constants from "expo-constants";
@@ -14,6 +14,8 @@ import { createLogger } from "./services/logger";
 import { installGlobalErrorHandlers, trackAppError } from "./services/errorReporting";
 import { SENTRY_DSN } from "./config/env";
 import { AppText as Text } from "./components/AppText";
+import { BRAND_NAME } from "./config/brand";
+import { BrandLogo } from "./components/BrandLogo";
 
 import OnboardingScreen, { ONBOARDING_KEY } from "./screens/OnboardingScreen";
 import AuthScreen from "./screens/AuthScreen";
@@ -99,7 +101,7 @@ if (updateGroup) {
 }
 
 class ErrorBoundary extends Component {
-  state = { hasError: false };
+  state = { hasError: false, retryKey: 0 };
 
   static getDerivedStateFromError() {
     return { hasError: true };
@@ -122,10 +124,10 @@ class ErrorBoundary extends Component {
             Something went wrong
           </Text>
           <Text style={{ fontSize: 15, color: Colors.textSecondary, textAlign: "center", marginBottom: 32, lineHeight: 22 }}>
-            The app ran into an unexpected error. Please restart to continue.
+            The app ran into an unexpected error. Try reloading this screen.
           </Text>
           <Pressable
-            onPress={() => this.setState({ hasError: false })}
+            onPress={() => this.setState((state) => ({ hasError: false, retryKey: state.retryKey + 1 }))}
             accessibilityRole="button"
             accessibilityLabel="Try again"
             accessibilityHint="Attempts to recover from the error"
@@ -146,7 +148,7 @@ class ErrorBoundary extends Component {
         </View>
       );
     }
-    return this.props.children;
+    return <View key={this.state.retryKey} style={{ flex: 1 }}>{this.props.children}</View>;
   }
 }
 
@@ -205,9 +207,30 @@ function AppNavigator({ initialRouteName = "Home", onInitialRouteConsumed, devPa
     );
   }
 
-  // Show blank screen while checking auth
+  // Keep the brand visible while the local session is resolved.
   if (loading) {
-    return <View style={{ flex: 1, backgroundColor: theme.bg }} />;
+    return (
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: theme.bg,
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 16,
+        }}
+        accessibilityRole="progressbar"
+        accessibilityLabel={`Opening ${BRAND_NAME}`}
+      >
+        <BrandLogo size={72} />
+        <Text style={{ color: theme.textPrimary, fontSize: 30, fontWeight: "800" }}>
+          {BRAND_NAME}
+        </Text>
+        <ActivityIndicator color={theme.textSecondary} />
+        <Text style={{ color: theme.textSecondary, fontSize: 14 }}>
+          Getting you set up…
+        </Text>
+      </View>
+    );
   }
 
   // Not authenticated — show auth screen
@@ -222,7 +245,21 @@ function AppNavigator({ initialRouteName = "Home", onInitialRouteConsumed, devPa
 
   // Authenticated — show main app
   return (
-    <NavigationContainer>
+    <NavigationContainer
+      theme={{
+        ...DefaultTheme,
+        dark: theme.statusBar === "light",
+        colors: {
+          ...DefaultTheme.colors,
+          primary: theme.textPrimary,
+          background: theme.bg,
+          card: theme.card,
+          text: theme.textPrimary,
+          border: theme.separator,
+          notification: theme.green,
+        },
+      }}
+    >
       <StatusBar style={theme.statusBar} />
       <Stack.Navigator
         initialRouteName={initialRouteName}
@@ -236,7 +273,8 @@ function AppNavigator({ initialRouteName = "Home", onInitialRouteConsumed, devPa
         <Stack.Screen
           name="Scanner"
           component={ScannerScreen}
-          options={{ title: "Woof Scanner" }}
+          initialParams={initialRouteName === "Scanner" ? { mode: "label_lookup" } : undefined}
+          options={{ title: `${BRAND_NAME} Scanner` }}
         />
         <Stack.Screen name="Results" component={ResultsScreen} />
         <Stack.Screen name="Profile" component={ProfileScreen} />
@@ -246,7 +284,7 @@ function AppNavigator({ initialRouteName = "Home", onInitialRouteConsumed, devPa
           options={{
             presentation: "modal",
             gestureEnabled: true,
-            contentStyle: { backgroundColor: "#FAFAFA" },
+            contentStyle: { backgroundColor: theme.bg },
           }}
         />
         <Stack.Screen name="WebView" component={WebViewScreen} />
@@ -291,9 +329,15 @@ function App() {
     setInitialRouteName("Home");
   }, []);
 
-  // Blank screen while checking AsyncStorage (< 1 frame)
+  // Keep the first painted frame branded while onboarding state loads.
   if (!isReady) {
-    return <View style={{ flex: 1, backgroundColor: theme.bg }} />;
+    return (
+      <View style={{ flex: 1, backgroundColor: theme.bg, alignItems: "center", justifyContent: "center", gap: 14 }}>
+        <BrandLogo size={64} />
+        <Text style={{ color: theme.textPrimary, fontSize: 28, fontWeight: "800" }}>{BRAND_NAME}</Text>
+        <ActivityIndicator color={theme.textSecondary} />
+      </View>
+    );
   }
 
   return (

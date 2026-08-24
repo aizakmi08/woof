@@ -1,6 +1,6 @@
 const PET_TYPES = new Set(["dog", "cat"]);
 const LIFE_STAGES = new Set(["young", "adult", "senior"]);
-const MAX_AVOID_INGREDIENTS = 20;
+export const MAX_AVOID_INGREDIENTS = 20;
 
 export const PET_AVOID_PRESETS = [
   "Chicken",
@@ -161,12 +161,16 @@ function joinedTerms(terms) {
 export function personalizePetSafety(result = {}, profileValue = {}) {
   const generic = result.petSafety || {};
   const profile = normalizePetProfile(profileValue);
+  const hasVerifiedEvidence = ["verified", "catalog", "manufacturer", "enriched"].includes(
+    normalizedText(result.dataSource)
+  ) || result?.ingredientVerification?.verified === true;
+  const evidenceNoun = hasVerifiedEvidence ? "verified ingredients" : "analyzed ingredients";
 
   if (!hasUsablePetProfile(profile)) {
     return {
       level: generic.level || "caution",
       label: "General ingredient check",
-      summary: "Add pet details to check the verified ingredients against a saved species, life stage, and avoid list.",
+      summary: `Add pet details to check the ${evidenceNoun} against a saved species, life stage, and avoid list.`,
       personalized: false,
       matches: [],
       profileLabel: "",
@@ -191,7 +195,7 @@ export function personalizePetSafety(result = {}, profileValue = {}) {
     return {
       level: "avoid",
       label: `Conflicts with ${profile.name}'s avoid list`,
-      summary: `The verified ingredients match ${joinedTerms(matches)} from the saved avoid list.`,
+      summary: `The ${evidenceNoun} match ${joinedTerms(matches)} from the saved avoid list.`,
       personalized: true,
       matches,
       profileLabel,
@@ -232,7 +236,9 @@ export function personalizePetSafety(result = {}, profileValue = {}) {
   return {
     level: "safe",
     label: `No saved conflicts for ${profile.name}`,
-    summary: "No saved avoid ingredients or life-stage conflicts were found in the verified catalog data.",
+    summary: hasVerifiedEvidence
+      ? "No saved avoid ingredients or life-stage conflicts were found in the verified catalog data."
+      : "No saved avoid ingredients or life-stage conflicts were found in this analysis.",
     personalized: true,
     matches: [],
     profileLabel,

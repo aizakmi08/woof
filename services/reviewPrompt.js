@@ -1,6 +1,14 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Linking, Platform } from "react-native";
 import { trackEvent } from "./analytics";
+import {
+  MIN_GOOD_SCORE,
+  MIN_SUCCESSFUL_RESULTS,
+  MIN_SUCCESSES_BETWEEN_PROMPTS,
+  REVIEW_PROMPT_COOLDOWN_SCHEDULE_MS,
+  isEligibleReviewSuccess,
+  reviewPromptDecision,
+} from "./reviewPromptPolicy";
 
 const APP_STORE_REVIEW_URL = "itms-apps://itunes.apple.com/app/viewContentsUserReviews/id6760733899?action=write-review";
 const APP_STORE_WEB_URL = "https://apps.apple.com/app/apple-store/id6760733899?action=write-review";
@@ -13,11 +21,15 @@ const LEGACY_LAST_PROMPT_AT_KEY = "@woof_review_last_prompt_at";
 const REVIEW_SUCCESS_COUNT_KEY_PREFIX = "@woof_review_success_count:";
 const REVIEW_PROMPT_COUNT_KEY_PREFIX = "@woof_review_prompt_count:";
 const REVIEW_LAST_PROMPT_AT_KEY_PREFIX = "@woof_review_last_prompt_at:";
+const REVIEW_LAST_PROMPT_SUCCESS_COUNT_KEY_PREFIX = "@woof_review_last_prompt_success_count:";
+const REVIEW_COMPLETED_KEY_PREFIX = "@woof_review_completed:";
+const LEGACY_LAST_PROMPT_SUCCESS_COUNT_KEY = "@woof_review_last_prompt_success_count";
+const LEGACY_REVIEW_COMPLETED_KEY = "@woof_review_completed";
 
-const MIN_GOOD_SCORE = 70;
-const MIN_SUCCESSFUL_RESULTS = 2;
-const MAX_PROMPTS = 2;
-const PROMPT_COOLDOWN_MS = 120 * 24 * 60 * 60 * 1000;
+// Keep these names in the integration surface so release checks make the
+// early/repeat cadence visible even though the policy itself is pure/testable.
+const PROMPT_COOLDOWN_MS = REVIEW_PROMPT_COOLDOWN_SCHEDULE_MS[0];
+const PROMPT_COOLDOWN_SCHEDULE_MS = REVIEW_PROMPT_COOLDOWN_SCHEDULE_MS;
 
 function reviewUrls() {
   if (Platform.OS === "ios") {
@@ -44,6 +56,16 @@ function reviewStorageKeys(userId) {
     successCount: reviewStorageKey(REVIEW_SUCCESS_COUNT_KEY_PREFIX, LEGACY_SUCCESS_COUNT_KEY, userId),
     promptCount: reviewStorageKey(REVIEW_PROMPT_COUNT_KEY_PREFIX, LEGACY_PROMPT_COUNT_KEY, userId),
     lastPromptAt: reviewStorageKey(REVIEW_LAST_PROMPT_AT_KEY_PREFIX, LEGACY_LAST_PROMPT_AT_KEY, userId),
+    lastPromptSuccessCount: reviewStorageKey(
+      REVIEW_LAST_PROMPT_SUCCESS_COUNT_KEY_PREFIX,
+      LEGACY_LAST_PROMPT_SUCCESS_COUNT_KEY,
+      userId
+    ),
+    reviewCompleted: reviewStorageKey(
+      REVIEW_COMPLETED_KEY_PREFIX,
+      LEGACY_REVIEW_COMPLETED_KEY,
+      userId
+    ),
   };
 }
 
@@ -65,7 +87,7 @@ function baseProperties(context = {}) {
 }
 
 function isGoodPetFoodResult({ score, scanMode }) {
-  return scanMode !== "human_food" && Number(score) >= MIN_GOOD_SCORE;
+  return isEligibleReviewSuccess({ score, scanMode });
 }
 
 async function recordEligibleSuccess(context) {
@@ -83,42 +105,53 @@ export async function maybeShowReviewPrompt(context = {}) {
 
   const reviewKeys = reviewStorageKeys(context.userId || null);
   const successCount = await recordEligibleSuccess(context);
-  if (successCount < MIN_SUCCESSFUL_RESULTS) {
-    return { show: false, reason: "not_enough_successes" };
-  }
-
-  if (!context.isPro && Number(context.remainingScans) <= 1) {
-    return { show: false, reason: "free_limit_near_paywall" };
-  }
-
-  const promptCount = await readNumber(reviewKeys.promptCount);
-  if (promptCount >= MAX_PROMPTS) {
-    return { show: false, reason: "max_prompts" };
-  }
-
-  const lastPromptAt = await readNumber(reviewKeys.lastPromptAt);
-  if (lastPromptAt && Date.now() - lastPromptAt < PROMPT_COOLDOWN_MS) {
-    return { show: false, reason: "cooldown" };
-  }
-
-  const nextPromptCount = promptCount + 1;
-  await AsyncStorage.multiSet([
-    [reviewKeys.promptCount, String(nextPromptCount)],
-    [reviewKeys.lastPromptAt, String(Date.now())],
+  const [promptCount, lastPromptSuccessCount, lastPromptAt, completedValue] = await Promise.all([
+    readNumber(reviewKeys.promptCount),
+    readNumber(reviewKeys.lastPromptSuccessCount),
+    readNumber(reviewKeys.lastPromptAt),
+    AsyncStorage.getItem(reviewKeys.reviewCompleted),
   ]);
+  const eligibility = reviewPromptDecision({
+    successCount,
+    promptCount,
+    lastPromptSuccessCount,
+    lastPromptAt,
+    reviewCompleted: completedValue === "true",
+    isPro: context.isPro,
+    remainingScans: context.remainingScans,
+  });
+  if (!eligibility.show) return eligibility;
+  return { show: true, promptCount: promptCount + 1, successfulResultCount: successCount };
+}
 
+export async function markReviewPromptVisible(context = {}, eligibility = {}) {
+  const reviewKeys = reviewStorageKeys(context.userId || null);
+  const promptCount = Math.max(1, Number(eligibility.promptCount) || 1);
+  const successCount = Math.max(0, Number(eligibility.successfulResultCount) || 0);
+  await AsyncStorage.multiSet([
+    [reviewKeys.promptCount, String(promptCount)],
+    [reviewKeys.lastPromptAt, String(Date.now())],
+    [reviewKeys.lastPromptSuccessCount, String(successCount)],
+  ]);
   trackEvent("app_review_prompt_viewed", {
     ...baseProperties(context),
     successful_result_count: successCount,
-    prompt_count: nextPromptCount,
+    prompt_count: promptCount,
     review_state_scoped: !!context.userId,
   });
-
-  return { show: true, promptCount: nextPromptCount, successfulResultCount: successCount };
 }
 
 export async function dismissReviewPrompt(context = {}) {
   trackEvent("app_review_prompt_dismissed", baseProperties(context));
+}
+
+export async function acknowledgeReviewComplete(context = {}) {
+  const reviewKeys = reviewStorageKeys(context.userId || null);
+  await AsyncStorage.setItem(reviewKeys.reviewCompleted, "true");
+  trackEvent("app_review_already_completed", {
+    ...baseProperties(context),
+    review_state_scoped: !!context.userId,
+  });
 }
 
 export async function openStoreReview(context = {}) {
@@ -170,11 +203,19 @@ export async function clearReviewPromptStorage(userId = null) {
     LEGACY_SUCCESS_COUNT_KEY,
     LEGACY_PROMPT_COUNT_KEY,
     LEGACY_LAST_PROMPT_AT_KEY,
+    LEGACY_LAST_PROMPT_SUCCESS_COUNT_KEY,
+    LEGACY_REVIEW_COMPLETED_KEY,
   ];
 
   if (userId) {
     const userKeys = reviewStorageKeys(userId);
-    keys.push(userKeys.successCount, userKeys.promptCount, userKeys.lastPromptAt);
+    keys.push(
+      userKeys.successCount,
+      userKeys.promptCount,
+      userKeys.lastPromptAt,
+      userKeys.lastPromptSuccessCount,
+      userKeys.reviewCompleted
+    );
   }
 
   await AsyncStorage.multiRemove([...new Set(keys)]);

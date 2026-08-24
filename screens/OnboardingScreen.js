@@ -22,6 +22,7 @@ import * as Haptics from "expo-haptics";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useTheme, getScoreConfig, Colors, Spacing, Shadows, Typography } from "../theme";
 import { trackEvent } from "../services/analytics";
+import { BRAND_NAME } from "../config/brand";
 
 const ONBOARDING_KEY = "@woof_onboarding_complete";
 
@@ -44,7 +45,7 @@ function ScoreRingIllustration({ theme }) {
             cx={size / 2}
             cy={size / 2}
             r={radius}
-            stroke={Colors.divider}
+            stroke={theme.separator}
             strokeWidth={strokeWidth}
             fill="none"
           />
@@ -123,7 +124,7 @@ function IngredientIllustration({ theme }) {
               <View
                 style={[
                   styles.ingredientDivider,
-                  { backgroundColor: Colors.divider },
+                  { backgroundColor: theme.separator },
                 ]}
               />
             )}
@@ -156,7 +157,7 @@ function PageDots({ count, current, theme }) {
             styles.dot,
             {
               backgroundColor:
-                i === current ? theme.textPrimary : Colors.divider,
+                i === current ? theme.textPrimary : theme.separator,
             },
           ]}
         />
@@ -171,7 +172,7 @@ const PAGES = [
   {
     key: "scan",
     title: "Scan the front label",
-    body: "Scan first, no account required. Woof reads the product name from the front of the bag or can. No barcode required.",
+    body: `${BRAND_NAME} reads the product name from the front of the bag or can. Start with a front-label photo or search by name.`,
     highlights: [
       "Product name",
       "Search works too",
@@ -397,11 +398,28 @@ export default function OnboardingScreen({ onComplete }) {
               { opacity: pressed ? 0.55 : 1 },
             ]}
             accessibilityRole="button"
-            accessibilityLabel="How Woof works"
+            accessibilityLabel={`How ${BRAND_NAME} works`}
             accessibilityHint="Shows the next onboarding screen"
           >
             <Text style={[styles.secondaryText, { color: theme.textSecondary }]}>
-              How Woof works
+              How {BRAND_NAME} works
+            </Text>
+          </Pressable>
+        )}
+
+        {!isFirstPage && (
+          <Pressable
+            onPress={handleScanNow}
+            style={({ pressed }) => [
+              styles.secondaryButton,
+              { opacity: pressed ? 0.55 : 1 },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Skip onboarding and scan"
+            accessibilityHint="Starts a front label scan"
+          >
+            <Text style={[styles.secondaryText, { color: theme.textSecondary }]}>
+              Skip and scan
             </Text>
           </Pressable>
         )}

@@ -10,8 +10,8 @@ import {
   RefreshControl,
   Modal,
 } from "react-native";
-import { AppText as Text, AppTextInput as TextInput } from "../components/AppText";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { AppText as Text, AppTextInput as TextInput } from "../components/AppText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { User, Shield, X, Utensils, Dog, Cat } from "lucide-react-native";
 import Animated, {
@@ -34,6 +34,14 @@ import { createLogger } from "../services/logger";
 import { useTheme, getScoreConfig, Colors, Spacing, Shadows } from "../theme";
 import * as Haptics from "expo-haptics";
 import { hasUsablePetProfile, normalizePetProfile } from "../services/petProfile";
+import { BrandLogo } from "../components/BrandLogo";
+import { BRAND_NAME, BRAND_PRO_NAME, BRAND_TAGLINE } from "../config/brand";
+import { requestCatalogEvidenceConsent } from "../services/catalogEvidenceConsent";
+import {
+  getPendingCatalogContributions,
+  removePendingCatalogContribution,
+} from "../services/catalogContributions";
+import { findVerifiedCatalogProductForLookup } from "../services/productCatalog";
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 const logger = createLogger("HOME");
@@ -118,7 +126,8 @@ function MiniScoreRing({ score, delay = 0 }) {
 function safetyColor(level) {
   if (level === "safe") return Colors.scoreExcellent;
   if (level === "caution") return Colors.scoreDecent;
-  return Colors.scoreConcerning;
+  if (level === "dangerous") return Colors.scoreConcerning;
+  return Colors.textTertiary;
 }
 
 function safetyLabel(level) {
@@ -266,7 +275,7 @@ function HistoryTools({
         {query.length > 0 && (
           <Pressable
             onPress={onQueryClear}
-            hitSlop={10}
+            hitSlop={15}
             style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
             accessibilityRole="button"
             accessibilityLabel="Clear history search"
@@ -348,7 +357,7 @@ function FilteredHistoryEmptyState({ theme, onClear }) {
 
 // --- History Row ---
 
-function HistoryRow({ item, onPress, theme, index }) {
+function HistoryRow({ item, onPress, onCompare, compareSelected, theme, index }) {
   const name = historyDisplayName(item);
   const imageUri = item.displayImageUrl || item.photoUri || null;
   const [imageFailed, setImageFailed] = useState(false);
@@ -358,18 +367,18 @@ function HistoryRow({ item, onPress, theme, index }) {
   }, [imageUri]);
 
   return (
-    <TouchableHighlight
-      onPress={() => {
-        Haptics.selectionAsync();
-        onPress();
-      }}
-      underlayColor={theme.surface}
-      style={styles.historyRow}
-      accessibilityRole="button"
-      accessibilityLabel={getHistoryAccessibilityLabel(item)}
-      accessibilityHint="Opens the saved scan result"
-    >
-      <View style={styles.historyRowInner}>
+    <View style={styles.historyRow}>
+      <TouchableHighlight
+        onPress={() => {
+          Haptics.selectionAsync();
+          onPress();
+        }}
+        underlayColor={theme.surface}
+        accessibilityRole="button"
+        accessibilityLabel={getHistoryAccessibilityLabel(item)}
+        accessibilityHint="Opens the saved scan result"
+      >
+        <View style={styles.historyRowInner}>
         {imageUri && !imageFailed ? (
           <Image
             source={{ uri: imageUri }}
@@ -396,63 +405,94 @@ function HistoryRow({ item, onPress, theme, index }) {
           {item.overallScore == null && item.scanMode === "human_food" ? (
             <View
               style={[
-                styles.safetyDot,
-                { backgroundColor: safetyColor(item.safetyLevel) },
+                styles.safetyPill,
+                {
+                  backgroundColor: `${safetyColor(item.safetyLevel)}18`,
+                  borderColor: safetyColor(item.safetyLevel),
+                },
               ]}
-            />
+            >
+              <Text style={[styles.safetyPillText, { color: safetyColor(item.safetyLevel) }]}>
+                {safetyLabel(item.safetyLevel).replace(" safety", "").replace(/^./, (letter) => letter.toUpperCase())}
+              </Text>
+            </View>
           ) : (
             <MiniScoreRing score={item.overallScore} delay={index * 100} />
           )}
           <ChevronRight size={14} color={theme.textTertiary} strokeWidth={2} />
         </View>
-      </View>
-    </TouchableHighlight>
+        </View>
+      </TouchableHighlight>
+      {isComparableHistoryItem(item) ? (
+        <Pressable
+          onPress={onCompare}
+          style={({ pressed }) => [
+            styles.historyCompareAction,
+            {
+              borderColor: compareSelected ? theme.textPrimary : theme.separator,
+              backgroundColor: compareSelected ? theme.surface : theme.card,
+              opacity: pressed ? 0.65 : 1,
+            },
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel={`${compareSelected ? "Remove" : "Add"} ${name} ${compareSelected ? "from" : "to"} comparison`}
+          accessibilityState={{ selected: compareSelected }}
+        >
+          <Text style={[styles.historyCompareActionText, { color: theme.textPrimary }]}>
+            {compareSelected ? "Selected" : "Compare"}
+          </Text>
+        </Pressable>
+      ) : null}
+    </View>
   );
 }
 
 // --- Compare Recent Scans ---
 
 function CompareRecentCard({ items, theme, onPress }) {
-  if (items.length < 2) return null;
-
   const [left, right] = items;
-  const delta = compareScoreDelta(items);
+  const ready = items.length === 2;
+  const delta = ready ? compareScoreDelta(items) : null;
 
   return (
     <Pressable
-      onPress={onPress}
+      onPress={ready ? onPress : undefined}
+      disabled={!ready}
       style={({ pressed }) => [
         styles.compareCard,
         {
           backgroundColor: theme.card,
           borderColor: theme.separator,
-          opacity: pressed ? 0.8 : 1,
+          opacity: ready ? (pressed ? 0.8 : 1) : 0.62,
         },
       ]}
       accessibilityRole="button"
       accessibilityLabel="Compare recent scans"
-      accessibilityHint="Opens a side by side comparison of your two most recent scored pet food scans"
+      accessibilityHint={ready ? "Opens a side by side comparison" : "Select Compare on two scored pet-food history rows"}
+      accessibilityState={{ disabled: !ready }}
     >
       <View style={styles.compareCardCopy}>
         <Text style={[styles.compareEyebrow, { color: theme.textTertiary }]}>
           Shopping helper
         </Text>
         <Text style={[styles.compareTitle, { color: theme.textPrimary }]}>
-          Compare recent scans
+          Compare products
         </Text>
         <Text
           style={[styles.compareSubtitle, { color: theme.textSecondary }]}
           numberOfLines={2}
         >
-          {historyDisplayName(left)} vs {historyDisplayName(right)}
+          {ready
+            ? `${historyDisplayName(left)} vs ${historyDisplayName(right)}`
+            : `Choose ${2 - items.length} more scored pet food${items.length === 1 ? "" : "s"} below`}
         </Text>
       </View>
       <View style={[styles.compareDeltaBadge, { backgroundColor: theme.surface }]}>
         <Text style={[styles.compareDeltaValue, { color: theme.textPrimary }]}>
-          {delta ?? 0}
+          {ready ? delta ?? 0 : items.length}
         </Text>
         <Text style={[styles.compareDeltaLabel, { color: theme.textTertiary }]}>
-          pts apart
+          {ready ? "pts apart" : "selected"}
         </Text>
       </View>
       <ChevronRight size={16} color={theme.textTertiary} strokeWidth={2} />
@@ -573,60 +613,51 @@ function CompareRecentModal({ visible, items, theme, onClose, onOpenItem }) {
 
 // --- Empty State ---
 
-function EmptyState({ theme, isPro, onScan, onHumanFood }) {
+function EmptyState({ theme, remainingScans, isPro, onScan, onSearch }) {
+  const freeScanValue = isPro
+    ? "Unlimited scans included"
+    : Number.isFinite(remainingScans)
+      ? `${remainingScans} free ${remainingScans === 1 ? "scan" : "scans"} left`
+      : "3 free scans included";
+
   return (
     <View style={styles.emptyContainer}>
-      <View style={styles.emptyIconContainer}>
-        <ScanLine size={64} color={theme.textTertiary} strokeWidth={1} />
+      <View style={[styles.emptyIconContainer, { backgroundColor: theme.surface }]}>
+        <ScanLine size={28} color={theme.textSecondary} strokeWidth={1.7} />
       </View>
-      <Text style={[styles.emptyTitle, { color: theme.textSecondary }]}>
-        Scan your first product
+      <Text style={[styles.emptyTitle, { color: theme.textPrimary }]}>
+        Your scans will live here
       </Text>
-      <Text style={[styles.emptySubtext, { color: theme.textTertiary }]}>
-        Search by name or scan the front of the package
+      <Text style={[styles.emptySubtext, { color: theme.textSecondary }]}>
+        Results are saved automatically so you can compare foods without scanning them again.
       </Text>
-      {!isPro && (
-        <Text style={[styles.emptyFreeScans, { color: theme.textTertiary }]}>
-          3 free scans included
-        </Text>
-      )}
+      <Text style={[styles.emptyValueCue, { color: theme.textTertiary }]}>
+        {freeScanValue}
+      </Text>
       <View style={styles.emptyActions}>
         <Pressable
           onPress={onScan}
           style={({ pressed }) => [
-            styles.emptyPrimaryButton,
-            {
-              backgroundColor: theme.buttonPrimary,
-              opacity: pressed ? 0.85 : 1,
-            },
+            styles.emptyPrimaryAction,
+            { backgroundColor: theme.buttonPrimary, opacity: pressed ? 0.78 : 1 },
           ]}
           accessibilityRole="button"
           accessibilityLabel="Scan your first product"
-          accessibilityHint="Opens the camera to scan a pet food label"
         >
-          <Camera size={17} color={theme.buttonText} strokeWidth={2} />
-          <Text style={[styles.emptyPrimaryText, { color: theme.buttonText }]}>
-            Scan Front Label
-          </Text>
+          <Camera size={17} color={theme.buttonText} strokeWidth={2.2} />
+          <Text style={[styles.emptyPrimaryActionText, { color: theme.buttonText }]}>Scan a product</Text>
         </Pressable>
         <Pressable
-          onPress={onHumanFood}
+          onPress={onSearch}
           style={({ pressed }) => [
-            styles.emptySecondaryButton,
-            {
-              borderColor: theme.separator,
-              backgroundColor: theme.card,
-              opacity: pressed ? 0.85 : 1,
-            },
+            styles.emptySecondaryAction,
+            { borderColor: theme.separator, opacity: pressed ? 0.62 : 1 },
           ]}
           accessibilityRole="button"
-          accessibilityLabel="Check if human food is safe for your pet"
-          accessibilityHint="Choose dog or cat, then open the camera for a human-food check"
+          accessibilityLabel="Search the product catalog"
         >
-          <Utensils size={17} color={theme.textPrimary} strokeWidth={2} />
-          <Text style={[styles.emptySecondaryText, { color: theme.textPrimary }]}>
-            Check Human Food
-          </Text>
+          <Search size={17} color={theme.textPrimary} strokeWidth={2.1} />
+          <Text style={[styles.emptySecondaryActionText, { color: theme.textPrimary }]}>Search instead</Text>
         </Pressable>
       </View>
     </View>
@@ -670,7 +701,7 @@ function FreeScanStatus({ theme, remaining, onUpgrade }) {
       ]}
       accessibilityRole="button"
       accessibilityLabel={`${copy.title}. ${copy.body}`}
-      accessibilityHint="Opens Woof Pro plans"
+      accessibilityHint={`Opens ${BRAND_PRO_NAME} plans`}
     >
       <View style={styles.freeScanStatusCopy}>
         <Text style={[styles.freeScanStatusTitle, { color: theme.textPrimary }]}>
@@ -698,51 +729,35 @@ function FreeScanStatus({ theme, remaining, onUpgrade }) {
 
 // --- Home Screen ---
 
-const BANNER_DISMISS_KEY = "@woof_banner_dismissed";
-const BANNER_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const HOME_SCAN_CTA_ANALYTICS = { source_surface: "home_scan_cta" };
 const HOME_HUMAN_FOOD_CTA_ANALYTICS = { source_surface: "home_human_food_cta" };
-const HOME_EMPTY_STATE_SOURCE_SURFACE = "home_empty_state";
 const HOME_CATALOG_SEARCH_SOURCE_SURFACE = "home_catalog_search";
 const HOME_INGREDIENT_CAPTURE_SOURCE_SURFACE = "home_ingredient_capture";
 const HOME_HISTORY_SEARCH_SOURCE_SURFACE = "home_history_search";
 const HOME_HISTORY_FILTER_SOURCE_SURFACE = "home_history_filter";
 const HOME_FREE_SCAN_STATUS_SOURCE_SURFACE = "home_free_scan_status";
+const HOME_EMPTY_STATE_SOURCE_SURFACE = "home_empty_state";
+const LAST_HUMAN_FOOD_PET_KEY = "@woof/last_human_food_pet_type";
 
 export default function HomeScreen({ navigation }) {
   const [history, setHistory] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
-  const [showBanner, setShowBanner] = useState(false);
   const [showPetPicker, setShowPetPicker] = useState(false);
   const [showCompareModal, setShowCompareModal] = useState(false);
+  const [compareSelection, setCompareSelection] = useState([]);
+  const [completedContribution, setCompletedContribution] = useState(null);
+  const [lastHumanFoodPetType, setLastHumanFoodPetType] = useState(null);
+  const [pendingHumanPetType, setPendingHumanPetType] = useState(null);
+  const [saveHumanFoodPet, setSaveHumanFoodPet] = useState(false);
+  const [humanFoodPetName, setHumanFoodPetName] = useState("");
   const [catalogQuery, setCatalogQuery] = useState("");
   const [historyQuery, setHistoryQuery] = useState("");
   const [historyFilter, setHistoryFilter] = useState("all");
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const theme = useTheme();
-  const { profile, canScan, isPro, remainingScans } = useAuth();
+  const { profile, canScan, isPro, remainingScans, updatePetProfile } = useAuth();
   const savedPetProfile = normalizePetProfile(profile?.pet_profile);
   const hasSavedPet = hasUsablePetProfile(savedPetProfile);
-
-  // Check if upgrade banner should show (free users, 7-day cooldown)
-  useEffect(() => {
-    if (isPro) return;
-    AsyncStorage.getItem(BANNER_DISMISS_KEY).then((val) => {
-      if (!val) {
-        setShowBanner(true);
-        return;
-      }
-      const dismissedAt = parseInt(val, 10);
-      if (Date.now() - dismissedAt > BANNER_COOLDOWN_MS) {
-        setShowBanner(true);
-      }
-    });
-  }, [isPro]);
-
-  const dismissBanner = () => {
-    setShowBanner(false);
-    AsyncStorage.setItem(BANNER_DISMISS_KEY, String(Date.now()));
-  };
 
   // Scan button press animation
   const scanScale = useSharedValue(1);
@@ -752,6 +767,34 @@ export default function HomeScreen({ navigation }) {
 
   const [historyError, setHistoryError] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
+
+  useEffect(() => {
+    AsyncStorage.getItem(LAST_HUMAN_FOOD_PET_KEY)
+      .then((value) => setLastHumanFoodPetType(value === "dog" || value === "cat" ? value : null))
+      .catch(() => {});
+  }, []);
+
+  const checkContributionStatus = useCallback(async () => {
+    try {
+      const pending = await getPendingCatalogContributions();
+      for (const contribution of pending.slice(0, 4)) {
+        const match = await findVerifiedCatalogProductForLookup({
+          productName: contribution.productName,
+          brand: contribution.brand,
+          petType: contribution.petType,
+          gtin: contribution.gtin,
+          barcode: contribution.gtin,
+        }, { limit: 8 });
+        if (match) {
+          setCompletedContribution({ contribution, product: match });
+          return;
+        }
+      }
+      setCompletedContribution(null);
+    } catch (err) {
+      logger.debug("[HOME] Contribution status check failed:", err.message);
+    }
+  }, []);
 
   const loadHistory = useCallback(async () => {
     setHistoryError(false);
@@ -783,7 +826,8 @@ export default function HomeScreen({ navigation }) {
   useFocusEffect(
     useCallback(() => {
       loadHistory();
-    }, [loadHistory])
+      checkContributionStatus();
+    }, [loadHistory, checkContributionStatus])
   );
 
   // Subscribe to background analysis completions for real-time history updates
@@ -822,7 +866,8 @@ export default function HomeScreen({ navigation }) {
       is_pro: isPro,
     });
     navigatePaywall("home_banner", {
-      source_surface: HOME_FREE_SCAN_STATUS_SOURCE_SURFACE,
+      source_surface: "home_banner",
+      trigger_surface: HOME_FREE_SCAN_STATUS_SOURCE_SURFACE,
       remaining_scans: remainingScansAnalyticsValue,
     });
   };
@@ -853,7 +898,7 @@ export default function HomeScreen({ navigation }) {
     navigation.navigate("Scanner", { mode: "label_lookup" });
   };
 
-  const handleIngredientCapture = () => {
+  const handleIngredientCapture = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const allowed = canScan();
     trackEvent("ingredient_capture_tapped", {
@@ -875,9 +920,12 @@ export default function HomeScreen({ navigation }) {
       });
       return;
     }
+    const catalogEvidenceConsent = await requestCatalogEvidenceConsent();
+    if (catalogEvidenceConsent == null) return;
     navigation.navigate("Scanner", {
       mode: "ingredient_capture",
       sourceSurface: HOME_INGREDIENT_CAPTURE_SOURCE_SURFACE,
+      catalogEvidenceConsent,
     });
   };
 
@@ -917,6 +965,7 @@ export default function HomeScreen({ navigation }) {
       return;
     }
 
+    setPendingHumanPetType(lastHumanFoodPetType);
     setShowPetPicker(true);
   };
 
@@ -939,6 +988,19 @@ export default function HomeScreen({ navigation }) {
     setCatalogQuery("");
     trackEvent("catalog_search_home_cleared", {
       source_surface: HOME_CATALOG_SEARCH_SOURCE_SURFACE,
+    });
+  };
+
+  const handleEmptyStateSearch = () => {
+    Haptics.selectionAsync();
+    trackEvent("catalog_search_submitted", {
+      source_surface: HOME_EMPTY_STATE_SOURCE_SURFACE,
+      query_present: false,
+      query_length: 0,
+    });
+    navigation.navigate("ProductSearch", {
+      initialQuery: "",
+      sourceSurface: HOME_EMPTY_STATE_SOURCE_SURFACE,
     });
   };
 
@@ -1033,10 +1095,21 @@ export default function HomeScreen({ navigation }) {
     setHistoryExpanded(nextExpanded);
   };
 
-  const comparableHistory = useMemo(
-    () => selectDistinctComparableHistory(history),
-    [history]
-  );
+  const comparableHistory = useMemo(() => compareSelection
+    .map((id) => history.find((item) => item.id === id))
+    .filter(Boolean)
+    .filter(isComparableHistoryItem)
+    .slice(0, 2), [compareSelection, history]);
+
+  const toggleCompareSelection = (item) => {
+    if (!isComparableHistoryItem(item)) return;
+    Haptics.selectionAsync();
+    setCompareSelection((current) => {
+      if (current.includes(item.id)) return current.filter((id) => id !== item.id);
+      if (current.length >= 2) return [current[1], item.id];
+      return [...current, item.id];
+    });
+  };
 
   const compareAnalytics = useCallback((items = comparableHistory) => ({
     source_surface: "home_compare_card",
@@ -1055,6 +1128,47 @@ export default function HomeScreen({ navigation }) {
     Haptics.selectionAsync();
     trackEvent("history_compare_opened", compareAnalytics());
     setShowCompareModal(true);
+  };
+
+  const handleContributionRescore = async () => {
+    if (!completedContribution?.product) return;
+    Haptics.selectionAsync();
+    await removePendingCatalogContribution(completedContribution.contribution.key).catch(() => {});
+    const product = completedContribution.product;
+    setCompletedContribution(null);
+    navigation.navigate("Results", {
+      mode: "catalog",
+      cacheKey: product.cacheKey,
+      catalogProduct: product,
+      petType: product.petType,
+      sourceSurface: "catalog_contribution_completed",
+    });
+  };
+
+  const chooseHumanFoodPet = async (petType) => {
+    setShowPetPicker(false);
+    setLastHumanFoodPetType(petType);
+    AsyncStorage.setItem(LAST_HUMAN_FOOD_PET_KEY, petType).catch(() => {});
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    trackEvent("human_food_pet_selected", {
+      pet_type: petType,
+      saved_as_profile: saveHumanFoodPet && !!humanFoodPetName.trim(),
+    });
+    if (saveHumanFoodPet && humanFoodPetName.trim()) {
+      try {
+        await updatePetProfile({
+          name: humanFoodPetName.trim(),
+          petType,
+          lifeStage: "adult",
+          avoidIngredients: [],
+        });
+      } catch (err) {
+        logger.debug("[HOME] Save human-food pet failed:", err.message);
+      }
+    }
+    setSaveHumanFoodPet(false);
+    setHumanFoodPetName("");
+    navigation.navigate("Scanner", { mode: "human_food", petType });
   };
 
   const handleCompareClose = (closeReason = "dismissed") => {
@@ -1131,7 +1245,10 @@ export default function HomeScreen({ navigation }) {
       {/* Title + profile */}
       <View style={styles.header}>
         <View style={styles.headerTop}>
-          <Text style={[styles.title, { color: theme.textPrimary }]}>Woof</Text>
+          <View style={styles.brandTitleRow}>
+            <BrandLogo size={36} />
+            <Text style={[styles.title, { color: theme.textPrimary }]}>{BRAND_NAME}</Text>
+          </View>
           <Pressable
             onPress={() => {
               Haptics.selectionAsync();
@@ -1154,89 +1271,11 @@ export default function HomeScreen({ navigation }) {
           </Pressable>
         </View>
         <Text style={[styles.tagline, { color: theme.textTertiary }]}>
-          Know what's in the bowl
+          {BRAND_TAGLINE}
         </Text>
       </View>
 
-      <View style={styles.catalogSearchSection}>
-        <View
-          style={[
-            styles.catalogSearchBox,
-            {
-              backgroundColor: theme.card,
-              borderColor: theme.separator,
-            },
-          ]}
-        >
-          <Search size={17} color={theme.textTertiary} strokeWidth={2} />
-          <TextInput
-            value={catalogQuery}
-            onChangeText={setCatalogQuery}
-            onSubmitEditing={handleCatalogSearchSubmit}
-            placeholder="Search pet foods by name"
-            placeholderTextColor={theme.textTertiary}
-            returnKeyType="search"
-            autoCapitalize="words"
-            autoCorrect={false}
-            style={[styles.catalogSearchInput, { color: theme.textPrimary }]}
-            accessibilityLabel="Search products by name"
-          />
-          {catalogQuery.length > 0 ? (
-            <Pressable
-              onPress={handleCatalogQueryClear}
-              hitSlop={10}
-              style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
-              accessibilityRole="button"
-              accessibilityLabel="Clear product search"
-            >
-              <X size={15} color={theme.textTertiary} strokeWidth={2} />
-            </Pressable>
-          ) : null}
-          {catalogQuery.trim().length > 0 ? (
-            <Pressable
-              onPress={handleCatalogSearchSubmit}
-              hitSlop={10}
-              style={({ pressed }) => [
-                styles.catalogSearchSubmit,
-                {
-                  backgroundColor: theme.buttonPrimary,
-                  opacity: pressed ? 0.78 : 1,
-                },
-              ]}
-              accessibilityRole="button"
-              accessibilityLabel="Search catalog"
-            >
-              <ChevronRight size={16} color={theme.buttonText} strokeWidth={2.4} />
-            </Pressable>
-          ) : null}
-        </View>
-        <Pressable
-          onPress={handleIngredientCapture}
-          style={({ pressed }) => [
-            styles.labelScanButton,
-            {
-              backgroundColor: theme.surface,
-              borderColor: theme.separator,
-              opacity: pressed ? 0.78 : 1,
-            },
-          ]}
-          accessibilityRole="button"
-          accessibilityLabel="Scan ingredients list"
-          accessibilityHint="Opens the camera to capture an ingredient-panel photo for catalog review"
-        >
-          <Camera size={17} color={theme.textPrimary} strokeWidth={2} />
-          <Text
-            style={[styles.labelScanButtonText, { color: theme.textPrimary }]}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.8}
-          >
-            Scan Ingredients
-          </Text>
-        </Pressable>
-      </View>
-
-      {/* Scan button */}
+      <Text style={[styles.actionEyebrow, { color: theme.textSecondary }]}>Pet food check</Text>
       <Pressable
         onPress={() => handleScan(HOME_SCAN_CTA_ANALYTICS.source_surface)}
         onPressIn={() => {
@@ -1264,12 +1303,135 @@ export default function HomeScreen({ navigation }) {
             adjustsFontSizeToFit
             minimumFontScale={0.75}
           >
-            Scan Product Label
+            Scan Front Label
           </Text>
         </Animated.View>
       </Pressable>
 
+      <View style={styles.trustLine} accessible accessibilityLabel="Exact formula matching only. Similar recipes are never substituted.">
+        <Shield size={15} color={Colors.scoreExcellent} strokeWidth={2.2} />
+        <Text style={[styles.trustLineText, { color: theme.textSecondary }]}>
+          Exact formula only. Never a similar recipe.
+        </Text>
+      </View>
+
+      <View style={styles.catalogSearchSection}>
+        <Text style={[styles.searchAlternativeLabel, { color: theme.textSecondary }]}>Search by name</Text>
+        <View
+          style={[
+            styles.catalogSearchBox,
+            {
+              backgroundColor: theme.card,
+              borderColor: theme.separator,
+            },
+          ]}
+        >
+          <Search size={18} color={theme.textTertiary} strokeWidth={2} />
+          <TextInput
+            value={catalogQuery}
+            onChangeText={setCatalogQuery}
+            onSubmitEditing={handleCatalogSearchSubmit}
+            placeholder="Brand, product, or recipe"
+            placeholderTextColor={theme.textTertiary}
+            returnKeyType="search"
+            autoCapitalize="words"
+            autoCorrect={false}
+            style={[styles.catalogSearchInput, { color: theme.textPrimary }]}
+            accessibilityLabel="Search products by name"
+          />
+          {catalogQuery.length > 0 ? (
+            <Pressable
+              onPress={handleCatalogQueryClear}
+              hitSlop={14}
+              style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
+              accessibilityRole="button"
+              accessibilityLabel="Clear product search"
+            >
+              <X size={16} color={theme.textTertiary} strokeWidth={2} />
+            </Pressable>
+          ) : null}
+          {catalogQuery.trim().length > 0 ? (
+            <Pressable
+              onPress={handleCatalogSearchSubmit}
+              hitSlop={10}
+              style={({ pressed }) => [
+                styles.catalogSearchSubmit,
+                {
+                  backgroundColor: theme.buttonPrimary,
+                  opacity: pressed ? 0.78 : 1,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Search catalog"
+            >
+              <ChevronRight size={16} color={theme.buttonText} strokeWidth={2.4} />
+            </Pressable>
+          ) : null}
+        </View>
+        <Pressable
+          onPress={handleIngredientCapture}
+          style={({ pressed }) => [
+            styles.labelScanButton,
+            { opacity: pressed ? 0.58 : 1 },
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel="Scan ingredients list"
+          accessibilityHint="Opens the camera to capture an ingredient-panel photo for catalog review"
+        >
+          <Camera size={15} color={theme.textSecondary} strokeWidth={2} />
+          <Text style={[styles.labelScanButtonText, { color: theme.textSecondary }]}>
+            Can’t find it? Scan the ingredient panel
+          </Text>
+        </Pressable>
+      </View>
+
+      {completedContribution ? (
+        <Pressable
+          onPress={handleContributionRescore}
+          style={({ pressed }) => [
+            styles.contributionBanner,
+            {
+              backgroundColor: theme.card,
+              borderColor: Colors.scoreExcellent,
+              opacity: pressed ? 0.72 : 1,
+            },
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel="Your submission was added. Rescore product"
+        >
+          <Shield size={18} color={Colors.scoreExcellent} strokeWidth={2} />
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.contributionTitle, { color: theme.textPrimary }]}>Your submission was added</Text>
+            <Text style={[styles.contributionBody, { color: theme.textSecondary }]} numberOfLines={1}>
+              {completedContribution.product.productName || completedContribution.contribution.productName} — rescore
+            </Text>
+          </View>
+          <ChevronRight size={16} color={theme.textTertiary} strokeWidth={2} />
+        </Pressable>
+      ) : null}
+
       {/* Human food safety check */}
+      {hasSavedPet || lastHumanFoodPetType ? (
+        <View style={[styles.humanPetChip, { backgroundColor: theme.surface, borderColor: theme.separator }]}>
+          {((hasSavedPet ? savedPetProfile.petType : lastHumanFoodPetType) === "cat")
+            ? <Cat size={14} color={theme.textSecondary} strokeWidth={2} />
+            : <Dog size={14} color={theme.textSecondary} strokeWidth={2} />}
+          <Text style={[styles.humanPetChipText, { color: theme.textSecondary }]}>
+            For {hasSavedPet ? savedPetProfile.name : `your ${lastHumanFoodPetType}`}
+          </Text>
+          <Pressable
+            onPress={() => {
+              setPendingHumanPetType(hasSavedPet ? savedPetProfile.petType : lastHumanFoodPetType);
+              setShowPetPicker(true);
+            }}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Switch pet for human-food check"
+          >
+            <Text style={[styles.humanPetSwitch, { color: theme.textPrimary }]}>Switch</Text>
+          </Pressable>
+        </View>
+      ) : null}
       <Pressable
         onPress={() => handleHumanFoodCheck(HOME_HUMAN_FOOD_CTA_ANALYTICS.source_surface)}
         accessibilityRole="button"
@@ -1299,67 +1461,17 @@ export default function HomeScreen({ navigation }) {
         />
       )}
 
-      {/* Upgrade banner (free users, 7-day cooldown) */}
-      {showBanner && !isPro && (
-        <View
-          style={[
-            styles.upgradeBanner,
-            {
-              backgroundColor: Colors.scoreExcellent + "0A",
-              borderColor: Colors.scoreExcellent + "26",
-            },
-          ]}
-        >
-          <Pressable
-            onPress={() => {
-              Haptics.selectionAsync();
-              trackEvent("upgrade_banner_tapped");
-              navigatePaywall("home_banner", {
-                source_surface: "home_banner",
-              });
-            }}
-            style={({ pressed }) => [
-              styles.upgradeBannerAction,
-              { opacity: pressed ? 0.8 : 1 },
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel="Unlock full ingredient analysis"
-            accessibilityHint="Opens Woof Pro plans"
-          >
-            <Shield size={16} color={Colors.scoreExcellent} strokeWidth={2} />
-            <Text style={[styles.upgradeBannerText, { color: theme.textPrimary }]} numberOfLines={1}>
-              Unlock full ingredient analysis
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={() => {
-              Haptics.selectionAsync();
-              trackEvent("upgrade_banner_dismissed");
-              dismissBanner();
-            }}
-            hitSlop={12}
-            style={({ pressed }) => [
-              styles.upgradeBannerDismiss,
-              { opacity: pressed ? 0.5 : 1 },
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel="Dismiss upgrade banner"
-          >
-            <X size={14} color={theme.textTertiary} strokeWidth={2} />
-          </Pressable>
-        </View>
-      )}
-
       {/* Section header */}
       {history.length > 0 && (
         <>
           <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>
-              Recent Scans
-            </Text>
+            <View>
+              <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>Recent Scans</Text>
+              <Text style={[styles.historyLimitHint, { color: theme.textTertiary }]}>History keeps your last 50 scans</Text>
+            </View>
             <Pressable
               onPress={handleClearHistory}
-              hitSlop={12}
+              hitSlop={15}
               style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
               accessibilityRole="button"
               accessibilityLabel="Clear scan history"
@@ -1413,6 +1525,8 @@ export default function HomeScreen({ navigation }) {
                 query_present: normalizedHistoryQuery.length > 0,
                 query_length: normalizedHistoryQuery.length,
               })}
+              onCompare={() => toggleCompareSelection(item)}
+              compareSelected={compareSelection.includes(item.id)}
             />
           );
         }}
@@ -1439,9 +1553,10 @@ export default function HomeScreen({ navigation }) {
           ) : (
             <EmptyState
               theme={theme}
+              remainingScans={remainingFreeScans}
               isPro={isPro}
               onScan={() => handleScan(HOME_EMPTY_STATE_SOURCE_SURFACE)}
-              onHumanFood={() => handleHumanFoodCheck(HOME_EMPTY_STATE_SOURCE_SURFACE)}
+              onSearch={handleEmptyStateSearch}
             />
           )
         }
@@ -1498,13 +1613,8 @@ export default function HomeScreen({ navigation }) {
             </Text>
             <View style={styles.petPickerRow}>
               <Pressable
-                style={({ pressed }) => [styles.petPickerOption, { backgroundColor: pressed ? theme.surface : theme.bg }]}
-                onPress={() => {
-                  setShowPetPicker(false);
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  trackEvent("human_food_pet_selected", { pet_type: "dog" });
-                  navigation.navigate("Scanner", { mode: "human_food", petType: "dog" });
-                }}
+                style={({ pressed }) => [styles.petPickerOption, { backgroundColor: pressed || pendingHumanPetType === "dog" ? theme.surface : theme.bg }]}
+                onPress={() => setPendingHumanPetType("dog")}
                 accessibilityRole="button"
                 accessibilityLabel="Check human food for a dog"
                 accessibilityHint="Opens the camera in dog food-safety mode"
@@ -1513,13 +1623,8 @@ export default function HomeScreen({ navigation }) {
                 <Text style={[styles.petPickerLabel, { color: theme.textPrimary }]}>Dog</Text>
               </Pressable>
               <Pressable
-                style={({ pressed }) => [styles.petPickerOption, { backgroundColor: pressed ? theme.surface : theme.bg }]}
-                onPress={() => {
-                  setShowPetPicker(false);
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  trackEvent("human_food_pet_selected", { pet_type: "cat" });
-                  navigation.navigate("Scanner", { mode: "human_food", petType: "cat" });
-                }}
+                style={({ pressed }) => [styles.petPickerOption, { backgroundColor: pressed || pendingHumanPetType === "cat" ? theme.surface : theme.bg }]}
+                onPress={() => setPendingHumanPetType("cat")}
                 accessibilityRole="button"
                 accessibilityLabel="Check human food for a cat"
                 accessibilityHint="Opens the camera in cat food-safety mode"
@@ -1528,6 +1633,42 @@ export default function HomeScreen({ navigation }) {
                 <Text style={[styles.petPickerLabel, { color: theme.textPrimary }]}>Cat</Text>
               </Pressable>
             </View>
+            <Pressable
+              onPress={() => setSaveHumanFoodPet((value) => !value)}
+              style={styles.savePetToggle}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: saveHumanFoodPet }}
+              accessibilityLabel="Save this as my pet"
+            >
+              <View style={[styles.savePetCheckbox, { borderColor: theme.textPrimary, backgroundColor: saveHumanFoodPet ? theme.textPrimary : "transparent" }]} />
+              <Text style={[styles.savePetToggleText, { color: theme.textPrimary }]}>Save as my pet</Text>
+            </Pressable>
+            {saveHumanFoodPet ? (
+              <TextInput
+                value={humanFoodPetName}
+                onChangeText={setHumanFoodPetName}
+                placeholder="Pet name"
+                placeholderTextColor={theme.textTertiary}
+                style={[styles.savePetNameInput, { color: theme.textPrimary, borderColor: theme.separator, backgroundColor: theme.bg }]}
+                accessibilityLabel="Pet name"
+              />
+            ) : null}
+            <Pressable
+              onPress={() => pendingHumanPetType && chooseHumanFoodPet(pendingHumanPetType)}
+              disabled={!pendingHumanPetType || (saveHumanFoodPet && !humanFoodPetName.trim())}
+              style={({ pressed }) => [
+                styles.petPickerContinue,
+                {
+                  backgroundColor: theme.buttonPrimary,
+                  opacity: !pendingHumanPetType || (saveHumanFoodPet && !humanFoodPetName.trim()) ? 0.45 : pressed ? 0.72 : 1,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Continue to human-food camera"
+              accessibilityState={{ disabled: !pendingHumanPetType || (saveHumanFoodPet && !humanFoodPetName.trim()) }}
+            >
+              <Text style={[styles.petPickerContinueText, { color: theme.buttonText }]}>Continue</Text>
+            </Pressable>
           </View>
         </Pressable>
       </Modal>
@@ -1560,16 +1701,21 @@ const styles = StyleSheet.create({
 
   // Header
   header: {
-    paddingTop: 16,
-    paddingBottom: 24,
+    paddingTop: 12,
+    paddingBottom: 28,
   },
   headerTop: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
+  brandTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
   title: {
-    fontSize: 34,
+    fontSize: 32,
     fontWeight: "700",
     letterSpacing: 0,
   },
@@ -1587,19 +1733,44 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
   tagline: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "400",
-    marginTop: 8,
+    marginTop: 6,
+  },
+
+  actionEyebrow: {
+    fontSize: 12,
+    fontWeight: "600",
+    letterSpacing: 0,
+    marginBottom: 10,
+  },
+  trustLine: {
+    minHeight: 38,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+  },
+  trustLineText: {
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 18,
+    flexShrink: 1,
   },
 
   // Catalog search
   catalogSearchSection: {
-    marginBottom: 14,
-    gap: 10,
+    marginTop: 16,
+    marginBottom: 12,
+    gap: 8,
+  },
+  searchAlternativeLabel: {
+    fontSize: 13,
+    fontWeight: "600",
   },
   catalogSearchBox: {
-    minHeight: 50,
-    borderRadius: 12,
+    minHeight: 54,
+    borderRadius: 16,
     borderWidth: 1,
     paddingHorizontal: 14,
     flexDirection: "row",
@@ -1621,21 +1792,38 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   labelScanButton: {
-    minHeight: 46,
-    borderRadius: 12,
-    borderWidth: 1,
-    paddingHorizontal: 14,
+    minHeight: 44,
+    paddingHorizontal: 4,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
+    justifyContent: "flex-start",
+    gap: 7,
   },
   labelScanButtonText: {
-    fontSize: 15,
-    fontWeight: "700",
+    fontSize: 13,
+    fontWeight: "600",
     letterSpacing: 0,
     flexShrink: 1,
-    textAlign: "center",
+  },
+  contributionBanner: {
+    minHeight: 62,
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  contributionTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  contributionBody: {
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 2,
   },
 
   // Scan button
@@ -1643,7 +1831,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    height: Spacing.buttonHeight,
+    height: 62,
     borderRadius: Spacing.buttonRadius,
     gap: 8,
   },
@@ -1663,17 +1851,36 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    height: 54,
-    borderRadius: 14,
-    borderWidth: 1.5,
+    height: 50,
+    borderRadius: 16,
+    borderWidth: 1,
     gap: 8,
-    marginTop: 12,
+    marginTop: 4,
   },
   humanFoodButtonText: {
     fontSize: 16,
     fontWeight: "600",
     flexShrink: 1,
     textAlign: "center",
+  },
+  humanPetChip: {
+    alignSelf: "flex-start",
+    minHeight: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    marginTop: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+  },
+  humanPetChipText: {
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  humanPetSwitch: {
+    fontSize: 12,
+    fontWeight: "800",
   },
 
   // Section header
@@ -1685,9 +1892,14 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.elementGap,
   },
   sectionTitle: {
-    fontSize: 22,
-    fontWeight: "600",
+    fontSize: 20,
+    fontWeight: "700",
     letterSpacing: 0,
+  },
+  historyLimitHint: {
+    fontSize: 11,
+    fontWeight: "500",
+    marginTop: 3,
   },
   clearText: {
     fontSize: 15,
@@ -1719,7 +1931,7 @@ const styles = StyleSheet.create({
   },
   historyFilterPill: {
     flex: 1,
-    minHeight: 36,
+    minHeight: 44,
     borderRadius: 10,
     borderWidth: 1,
     alignItems: "center",
@@ -1755,7 +1967,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   filteredEmptyButton: {
-    minHeight: 42,
+    minHeight: 44,
     borderRadius: 12,
     borderWidth: 1,
     paddingHorizontal: 18,
@@ -1772,6 +1984,7 @@ const styles = StyleSheet.create({
   // History rows
   historyRow: {
     paddingHorizontal: Spacing.screenPadding,
+    paddingBottom: 8,
   },
   historyRowInner: {
     flexDirection: "row",
@@ -1810,6 +2023,20 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
+  },
+  historyCompareAction: {
+    alignSelf: "flex-end",
+    minHeight: 32,
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 13,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: -4,
+  },
+  historyCompareActionText: {
+    fontSize: 12,
+    fontWeight: "700",
   },
   rowDivider: {
     height: 0.5,
@@ -1897,12 +2124,12 @@ const styles = StyleSheet.create({
 
   // Free scan status
   freeScanStatus: {
-    minHeight: 68,
-    borderRadius: 12,
+    minHeight: 64,
+    borderRadius: 16,
     borderWidth: 1,
     paddingVertical: 12,
     paddingHorizontal: 14,
-    marginTop: 12,
+    marginTop: 10,
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
@@ -1930,50 +2157,25 @@ const styles = StyleSheet.create({
     textAlign: "right",
   },
 
-  // Upgrade banner
-  upgradeBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderRadius: 12,
-    borderWidth: 0.5,
-    paddingLeft: 16,
-    paddingRight: 8,
-    marginTop: 16,
-  },
-  upgradeBannerAction: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: 44,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingVertical: 12,
-  },
-  upgradeBannerDismiss: {
-    width: 36,
-    height: 36,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  upgradeBannerText: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: "500",
-  },
-
   // Empty state
   emptyContainer: {
-    flex: 1,
+    minHeight: 240,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 40,
+    paddingBottom: 36,
   },
   emptyIconContainer: {
-    marginBottom: 24,
+    width: 64,
+    height: 64,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 18,
   },
   emptyTitle: {
-    fontSize: 17,
-    fontWeight: "500",
+    fontSize: 18,
+    fontWeight: "700",
     marginBottom: 8,
     textAlign: "center",
   },
@@ -1983,51 +2185,58 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     textAlign: "center",
   },
-  emptyFreeScans: {
+  emptyValueCue: {
+    marginTop: 12,
     fontSize: 13,
-    fontWeight: "500",
-    marginTop: 10,
+    fontWeight: "600",
     textAlign: "center",
   },
   emptyActions: {
     width: "100%",
+    maxWidth: 320,
+    marginTop: 20,
     gap: 10,
-    marginTop: 22,
   },
-  emptyPrimaryButton: {
-    height: 48,
-    borderRadius: 12,
+  emptyPrimaryAction: {
+    minHeight: 50,
+    borderRadius: 15,
+    paddingHorizontal: 18,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    ...Shadows.button,
+    gap: 9,
   },
-  emptySecondaryButton: {
-    height: 48,
-    borderRadius: 12,
+  emptyPrimaryActionText: {
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  emptySecondaryAction: {
+    minHeight: 48,
+    borderRadius: 15,
     borderWidth: 1,
+    paddingHorizontal: 18,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
+    gap: 9,
   },
-  emptyPrimaryText: {
+  emptySecondaryActionText: {
     fontSize: 15,
     fontWeight: "600",
-    letterSpacing: 0,
-  },
-  emptySecondaryText: {
-    fontSize: 15,
-    fontWeight: "600",
-    letterSpacing: 0,
   },
 
-  // Safety dot for human food entries
-  safetyDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+  // Labeled safety status for human-food entries
+  safetyPill: {
+    minHeight: 28,
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 9,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  safetyPillText: {
+    fontSize: 11,
+    fontWeight: "800",
   },
 
   // Pet picker modal
@@ -2063,6 +2272,41 @@ const styles = StyleSheet.create({
   petPickerLabel: {
     fontSize: 16,
     fontWeight: "600",
+  },
+  savePetToggle: {
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 12,
+  },
+  savePetCheckbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 6,
+    borderWidth: 1.5,
+  },
+  savePetToggleText: {
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  savePetNameInput: {
+    minHeight: 46,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    fontSize: 15,
+  },
+  petPickerContinue: {
+    minHeight: 48,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 14,
+  },
+  petPickerContinueText: {
+    fontSize: 15,
+    fontWeight: "700",
   },
 
   // Compare modal

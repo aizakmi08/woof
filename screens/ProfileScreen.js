@@ -49,13 +49,13 @@ import { useTheme, Colors, Spacing, Shadows, Typography } from "../theme";
 import { PRIVACY_HTML, TERMS_HTML } from "../legal";
 import {
   PET_AVOID_PRESETS,
+  MAX_AVOID_INGREDIENTS,
   hasUsablePetProfile,
   normalizePetProfile,
   parseAvoidIngredients,
   petProfileSummary,
 } from "../services/petProfile";
-
-const SUPPORT_EMAIL = "woofapp.help@gmail.com";
+import { BRAND_NAME, BRAND_PRO_NAME, SUPPORT_EMAIL } from "../config/brand";
 
 export default function ProfileScreen({ navigation, route }) {
   const theme = useTheme();
@@ -111,6 +111,16 @@ export default function ProfileScreen({ navigation, route }) {
     { value: "adult", label: "Adult" },
     { value: "senior", label: "Senior" },
   ];
+  const customAvoidRaw = customAvoidIngredientsText
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const avoidIngredientCount = parseAvoidIngredients([
+    ...selectedAvoidIngredients,
+    ...customAvoidRaw,
+  ]).length;
+  const avoidInputTruncated = customAvoidRaw.some((value) => value.length > 60)
+    || new Set([...selectedAvoidIngredients, ...customAvoidRaw].map((value) => value.toLowerCase())).size > MAX_AVOID_INGREDIENTS;
 
   const handleSaveAccount = async (provider) => {
     const setSaving = provider === "apple" ? setSavingApple : setSavingGoogle;
@@ -200,7 +210,7 @@ export default function ProfileScreen({ navigation, route }) {
         Alert.alert(
           proAfterRefresh ? "Purchases Restored" : "Restore Received",
           proAfterRefresh
-            ? "Your Woof Pro access is active."
+            ? `Your ${BRAND_PRO_NAME} access is active.`
             : "Your purchase was found, but Pro access is still syncing. Please try again in a moment."
         );
       } else if (result.error) {
@@ -260,12 +270,12 @@ export default function ProfileScreen({ navigation, route }) {
       });
       Alert.alert(
         "Could Not Open Subscriptions",
-        "Please open your App Store or Google Play subscription settings to manage or cancel Woof Pro."
+        `Please open your App Store or Google Play subscription settings to manage or cancel ${BRAND_PRO_NAME}.`
       );
     }
   };
 
-  const handleRateWoof = async () => {
+  const handleRateApp = async () => {
     Haptics.selectionAsync();
     const opened = await openStoreReview({
       source: "profile",
@@ -276,7 +286,7 @@ export default function ProfileScreen({ navigation, route }) {
     if (!opened) {
       Alert.alert(
         "Could Not Open App Store",
-        "Ratings are available from the App Store version of Woof. Please try again later."
+        `Ratings are available from the App Store version of ${BRAND_NAME}. Please try again later.`
       );
     }
   };
@@ -290,14 +300,14 @@ export default function ProfileScreen({ navigation, route }) {
       "",
       "",
       "---",
-      "Woof support diagnostics",
+      `${BRAND_NAME} support diagnostics`,
       `App version: ${appVersion}`,
       `Build: ${nativeBuildVersion}`,
       `Platform: ${Platform.OS} ${Platform.Version || "unknown"}`,
       `Plan: ${isPro ? "pro" : "free"}`,
       `Account: ${isAnonymous ? "guest" : "signed_in"}`,
     ].join("\n");
-    const mailtoUrl = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent("Woof Support")}&body=${encodeURIComponent(supportDiagnostics)}`;
+    const mailtoUrl = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(`${BRAND_NAME} Support`)}&body=${encodeURIComponent(supportDiagnostics)}`;
 
     trackEvent("support_contact_tapped", {
       source: "profile",
@@ -596,13 +606,13 @@ export default function ProfileScreen({ navigation, route }) {
             style={({ pressed }) => [styles.subscriptionPressable, { opacity: pressed ? 0.5 : 1 }]}
             accessibilityRole="button"
             accessibilityLabel={isPro ? "Manage subscription" : "Upgrade to Pro"}
-            accessibilityHint={isPro ? "Opens system subscription management" : "Opens Woof Pro plans"}
+            accessibilityHint={isPro ? "Opens system subscription management" : `Opens ${BRAND_PRO_NAME} plans`}
           >
             <View style={styles.subscriptionRow}>
               <CreditCard size={18} color={isPro ? Colors.scoreExcellent : theme.textSecondary} strokeWidth={1.8} />
               <View style={styles.subscriptionCopy}>
                 <Text style={[styles.legalRowText, { color: theme.textPrimary }]}>
-                  {isPro ? "Manage Subscription" : "Upgrade to Woof Pro"}
+                  {isPro ? "Manage Subscription" : `Upgrade to ${BRAND_PRO_NAME}`}
                 </Text>
                 <Text style={[styles.subscriptionStatus, { color: isPro ? Colors.scoreExcellent : theme.textTertiary }]}>
                   {isPro ? "Active" : "Free plan"}
@@ -618,7 +628,7 @@ export default function ProfileScreen({ navigation, route }) {
             style={({ pressed }) => [styles.subscriptionPressable, { opacity: pressed ? 0.5 : 1 }]}
             accessibilityRole="button"
             accessibilityLabel="Restore purchases"
-            accessibilityHint="Checks App Store or Google Play purchases for an active Woof Pro subscription"
+            accessibilityHint={`Checks App Store or Google Play purchases for an active ${BRAND_PRO_NAME} subscription`}
             accessibilityState={{ disabled: restoring, busy: restoring }}
           >
             <View style={styles.subscriptionRow}>
@@ -640,17 +650,17 @@ export default function ProfileScreen({ navigation, route }) {
           </Pressable>
           <View style={[styles.legalDivider, { backgroundColor: theme.separator }]} />
           <Pressable
-            onPress={handleRateWoof}
+            onPress={handleRateApp}
             style={({ pressed }) => [styles.subscriptionPressable, { opacity: pressed ? 0.5 : 1 }]}
             accessibilityRole="button"
-            accessibilityLabel="Rate Woof"
+            accessibilityLabel={`Rate ${BRAND_NAME}`}
             accessibilityHint="Opens the store rating page"
           >
             <View style={styles.subscriptionRow}>
               <Star size={18} color={theme.textSecondary} strokeWidth={1.8} />
               <View style={styles.subscriptionCopy}>
                 <Text style={[styles.legalRowText, { color: theme.textPrimary }]}>
-                  Rate Woof
+                  Rate {BRAND_NAME}
                 </Text>
                 <Text style={[styles.subscriptionStatus, { color: theme.textTertiary }]}>
                   Support the app with a quick rating
@@ -665,7 +675,7 @@ export default function ProfileScreen({ navigation, route }) {
             style={({ pressed }) => [styles.subscriptionPressable, { opacity: pressed ? 0.5 : 1 }]}
             accessibilityRole="button"
             accessibilityLabel="Contact Support"
-            accessibilityHint="Opens an email draft to Woof support"
+            accessibilityHint={`Opens an email draft to ${BRAND_NAME} support`}
           >
             <View style={styles.subscriptionRow}>
               <Mail size={18} color={theme.textSecondary} strokeWidth={1.8} />
@@ -784,7 +794,7 @@ export default function ProfileScreen({ navigation, route }) {
         {/* Version Footer */}
         <View style={styles.footer}>
           <Text style={[styles.versionText, { color: theme.textTertiary }]}>
-            Woof v{appVersion}
+            {BRAND_NAME} v{appVersion}
           </Text>
         </View>
       </ScrollView>
@@ -947,6 +957,14 @@ export default function ProfileScreen({ navigation, route }) {
                 ]}
                 accessibilityLabel="Ingredients to avoid"
               />
+              <View style={styles.petAvoidCountRow}>
+                <Text style={[styles.petAvoidCount, { color: avoidInputTruncated ? Colors.scoreConcerning : theme.textTertiary }]}>
+                  {avoidIngredientCount} of {MAX_AVOID_INGREDIENTS}
+                </Text>
+                {avoidInputTruncated ? (
+                  <Text style={[styles.petAvoidWarning, { color: Colors.scoreConcerning }]}>Extra entries will be truncated</Text>
+                ) : null}
+              </View>
             </ScrollView>
 
             <Pressable
@@ -1266,6 +1284,24 @@ const styles = StyleSheet.create({
   },
   petAvoidInput: {
     marginTop: 10,
+  },
+  petAvoidCountRow: {
+    minHeight: 28,
+    marginTop: 5,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  petAvoidCount: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  petAvoidWarning: {
+    fontSize: 11,
+    fontWeight: "600",
+    flexShrink: 1,
+    textAlign: "right",
   },
   petSaveButton: {
     height: Spacing.buttonHeight,
