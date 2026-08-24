@@ -1276,7 +1276,7 @@ function checkScanFirstOnboarding() {
     "onboarding_scan_now_tapped",
     "completion_method: completionMethod",
     "nextRoute: \"Scanner\"",
-    "Scan the front label",
+    "Scan pet food labels",
     "No barcode needed",
     "Search works too",
     "verified ingredient list",

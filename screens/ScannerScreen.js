@@ -540,7 +540,13 @@ export default function ScannerScreen({ navigation, route }) {
       // Start at a label-readable size that usually meets the upload target in
       // one pass, avoiding extra image transformations on the hot scan path.
       captureStage = "image_optimization";
-      setCaptureProgress(isLabelLookup ? "Reading label text…" : "Preparing photo…");
+      setCaptureProgress(
+        isLabelLookup
+          ? "Reading label text…"
+          : isHumanFood
+            ? "Checking food safety..."
+            : "Preparing photo…"
+      );
       // OCR and visual recognition must inspect the same pixels inside the
       // highlighted frame. Never allow surrounding shelf or browser text to
       // compete with the product label the user intentionally framed.
@@ -626,7 +632,13 @@ export default function ScannerScreen({ navigation, route }) {
         capture_to_handoff_ms: Date.now() - captureStartedAt,
       });
 
-      setCaptureProgress(isLabelLookup ? "Starting exact-match lookup…" : "Starting secure upload…");
+      setCaptureProgress(
+        isLabelLookup
+          ? "Starting exact-match lookup…"
+          : isHumanFood
+            ? "Checking food safety..."
+            : "Starting secure upload…"
+      );
       await new Promise((resolve) => requestAnimationFrame(resolve));
       setCapturing(false);
 

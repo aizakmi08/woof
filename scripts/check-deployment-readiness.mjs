@@ -292,9 +292,9 @@ requireSnippet(onboardingScreen, "onboarding_scan_now_tapped", "Onboarding must 
 requireSnippet(onboardingScreen, "nextRoute: \"Scanner\"", "Onboarding must be able to route scan-now users to Scanner");
 requireSnippet(onboardingScreen, "Scan first, no account required", "Onboarding must reinforce no-account scan-first value prop");
 requireSnippet(onboardingScreen, "3 free scans", "Onboarding must reinforce free-scan value prop");
-requireSnippet(onboardingScreen, "Pet food labels", "Onboarding must introduce pet-food scan value");
+requireSnippet(onboardingScreen, "pet food labels", "Onboarding must introduce pet-food scan value");
 requireSnippet(onboardingScreen, "Human-food checks", "Onboarding must introduce human-food scan value");
-requireSnippet(onboardingScreen, "Save results later", "Onboarding must keep account saving after value");
+requireSnippet(onboardingScreen, "save results later", "Onboarding must keep account saving after value");
 requireSnippet(homeScreen, "home_empty_state", "Home empty-state CTAs must keep source-specific analytics");
 requireSnippet(homeScreen, "3 free scans included", "Home empty state must keep the free-scan value cue");
 requireSnippet(homeScreen, "CompareRecentCard", "Home must keep the recent-scan comparison card");

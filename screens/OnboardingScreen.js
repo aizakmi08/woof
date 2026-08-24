@@ -110,8 +110,8 @@ function PageDots({ count, current, theme }) {
 const PAGES = [
   {
     key: "scan",
-    title: "Scan the front label",
-    body: `${BRAND_NAME} reads the brand, recipe, and package details from the front. No barcode needed. Search works too, and no account is required.`,
+    title: "Scan pet food labels",
+    body: `${BRAND_NAME} reads the brand, recipe, and package details from the front. Scan first, no account required. No barcode needed. Search works too.`,
     highlights: [
       "Exact formula",
       "3 free scans",
@@ -122,7 +122,7 @@ const PAGES = [
   {
     key: "answer",
     title: "Get one clear answer",
-    body: "Scores use the exact verified ingredient list. Add pet details any time to flag ingredients that are not a fit for your pet.",
+    body: "Scores use the exact verified ingredient list. Human-food checks flag everyday foods for your selected pet. Add pet details any time, and save results later by creating an account.",
     Illustration: AnswerIllustration,
     button: "Scan Front Label",
   },
