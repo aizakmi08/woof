@@ -5,6 +5,7 @@ import {
   catalogVerificationState,
   productIsVerifiedReady,
 } from "./catalogQuality";
+import { catalogLookupMissReason } from "./catalogMiss";
 import { createLogger } from "./logger";
 
 const logger = createLogger("CATALOG_COVERAGE");
@@ -60,6 +61,33 @@ function textOrNull(value, maxLength = MAX_STRING_LENGTH) {
 
 function numberOrNull(value) {
   return Number.isFinite(value) ? value : null;
+}
+
+function recognizedIdentity(identification = {}) {
+  const values = [
+    identification?.brand,
+    identification?.productLine,
+    identification?.productName,
+    identification?.flavor,
+    identification?.lifeStage,
+    identification?.foodForm,
+  ]
+    .map((value) => compact(value))
+    .filter(Boolean);
+
+  return normalizeQuery([...new Set(values)].join(" "));
+}
+
+function recognizedIdentityMetadata(identification = {}) {
+  return {
+    recognized_identity: recognizedIdentity(identification),
+    label_brand: textOrNull(identification?.brand, 80),
+    label_product_name: textOrNull(identification?.productName, 120),
+    label_product_line: textOrNull(identification?.productLine, 100),
+    label_flavor: textOrNull(identification?.flavor, 100),
+    label_life_stage: textOrNull(identification?.lifeStage, 40),
+    label_food_form: textOrNull(identification?.foodForm, 40),
+  };
 }
 
 function compactArray(values = [], limit = 120) {
@@ -161,23 +189,15 @@ function catalogVerificationGapSummary(products = []) {
   };
 }
 
-function missReason({ normalizedQuery, identification, summary, errorMessage }) {
-  if (errorMessage) return "lookup_failed";
-  if (!normalizedQuery) return "empty_query";
-  if (identification && identification.found === false) return "label_not_readable";
-  if (summary.result_count === 0) return "no_results";
-  if (summary.catalog_result_count === 0 && summary.opff_result_count > 0) return "catalog_gap_opff_hit";
-  if (summary.ready_result_count === 0) return "missing_ingredients";
-  if (summary.image_result_count === 0) return "missing_images";
-  return null;
-}
-
 export async function logCatalogLookupEvent({
   source = "unknown",
   query,
   identification,
   products = [],
   resolverStatus,
+  resolutionDecision,
+  resolutionEvidence,
+  recognitionPath,
   verificationState,
   latencyMs,
   errorMessage,
@@ -189,14 +209,15 @@ export async function logCatalogLookupEvent({
     const normalizedQuery = normalizeQuery(
       query ||
       identification?.searchQuery ||
-      [identification?.brand, identification?.productName].filter(Boolean).join(" ")
+      recognizedIdentity(identification)
     );
     const summary = catalogCoverageSummary(products);
-    const reason = missReason({
+    const reason = catalogLookupMissReason({
       normalizedQuery,
       identification,
       summary,
       errorMessage,
+      resolutionDecision,
     });
     const topProduct = Array.isArray(products) ? products[0] : null;
     const eventName = errorMessage
@@ -217,7 +238,14 @@ export async function logCatalogLookupEvent({
         label_found: typeof identification?.found === "boolean" ? identification.found : null,
         label_confidence: numberOrNull(identification?.confidence),
         label_pet_type: textOrNull(identification?.petType, 20),
+        ...recognizedIdentityMetadata(identification),
         resolver_status: textOrNull(resolverStatus, 40),
+        resolution_decision: textOrNull(resolutionDecision, 40),
+        recognition_path: textOrNull(recognitionPath, 80),
+        agreement_fields: compactArray(resolutionEvidence?.agreementFields, 20),
+        disagreement_fields: compactArray(resolutionEvidence?.disagreementFields, 20),
+        reason_codes: compactArray(resolutionEvidence?.reasonCodes, 20),
+        visual_confirmation: textOrNull(resolutionEvidence?.visualConfirmation, 40),
         verification_state: textOrNull(verificationState?.state, 40),
         verification_gaps: Array.isArray(verificationState?.gaps) ? verificationState.gaps.slice(0, 10) : [],
         latency_ms: numberOrNull(latencyMs),
@@ -269,7 +297,7 @@ export async function logCatalogVerificationGapEvent({
     const normalizedQuery = normalizeQuery(
       query ||
       identification?.searchQuery ||
-      [identification?.brand, identification?.productName].filter(Boolean).join(" ") ||
+      recognizedIdentity(identification) ||
       selectedProduct?.productName
     );
     const topProduct = selectedProduct || inspectedProducts[0] || null;
@@ -287,6 +315,7 @@ export async function logCatalogVerificationGapEvent({
         label_found: typeof identification?.found === "boolean" ? identification.found : null,
         label_confidence: numberOrNull(identification?.confidence),
         label_pet_type: textOrNull(identification?.petType, 20),
+        ...recognizedIdentityMetadata(identification),
         resolver_status: textOrNull(resolverStatus, 40),
         verification_state: textOrNull(verificationState?.state, 40),
         verification_gaps: Array.isArray(verificationState?.gaps) ? verificationState.gaps.slice(0, 10) : [],
@@ -325,8 +354,12 @@ export async function submitCatalogIngredientCapture({
   source = "ingredient_capture",
   scanId,
   sourceSurface,
+  userConsent = false,
 } = {}) {
   try {
+    if (userConsent !== true) {
+      return { submitted: false, reason: "explicit_consent_required" };
+    }
     const identity = productIdentityFromSubmission({
       analysis,
       candidateProduct,
@@ -376,6 +409,7 @@ export async function submitCatalogIngredientCapture({
         candidate_source_quality: textOrNull(candidateProduct?.sourceQuality, 60),
         ingredient_count: ingredientNames.length,
       },
+      p_user_consent: true,
     });
 
     if (error) {

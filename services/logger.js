@@ -7,7 +7,7 @@ function log(method, args) {
 }
 
 export function createLogger(scope) {
-  const prefix = scope ? `[${scope}]` : "[WOOF]";
+  const prefix = scope ? `[${scope}]` : "[BOWLPROOF]";
 
   return {
     debug: (...args) => log("log", [prefix, ...args]),
