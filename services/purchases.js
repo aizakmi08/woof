@@ -324,9 +324,11 @@ export async function getProStatus() {
 
   try {
     const customerInfo = await Purchases.getCustomerInfo();
+    const proEntitlement = customerInfo.entitlements.active["pro"];
     return {
       checked: true,
-      isPro: customerInfo.entitlements.active["pro"] !== undefined,
+      isPro: proEntitlement !== undefined,
+      expiresAt: proEntitlement?.expirationDate || null,
       reason: null,
     };
   } catch (err) {

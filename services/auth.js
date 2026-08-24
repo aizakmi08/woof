@@ -29,6 +29,12 @@ import { clearAnalyticsStorage, flushAnalyticsQueue, trackEvent } from "./analyt
 import { clearLocalResults } from "./analysisService";
 import { createLogger } from "./logger";
 import { normalizePetProfile } from "./petProfile";
+import {
+  cachedProIsActive,
+  clearCachedEntitlement,
+  persistCachedEntitlement,
+  readCachedEntitlement,
+} from "./entitlementResilience";
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -98,6 +104,18 @@ function persistScanCount(userId, count) {
   if (!userId) return;
   AsyncStorage.setItem(scanCountStorageKey(userId), String(count)).catch(() => {});
   AsyncStorage.removeItem(LEGACY_SCAN_COUNT_KEY).catch(() => {});
+}
+
+async function readPersistedScanCount(userId) {
+  if (!userId) return null;
+  try {
+    const raw = await AsyncStorage.getItem(scanCountStorageKey(userId));
+    if (raw == null) return null;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : null;
+  } catch {
+    return null;
+  }
 }
 
 async function completeBrowserAuth(url) {
@@ -228,6 +246,10 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
   const [scanCount, setScanCount] = useState(0);
   const setupUserIdRef = useRef(null);
   const purchaseListenerCleanupRef = useRef(null);
+  const anonymousSignInPromiseRef = useRef(null);
+  const authTransitionRef = useRef(0);
+  const latestUserRef = useRef(null);
+  const automaticGuestPendingRef = useRef(false);
 
   const fetchProfile = useCallback(async (userId, { updateProState = true } = {}) => {
     try {
@@ -243,6 +265,10 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
           setScanCount(data.scan_count);
           persistScanCount(userId, data.scan_count);
         }
+        persistCachedEntitlement(userId, {
+          isPro: isActiveProfilePro(data),
+          proExpiresAt: data.pro_expires_at,
+        }).catch(() => {});
         if (updateProState) {
           setIsPro(isActiveProfilePro(data));
         }
@@ -255,48 +281,73 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
   }, []);
 
   const startAnonymousSession = useCallback(async ({ automatic = false } = {}) => {
-    trackEvent("anonymous_sign_in_started", { automatic });
-    let data = null;
-    try {
-      const response = await withTimeout(
-        supabase.auth.signInAnonymously({
-          options: {
-            data: {
-              source: automatic ? "automatic_start" : "manual_continue",
+    if (anonymousSignInPromiseRef.current) return anonymousSignInPromiseRef.current;
+    if (latestUserRef.current && !isAnonymousUser(latestUserRef.current)) return null;
+
+    const transitionAtStart = authTransitionRef.current;
+    const promise = (async () => {
+      trackEvent("anonymous_sign_in_started", { automatic });
+      let data = null;
+      try {
+        const response = await withTimeout(
+          supabase.auth.signInAnonymously({
+            options: {
+              data: {
+                source: automatic ? "automatic_start" : "manual_continue",
+              },
             },
-          },
-        }),
-        ANONYMOUS_SIGN_IN_TIMEOUT_MS,
-        "ANONYMOUS_SIGN_IN_TIMEOUT"
-      );
-      if (response?.error) throw response.error;
-      data = response?.data || null;
-    } catch (error) {
-      const failureKind = anonymousSignInErrorKind(error);
-      setAnonymousUnavailable(failureKind === "capability");
-      trackEvent("anonymous_sign_in_failed", {
-        automatic,
-        failure_kind: failureKind,
-        message: error.message,
-      });
-      throw error;
-    }
+          }),
+          ANONYMOUS_SIGN_IN_TIMEOUT_MS,
+          "ANONYMOUS_SIGN_IN_TIMEOUT"
+        );
+        if (response?.error) throw response.error;
+        data = response?.data || null;
+      } catch (error) {
+        const failureKind = anonymousSignInErrorKind(error);
+        setAnonymousUnavailable(failureKind === "capability");
+        trackEvent("anonymous_sign_in_failed", {
+          automatic,
+          failure_kind: failureKind,
+          message: error.message,
+        });
+        throw error;
+      }
 
-    if (!data?.session) {
+      if (!data?.session) {
+        setAnonymousUnavailable(false);
+        const missingSessionError = new Error("Guest session could not be created.");
+        missingSessionError.code = "ANONYMOUS_SESSION_MISSING";
+        trackEvent("anonymous_sign_in_failed", {
+          automatic,
+          failure_kind: "network",
+          message: missingSessionError.message,
+        });
+        throw missingSessionError;
+      }
+
+      const currentUser = latestUserRef.current;
+      if (
+        authTransitionRef.current !== transitionAtStart
+        || (currentUser && !isAnonymousUser(currentUser))
+      ) {
+        trackEvent("anonymous_sign_in_discarded", {
+          automatic,
+          reason: "newer_non_anonymous_transition",
+        });
+        return null;
+      }
+
       setAnonymousUnavailable(false);
-      const missingSessionError = new Error("Guest session could not be created.");
-      missingSessionError.code = "ANONYMOUS_SESSION_MISSING";
-      trackEvent("anonymous_sign_in_failed", {
-        automatic,
-        failure_kind: "network",
-        message: missingSessionError.message,
-      });
-      throw missingSessionError;
-    }
+      trackEvent("anonymous_signed_in", { automatic });
+      return data.session;
+    })().finally(() => {
+      if (anonymousSignInPromiseRef.current === promise) {
+        anonymousSignInPromiseRef.current = null;
+      }
+    });
 
-    setAnonymousUnavailable(false);
-    trackEvent("anonymous_signed_in", { automatic });
-    return data.session;
+    anonymousSignInPromiseRef.current = promise;
+    return promise;
   }, []);
 
   const resolveProStatus = useCallback(async ({ source = "unknown", userId, profileData = null } = {}) => {
@@ -304,8 +355,19 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
       ? source.trim().slice(0, 80)
       : "unknown";
     const status = await getProStatus();
+    const cachedEntitlement = userId ? await readCachedEntitlement(userId) : null;
+    const cachedPro = cachedProIsActive(cachedEntitlement);
+
+    const persistResolvedStatus = (pro, expiresAt = null) => {
+      if (!userId) return;
+      persistCachedEntitlement(userId, {
+        isPro: pro,
+        proExpiresAt: expiresAt,
+      }).catch(() => {});
+    };
 
     if (status.isPro) {
+      persistResolvedStatus(true, status.expiresAt);
       const syncState = await syncRevenueCatProfile({ source: sourceKey });
       if (syncState?.is_pro === false) {
         trackEvent("revenuecat_status_mismatch", {
@@ -326,9 +388,21 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
       const fallbackProfile = profileData || (userId
         ? await fetchProfile(userId, { updateProState: false })
         : null);
+      if (!fallbackProfile && cachedPro) {
+        trackEvent("revenuecat_status_fallback_used", {
+          source: sourceKey,
+          fallback: "cached_entitlement",
+          reason: `${status.reason || "checked_inactive"}_profile_unavailable`,
+          is_pro: true,
+        });
+        return true;
+      }
       const profilePro = isActiveProfilePro(fallbackProfile);
 
-      if (!profilePro) return false;
+      if (!profilePro) {
+        persistResolvedStatus(false);
+        return false;
+      }
 
       trackEvent("revenuecat_status_mismatch", {
         source: sourceKey,
@@ -347,6 +421,7 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
           reason: status.reason || "checked_inactive",
           is_pro: syncState.is_pro,
         });
+        persistResolvedStatus(syncState.is_pro, syncState.pro_expires_at);
         return syncState.is_pro;
       }
 
@@ -356,6 +431,7 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
         reason: `${status.reason || "checked_inactive"}_sync_unavailable`,
         is_pro: true,
       });
+      persistResolvedStatus(true, fallbackProfile?.pro_expires_at);
       return true;
     }
 
@@ -367,10 +443,20 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
         reason: status.reason || "unchecked",
         is_pro: syncState.is_pro,
       });
+      persistResolvedStatus(syncState.is_pro, syncState.pro_expires_at);
       return syncState.is_pro;
     }
 
     const fallbackProfile = profileData || (userId ? await fetchProfile(userId, { updateProState: false }) : null);
+    if (!fallbackProfile && cachedPro) {
+      trackEvent("revenuecat_status_fallback_used", {
+        source: sourceKey,
+        fallback: "cached_entitlement",
+        reason: `${status.reason || "unchecked"}_profile_unavailable`,
+        is_pro: true,
+      });
+      return true;
+    }
     const profilePro = isActiveProfilePro(fallbackProfile);
     trackEvent("revenuecat_status_fallback_used", {
       source: sourceKey,
@@ -378,6 +464,7 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
       reason: status.reason || "unchecked",
       is_pro: profilePro,
     });
+    persistResolvedStatus(profilePro, fallbackProfile?.pro_expires_at);
     return profilePro;
   }, [fetchProfile]);
 
@@ -386,6 +473,10 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
     purchaseListenerCleanupRef.current = addCustomerInfoUpdateListener((customerInfo) => {
       if (!customerInfoHasProEntitlement(customerInfo)) return;
       setIsPro(true);
+      persistCachedEntitlement(userId, {
+        isPro: true,
+        proExpiresAt: customerInfo?.entitlements?.active?.pro?.expirationDate || null,
+      }).catch(() => {});
       trackEvent("revenuecat_customer_info_unlocked", {
         source: "customer_info_listener",
       });
@@ -486,6 +577,7 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
 
     setSession(updatedSession);
     setUser(updatedUser);
+    latestUserRef.current = updatedUser;
     setIsAnonymous(isAnonymousUser(updatedUser));
 
     if (!updatedUser) {
@@ -516,6 +608,7 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
     }
 
     const purchasesInitialized = await initializePurchases(updatedUser.id);
+    installPurchaseListener(updatedUser.id);
     trackEvent("account_link_revenuecat_reidentified", {
       provider,
       changed_user_id: previousUserId ? previousUserId !== updatedUser.id : false,
@@ -525,7 +618,7 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
     await syncProfileFromAuthUser(updatedUser);
     await fetchProfile(updatedUser.id, { updateProState: false });
     await refreshProStatus({ source: `account_link_${provider}`, userId: updatedUser.id });
-  }, [fetchProfile, refreshProStatus]);
+  }, [fetchProfile, installPurchaseListener, refreshProStatus]);
 
   const checkSession = useCallback(async () => {
     try {
@@ -586,12 +679,29 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
       (event, s) => {
         if (!mounted) return;
 
+        const nextUser = s?.user ?? null;
+        const previousUser = latestUserRef.current;
+        if (
+          nextUser
+          && isAnonymousUser(nextUser)
+          && latestUserRef.current
+          && !isAnonymousUser(latestUserRef.current)
+        ) {
+          trackEvent("anonymous_auth_event_ignored", {
+            reason: "non_anonymous_session_already_active",
+          });
+          return;
+        }
+
+        if (nextUser && !isAnonymousUser(nextUser)) authTransitionRef.current += 1;
+        latestUserRef.current = nextUser;
+
         setSession(s);
-        setUser(s?.user ?? null);
-        setIsAnonymous(isAnonymousUser(s?.user));
+        setUser(nextUser);
+        setIsAnonymous(isAnonymousUser(nextUser));
 
         if (event === "SIGNED_IN" && s?.user) {
-          setLoading(false);
+          if (!automaticGuestPendingRef.current) setLoading(false);
           flushAnalyticsQueue({ source: "auth_state_signed_in" }).catch(() => {});
           trackEvent("auth_signed_in", {
             provider: isAnonymousUser(s.user) ? "anonymous" : s.user.app_metadata?.provider || "unknown",
@@ -609,6 +719,10 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
         }
 
         if (event === "SIGNED_OUT") {
+          const signedOutUserId = previousUser?.id || null;
+          authTransitionRef.current += 1;
+          latestUserRef.current = null;
+          if (signedOutUserId) clearCachedEntitlement(signedOutUserId).catch(() => {});
           trackEvent("auth_signed_out", {}, { queueWhenSignedOut: false });
           setupUserIdRef.current = null;
           setProfile(null);
@@ -629,15 +743,25 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
     // Resolve the locally persisted session first. A network-backed guest sign-in
     // must never hold the first interactive frame hostage.
     supabase.auth.getSession()
-      .then(({ data: { session: s } }) => {
+      .then(async ({ data: { session: s }, error }) => {
+        if (error) throw error;
         if (!mounted) return;
 
         setSession(s);
-        setUser(s?.user ?? null);
-        setIsAnonymous(isAnonymousUser(s?.user));
-        setLoading(false);
+        const initialUser = s?.user ?? null;
+        latestUserRef.current = initialUser;
+        setUser(initialUser);
+        setIsAnonymous(isAnonymousUser(initialUser));
 
         if (s?.user) {
+          const [cachedEntitlement, persistedScanCount] = await Promise.all([
+            readCachedEntitlement(s.user.id),
+            readPersistedScanCount(s.user.id),
+          ]);
+          if (!mounted || latestUserRef.current?.id !== s.user.id) return;
+          if (cachedProIsActive(cachedEntitlement)) setIsPro(true);
+          if (persistedScanCount != null) setScanCount(persistedScanCount);
+          setLoading(false);
           flushAnalyticsQueue({ source: "auth_boot_existing_session" }).catch(() => {});
           runSignedInSetup(s.user, () => mounted).catch((err) => {
             logger.debug("[AUTH] Background signed-in setup failed:", err.message);
@@ -646,10 +770,18 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
         }
 
         if (!skipAutomaticGuestSession) {
-          startAnonymousSession({ automatic: true }).catch((err) => {
+          automaticGuestPendingRef.current = true;
+          try {
+            await startAnonymousSession({ automatic: true });
+          } catch (err) {
             logger.debug("[AUTH] Anonymous session unavailable:", err.message);
-          });
+          } finally {
+            automaticGuestPendingRef.current = false;
+            if (mounted) setLoading(false);
+          }
+          return;
         }
+        setLoading(false);
       })
       .catch((err) => {
         logger.debug("[AUTH] Initial session error:", err.message);
@@ -666,6 +798,8 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
 
   // --- Apple Sign-In ---
   const signInWithApple = useCallback(async () => {
+    authTransitionRef.current += 1;
+    await anonymousSignInPromiseRef.current?.catch(() => {});
     if (isAnonymousUser(user)) {
       const previousUserId = user?.id ?? null;
       await startBrowserProviderFlow("apple", { linkCurrentUser: true });
@@ -705,6 +839,8 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
 
   // --- Google Sign-In (via Supabase OAuth) ---
   const signInWithGoogle = useCallback(async () => {
+    authTransitionRef.current += 1;
+    await anonymousSignInPromiseRef.current?.catch(() => {});
     const linkCurrentUser = isAnonymousUser(user);
     const previousUserId = linkCurrentUser ? user?.id ?? null : null;
     await startBrowserProviderFlow("google", {
@@ -718,6 +854,7 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
       const updatedUser = updatedSession?.user ?? null;
       setSession(updatedSession);
       setUser(updatedUser);
+      latestUserRef.current = updatedUser;
       setIsAnonymous(isAnonymousUser(updatedUser));
 
       if (updatedUser) {
@@ -730,9 +867,12 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
 
   // --- Sign Out ---
   const signOut = useCallback(async () => {
+    authTransitionRef.current += 1;
+    await anonymousSignInPromiseRef.current?.catch(() => {});
+    if (user?.id) await clearCachedEntitlement(user.id).catch(() => {});
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
-  }, []);
+  }, [user?.id]);
 
   // --- Delete Account ---
   const deleteAccount = useCallback(async () => {
@@ -748,6 +888,7 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
       deletedUserId
         ? AsyncStorage.removeItem(scanCountStorageKey(deletedUserId))
         : Promise.resolve(),
+      clearCachedEntitlement(deletedUserId),
       clearLocalHistoryForUser(deletedUserId),
       clearLocalResults(),
       clearResultPromptState(deletedUserId),
@@ -760,6 +901,7 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
     setupUserIdRef.current = null;
     setSession(null);
     setUser(null);
+    latestUserRef.current = null;
     setProfile(null);
     setIsPro(false);
     setIsAnonymous(false);

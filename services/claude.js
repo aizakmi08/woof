@@ -3,6 +3,7 @@ import { supabase } from "./supabase";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../config/env";
 import { trackEvent } from "./analytics";
 import { createLogger } from "./logger";
+import { authRefreshFailurePolicy } from "./entitlementResilience";
 
 const ANALYZE_URL = `${SUPABASE_URL}/functions/v1/analyze`;
 const LABEL_LOOKUP_URL = `${SUPABASE_URL}/functions/v1/label-lookup`;
@@ -76,18 +77,23 @@ async function _getAuthHeaders() {
     const { data, error: refreshError } = await refreshSessionWithTimeout();
     if (refreshError) {
       logger.debug("[CLAUDE] Token refresh failed:", refreshError.message);
-      // Token is completely dead - force sign out
-      logger.debug("[CLAUDE] Forcing sign out due to dead token");
-      await supabase.auth.signOut().catch(() => {});
-      throw new Error("Session expired. Please sign in again.");
+      if (authRefreshFailurePolicy(refreshError) === "sign_out") {
+        logger.debug("[CLAUDE] Signing out after non-retryable refresh-token rejection");
+        await supabase.auth.signOut().catch(() => {});
+        throw new Error("Session expired. Please sign in again.");
+      }
+      const retryError = new Error("Could not refresh your session. Check your connection and try again.");
+      retryError.code = "AUTH_REFRESH_RETRYABLE";
+      throw retryError;
     }
     if (data.session) {
       session = data.session;
       logger.debug("[CLAUDE] Token refreshed successfully, new expiry:", new Date(data.session.expires_at * 1000).toISOString());
     } else {
       logger.debug("[CLAUDE] Refresh returned no session");
-      await supabase.auth.signOut().catch(() => {});
-      throw new Error("Session expired. Please sign in again.");
+      const retryError = new Error("Could not refresh your session. Check your connection and try again.");
+      retryError.code = "AUTH_REFRESH_RETRYABLE";
+      throw retryError;
     }
   }
 

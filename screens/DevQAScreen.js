@@ -13,6 +13,7 @@ import {
   DEV_QA_PET_RESULT,
 } from "../services/devQaFixtures";
 import { getPerformanceTimingSnapshot } from "../services/performanceTimings";
+import { entitlementResilienceQaScenario } from "../services/entitlementResilience";
 
 const LABEL_LOADING_STAGES = [
   "Reading product label...",
@@ -86,6 +87,14 @@ export default function DevQAScreen({ navigation }) {
     devFixtureResult: DEV_QA_HUMAN_RESULTS[state],
     devReturnToQa: true,
   });
+
+  const runEntitlementScenario = (scenario) => {
+    const result = entitlementResilienceQaScenario(scenario);
+    Alert.alert(
+      `${result.passed ? "PASS" : "FAIL"} — ${result.title}`,
+      `Expected: ${result.expected}\n\nActual: ${result.actual}`
+    );
+  };
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.bg }]}>
@@ -194,6 +203,24 @@ export default function DevQAScreen({ navigation }) {
             devBoundaryErrorArmed = true;
             setTriggerError(true);
           }} />
+        </QaSection>
+
+        <QaSection title="Entitlement resilience" theme={theme}>
+          <QaButton
+            label="QA — token refresh network failure"
+            theme={theme}
+            onPress={() => runEntitlementScenario("refresh_network_failure")}
+          />
+          <QaButton
+            label="QA — cached Pro + profile failure"
+            theme={theme}
+            onPress={() => runEntitlementScenario("cached_pro_profile_failure")}
+          />
+          <QaButton
+            label="QA — out-of-order webhook"
+            theme={theme}
+            onPress={() => runEntitlementScenario("out_of_order_webhook")}
+          />
         </QaSection>
       </ScrollView>
     </SafeAreaView>

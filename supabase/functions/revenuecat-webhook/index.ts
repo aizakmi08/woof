@@ -468,6 +468,31 @@ async function updateProfiles(
   }
 }
 
+async function updateProfilesForNewerEvent(
+  supabase: SupabaseClient,
+  userIds: string[],
+  updates: Record<string, unknown>,
+): Promise<string[]> {
+  if (userIds.length === 0) return [];
+  const eventAt = typeof updates.revenuecat_last_event_at === "string"
+    ? updates.revenuecat_last_event_at
+    : null;
+  if (!eventAt) return [];
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .update(updates)
+    .in("id", userIds)
+    .or(`revenuecat_last_event_at.is.null,revenuecat_last_event_at.lt.${eventAt}`)
+    .select("id");
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return uniqueUuidIds((data || []).map((row) => row.id));
+}
+
 Deno.serve(async (req) => {
   const responseHeaders = corsHeaders(req);
   const json = (body: Record<string, unknown>, status = 200) =>
@@ -530,12 +555,13 @@ Deno.serve(async (req) => {
       const nowIso = new Date().toISOString();
 
       if (fromProfileIds.length > 0) {
-        await updateProfiles(
+        const revokedProfileIds = await updateProfilesForNewerEvent(
           supabase,
           fromProfileIds,
           transferRevocationUpdates(event, eventId, eventType, nowIso),
         );
-        processedUserIds = appendUniqueUuidIds(processedUserIds, fromProfileIds);
+        processedUserIds = appendUniqueUuidIds(processedUserIds, revokedProfileIds);
+        if (revokedProfileIds.length === 0) ignoredReason = "stale_transfer_event_timestamp";
       }
 
       if (revenueCatApiKey && toAppUserIds.length > 0) {
@@ -623,13 +649,15 @@ Deno.serve(async (req) => {
       if (!usedSubscriberSync) {
         const userIds = candidateUserIds(event);
         if (entitlement.shouldUpdate && userIds.length > 0) {
-          await updateProfiles(
+          const eventUpdatedUserIds = await updateProfilesForNewerEvent(
             supabase,
             userIds,
             eventEntitlementUpdates(event, eventId, eventType, entitlement),
           );
-          processedUserIds = appendUniqueUuidIds(processedUserIds, userIds);
-          ignoredReason = null;
+          processedUserIds = appendUniqueUuidIds(processedUserIds, eventUpdatedUserIds);
+          ignoredReason = eventUpdatedUserIds.length > 0
+            ? null
+            : "stale_event_timestamp";
         } else if (entitlement.shouldUpdate && userIds.length === 0) {
           ignoredReason = "no_uuid_app_user_id";
         }
