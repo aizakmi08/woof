@@ -21,7 +21,7 @@ const CORS_HEADERS = {
 };
 
 const FUNCTION_NAME = "analyze";
-const FUNCTION_AUDIT_VERSION = "2026-07-16-edge-bounded-analysis-v2";
+const FUNCTION_AUDIT_VERSION = "2026-08-23-edge-eric-nutrient-balance-v1";
 const DEPLOYMENT_HEADERS = {
   "X-Woof-Function-Name": FUNCTION_NAME,
   "X-Woof-Function-Audit-Version": FUNCTION_AUDIT_VERSION,
@@ -116,7 +116,7 @@ Use this exact format:
     { "name": "Protein Quality", "score": 1-100, "detail": "brief assessment" },
     { "name": "Ingredient Safety", "score": 1-100, "detail": "brief assessment" },
     { "name": "Nutritional Balance", "score": 1-100, "detail": "brief assessment" },
-    { "name": "Filler Content", "score": 1-100, "detail": "higher is better (less filler)" },
+    { "name": "Low-Nutrient Binders", "score": 1-100, "detail": "higher is better (less reliance on low-nutrient binders)" },
     { "name": "Additives & Preservatives", "score": 1-100, "detail": "higher is better (fewer harmful additives)" }
   ],
   "nutritionAnalysis": {
@@ -125,6 +125,12 @@ Use this exact format:
     "fatLevel": "high" | "moderate" | "low",
     "fatPercent": "e.g. 15%",
     "fiberPercent": "e.g. 4%",
+    "moisturePercent": "e.g. 10% or N/A",
+    "calciumDryMatterPercent": "source-backed dry-matter value or N/A",
+    "phosphorusDryMatterPercent": "source-backed dry-matter value or N/A",
+    "calciumPhosphorusRatio": "source-backed ratio such as 1.20:1 or N/A",
+    "analysisTypeLabel": "Typical Analysis | Guaranteed Analysis | Nutrient Analysis",
+    "analysisBasisLabel": "Dry matter | As fed | Basis not stated",
     "primaryProteinSource": "e.g. Deboned Chicken",
     "grainFree": true | false,
     "lifestage": "e.g. All Life Stages",
@@ -145,10 +151,10 @@ For each ingredient: "description" explains what it is. "reason" explains the qu
 SCORING RUBRIC (be strict and evidence-based):
 
 Overall Score = weighted average of 5 categories:
-- Protein Quality (25%): Named whole meat as first ingredient = baseline 70+. Meat meal acceptable = 50-69. By-products anywhere = cap at 50. No named protein source = cap at 30.
+- Protein Quality (20%): Named whole meat as first ingredient = baseline 70+. Meat meal acceptable = 50-69. By-products anywhere = cap at 50. No named protein source = cap at 30.
 - Ingredient Safety (20%): BHA/BHT/ethoxyquin present = auto-cap OVERALL score at 35. Propylene glycol = cap overall at 40. Menadione = penalty of -15 on this category.
-- Nutritional Balance (20%): Evaluate protein/fat/fiber ratios against AAFCO standards. Missing key nutrients = penalty.
-- Filler Content (20%): Corn, wheat, or soy in top 3 ingredients = cap this category at 40. Multiple unnamed grains = cap at 30. Excessive legumes/potatoes in grain-free = cap at 55.
+- Nutritional Balance (30%): Prefer published typical/actual analysis on a dry-matter basis over guaranteed label minimums/maximums. Evaluate disclosed protein, fat, fiber, calcium, phosphorus, and Ca:P ratio against the applicable life-stage profile. Missing full nutrient data = transparency penalty. Never infer exact nutrient levels from ingredients.
+- Low-Nutrient Binders (15%): Corn, wheat, or soy in top 3 ingredients = cap this category at 40. Multiple unnamed grains = cap at 30. Excessive legumes/potatoes in grain-free = cap at 55.
 - Additives & Preservatives (15%): Artificial colors (Red 40, Yellow 5, Blue 2) = cap at 30. Artificial flavors = cap at 40. Natural preservatives (mixed tocopherols, rosemary) = 80+.
 
 Score tier labels: 85-100 Excellent, 70-84 Good, 50-69 Average, 30-49 Below Average, 1-29 Poor.
@@ -157,12 +163,14 @@ CRITICAL SCORING RULES:
 - NEVER inflate scores. A grocery store brand with corn as the first ingredient should score 35-50, NOT 65-75.
 - By-products as a primary protein source = maximum overall score of 50.
 - The overallScore MUST be mathematically consistent with category scores. If categories average to 55, overallScore must NOT be 70+.
+- If source-backed dog calcium on a dry-matter basis exceeds 1.8% for growth, reproduction, or all-life-stages food, or 2.5% for adult-maintenance food, cap the OVERALL score at 35 and state the concern clearly. Do not apply these caps to values whose basis or provenance is unknown.
+- If a source-backed calcium-to-phosphorus ratio is outside 1:1 to 2:1, cap the OVERALL score at 45 and recommend confirming suitability with a veterinarian.
 - Justify each category score by citing specific ingredients.
 - Multiple bonus ingredients (probiotics, omega-3s, named organ meats, chelated minerals) can raise score.
 
 Good: wholesome proteins, healthy fats, named meat sources, probiotics, omega fatty acids, chelated minerals.
-Bad: BHA/BHT/ethoxyquin, by-products, excessive fillers, sugar, artificial colors, propylene glycol, menadione.
-Neutral: common fillers that aren't harmful but aren't remarkable (rice, barley, oats).
+Bad: BHA/BHT/ethoxyquin, by-products, excessive low-nutrient binders, sugar, artificial colors, propylene glycol, menadione.
+Neutral: common binders or starches that are not inherently harmful but are not major nutritional strengths (rice, barley, oats).
 
 IMPORTANT formatting rules:
 - primaryProteinSource: use just the protein name (e.g. "Chicken", "Salmon Meal", "Deboned Chicken"). Do NOT include "By-Products" or long qualifiers.
@@ -228,7 +236,7 @@ Use this exact format:
     { "name": "Protein Quality", "score": 1-100, "detail": "based on verified data" },
     { "name": "Ingredient Safety", "score": 1-100, "detail": "based on verified data" },
     { "name": "Nutritional Balance", "score": 1-100, "detail": "based on verified data" },
-    { "name": "Filler Content", "score": 1-100, "detail": "higher = less filler" },
+    { "name": "Low-Nutrient Binders", "score": 1-100, "detail": "higher = less reliance on low-nutrient binders" },
     { "name": "Additives & Preservatives", "score": 1-100, "detail": "higher = fewer harmful" }
   ],
   "nutritionAnalysis": {
@@ -237,6 +245,12 @@ Use this exact format:
     "fatLevel": "high" | "moderate" | "low",
     "fatPercent": "from data or N/A",
     "fiberPercent": "from data or N/A",
+    "moisturePercent": "from data or N/A",
+    "calciumDryMatterPercent": "from data or N/A",
+    "phosphorusDryMatterPercent": "from data or N/A",
+    "calciumPhosphorusRatio": "from data or N/A",
+    "analysisTypeLabel": "Typical Analysis | Guaranteed Analysis | Nutrient Analysis",
+    "analysisBasisLabel": "Dry matter | As fed | Basis not stated",
     "primaryProteinSource": "from ingredients list",
     "grainFree": true | false,
     "lifestage": "from data or Unknown",
@@ -255,10 +269,10 @@ For each ingredient: "description" explains what it is. "reason" explains the qu
 SCORING RUBRIC (be strict and evidence-based):
 
 Overall Score = weighted average of 5 categories:
-- Protein Quality (25%): Named whole meat as first ingredient = baseline 70+. Meat meal acceptable = 50-69. By-products anywhere = cap at 50. No named protein source = cap at 30.
+- Protein Quality (20%): Named whole meat as first ingredient = baseline 70+. Meat meal acceptable = 50-69. By-products anywhere = cap at 50. No named protein source = cap at 30.
 - Ingredient Safety (20%): BHA/BHT/ethoxyquin present = auto-cap OVERALL score at 35. Propylene glycol = cap overall at 40. Menadione = penalty of -15 on this category.
-- Nutritional Balance (20%): Evaluate protein/fat/fiber ratios against AAFCO standards. Missing key nutrients = penalty.
-- Filler Content (20%): Corn, wheat, or soy in top 3 ingredients = cap this category at 40. Multiple unnamed grains = cap at 30. Excessive legumes/potatoes in grain-free = cap at 55.
+- Nutritional Balance (30%): Prefer published typical/actual analysis on a dry-matter basis over guaranteed label minimums/maximums. Evaluate disclosed protein, fat, fiber, calcium, phosphorus, and Ca:P ratio against the applicable life-stage profile. Missing full nutrient data = transparency penalty. Never infer exact nutrient levels from ingredients.
+- Low-Nutrient Binders (15%): Corn, wheat, or soy in top 3 ingredients = cap this category at 40. Multiple unnamed grains = cap at 30. Excessive legumes/potatoes in grain-free = cap at 55.
 - Additives & Preservatives (15%): Artificial colors (Red 40, Yellow 5, Blue 2) = cap at 30. Artificial flavors = cap at 40. Natural preservatives (mixed tocopherols, rosemary) = 80+.
 
 Score tier labels: 85-100 Excellent, 70-84 Good, 50-69 Average, 30-49 Below Average, 1-29 Poor.
@@ -267,11 +281,13 @@ CRITICAL SCORING RULES:
 - NEVER inflate scores. A grocery store brand with corn as the first ingredient should score 35-50, NOT 65-75.
 - By-products as a primary protein source = maximum overall score of 50.
 - The overallScore MUST be mathematically consistent with category scores. If categories average to 55, overallScore must NOT be 70+.
+- If source-backed dog calcium on a dry-matter basis exceeds 1.8% for growth, reproduction, or all-life-stages food, or 2.5% for adult-maintenance food, cap the OVERALL score at 35 and state the concern clearly. Do not apply these caps to values whose basis or provenance is unknown.
+- If a source-backed calcium-to-phosphorus ratio is outside 1:1 to 2:1, cap the OVERALL score at 45 and recommend confirming suitability with a veterinarian.
 - Justify each category score by citing specific ingredients.
 
 Good: wholesome proteins, healthy fats, named meat sources, probiotics, omega fatty acids, chelated minerals.
-Bad: BHA/BHT/ethoxyquin, by-products, excessive fillers, sugar, artificial colors, propylene glycol, menadione.
-Neutral: common fillers that aren't harmful but aren't remarkable (rice, barley, oats).
+Bad: BHA/BHT/ethoxyquin, by-products, excessive low-nutrient binders, sugar, artificial colors, propylene glycol, menadione.
+Neutral: common binders or starches that are not inherently harmful but are not major nutritional strengths (rice, barley, oats).
 
 IMPORTANT formatting rules:
 - primaryProteinSource: use just the protein name (e.g. "Chicken", "Salmon Meal", "Deboned Chicken"). Do NOT include "By-Products" or long qualifiers.

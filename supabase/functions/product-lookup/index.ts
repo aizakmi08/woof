@@ -58,6 +58,8 @@ const CATALOG_SELECT = [
   "expires_at",
   "is_complete_food",
   "catalog_exclusion_reason",
+  "formula_evidence_tier",
+  "formula_version_provenance",
 ].join(", ");
 const VERIFIED_INGREDIENT_STATUSES = new Set([
   "gdsn",
@@ -220,7 +222,31 @@ function normalizeCatalogProduct(raw: Record<string, any>): Record<string, unkno
   const row = raw.product || raw;
   const ingredients = ingredientList(row.ingredients);
   const ingredientText = compact(row.ingredient_text) || ingredients.join(", ");
-  const nutriments = row.nutritional_info || row.nutrient_panel || {};
+  const nutrientRoot = row.nutritional_info || row.nutrient_panel || {};
+  const typical = nutrientRoot.typicalAnalysis
+    || nutrientRoot.typical_analysis
+    || nutrientRoot.actualAnalysis
+    || nutrientRoot.actual_analysis;
+  const dryMatter = nutrientRoot.dryMatter || nutrientRoot.dry_matter;
+  const guaranteed = nutrientRoot.guaranteedAnalysis || nutrientRoot.guaranteed_analysis;
+  const nutriments = typical || dryMatter || guaranteed || nutrientRoot;
+  const inferredAnalysisType = typical || dryMatter
+    ? "typical"
+    : guaranteed || row.has_published_nutrients
+      ? "guaranteed"
+      : null;
+  const inferredBasis = dryMatter
+    ? "dry_matter"
+    : guaranteed || row.has_published_nutrients
+      ? "as_fed"
+      : null;
+  const formulaEvidenceTier = compact(
+    row.formula_evidence_tier || row.nutritional_info?.formula_evidence_tier,
+  );
+  const formulaVersionProvenance =
+    row.formula_version_provenance
+    || row.nutritional_info?.formula_version_provenance
+    || null;
 
   const product = {
     id: row.cache_key || row.gtin || row.product_name || "",
@@ -239,10 +265,32 @@ function normalizeCatalogProduct(raw: Record<string, any>): Record<string, unkno
     ingredients: ingredients.map((text) => ({ id: "", text, percent: null })),
     ingredientCount: Number(row.ingredient_count ?? ingredients.length) || 0,
     nutriments: {
-      protein: nutriments.protein ?? nutriments.proteins_100g ?? nutriments.proteins ?? null,
-      fat: nutriments.fat ?? nutriments.fat_100g ?? null,
-      fiber: nutriments.fiber ?? nutriments.fiber_100g ?? nutriments["crude-fiber_100g"] ?? null,
+      protein: nutriments.protein ?? nutriments.crudeProtein ?? nutriments.crude_protein ?? nutriments.proteins_100g ?? nutriments.proteins ?? null,
+      fat: nutriments.fat ?? nutriments.crudeFat ?? nutriments.crude_fat ?? nutriments.fat_100g ?? null,
+      fiber: nutriments.fiber ?? nutriments.crudeFiber ?? nutriments.crude_fiber ?? nutriments.fiber_100g ?? nutriments["crude-fiber_100g"] ?? null,
+      moisture: nutriments.moisture ?? nutriments.moisture_100g ?? nutrientRoot.moisture ?? null,
+      ash: nutriments.ash ?? nutriments.ash_100g ?? nutrientRoot.ash ?? null,
+      calcium: nutriments.calcium ?? nutriments.calciumPercent ?? nutriments.calcium_percent ?? nutriments.calcium_100g ?? null,
+      phosphorus: nutriments.phosphorus ?? nutriments.phosphorusPercent ?? nutriments.phosphorus_percent ?? nutriments.phosphorus_100g ?? null,
       energy: nutriments.energy ?? nutriments["energy-kcal_100g"] ?? nutriments.energy_100g ?? null,
+      analysisType:
+        nutriments.analysisType
+        || nutriments.analysis_type
+        || nutrientRoot.analysisType
+        || nutrientRoot.analysis_type
+        || inferredAnalysisType,
+      basis:
+        nutriments.basis
+        || nutriments.valueBasis
+        || nutriments.value_basis
+        || nutriments.analysisBasis
+        || nutriments.analysis_basis
+        || nutrientRoot.basis
+        || nutrientRoot.valueBasis
+        || nutrientRoot.value_basis
+        || nutrientRoot.analysisBasis
+        || nutrientRoot.analysis_basis
+        || inferredBasis,
     },
     nutritionalInfo: row.nutritional_info || null,
     nutrientPanel: row.nutrient_panel || null,
@@ -257,6 +305,8 @@ function normalizeCatalogProduct(raw: Record<string, any>): Record<string, unkno
     expiresAt: row.expires_at || null,
     isCompleteFood: row.is_complete_food ?? true,
     catalogExclusionReason: compact(row.catalog_exclusion_reason),
+    formulaEvidenceTier,
+    formulaVersionProvenance,
     rank: Number(row.rank) || 0,
     sourceKind: "catalog",
   };
@@ -267,6 +317,104 @@ function normalizeCatalogProduct(raw: Record<string, any>): Record<string, unkno
     verificationState,
     catalogQualityState: verificationState.state,
   };
+}
+
+function formulaEvidencePriority(product: Record<string, any>): number {
+  switch (compact(product.formulaEvidenceTier)) {
+    case "manufacturer_current_exact":
+      return 4;
+    case "retailer_web_version":
+      return 3;
+    case "web_label_version":
+      return 2;
+    case "conflicted":
+      return 0;
+    default:
+      return 1;
+  }
+}
+
+function formulaEvidenceSearchBoost(product: Record<string, any>): number {
+  switch (compact(product.formulaEvidenceTier)) {
+    case "manufacturer_current_exact":
+      return 3;
+    case "retailer_web_version":
+      return 1;
+    case "web_label_version":
+      return 0.5;
+    default:
+      return 0;
+  }
+}
+
+function sortCatalogProducts(
+  products: Record<string, unknown>[],
+): Record<string, unknown>[] {
+  return [...products].sort((left, right) => {
+    const leftProduct = left as Record<string, any>;
+    const rightProduct = right as Record<string, any>;
+    return (
+      (
+        Number(rightProduct.rank || 0)
+        + formulaEvidenceSearchBoost(rightProduct)
+      ) - (
+        Number(leftProduct.rank || 0)
+        + formulaEvidenceSearchBoost(leftProduct)
+      )
+      || formulaEvidencePriority(rightProduct)
+        - formulaEvidencePriority(leftProduct)
+      || Number(rightProduct.ingredientCount || 0)
+        - Number(leftProduct.ingredientCount || 0)
+      || Date.parse(rightProduct.verifiedAt || 0)
+        - Date.parse(leftProduct.verifiedAt || 0)
+    );
+  });
+}
+
+function exactBarcodeVersionKey(product: Record<string, any>): string {
+  return normalizeIdentity([
+    product.brand,
+    product.petType,
+    product.productLine,
+    product.flavor,
+    product.lifeStage,
+    product.foodForm,
+    product.ingredientsText,
+  ].map(compact).filter(Boolean).join(" "));
+}
+
+function pickExactBarcodeVersion(
+  products: Record<string, unknown>[],
+): Record<string, unknown> | null {
+  const scorable = products.filter((product) => isScorableCatalogProduct(
+    product as Record<string, any>,
+    { requireRank: false },
+  ));
+  if (scorable.length === 0) return null;
+
+  const unique = [
+    ...new Map(
+      scorable.map((product) => {
+        const typed = product as Record<string, any>;
+        return [
+          compact(typed.cacheKey || typed.gtin || typed.barcode),
+          product,
+        ];
+      }),
+    ).values(),
+  ];
+  const versionKeys = new Set(
+    unique
+      .map((product) => exactBarcodeVersionKey(
+        product as Record<string, any>,
+      ))
+      .filter(Boolean),
+  );
+
+  // A reused GTIN cannot identify which ingredient version is in hand.
+  // Abstain and require package-photo confirmation instead of guessing.
+  if (versionKeys.size !== 1) return null;
+  return sortCatalogProducts(unique)[0] || null;
 }
 
 function hasVerifiedIngredientData(product: Record<string, any>): boolean {
@@ -484,7 +632,7 @@ async function searchVerifiedCatalog(
     .map((row) => normalizeCatalogProduct(row))
     .filter((product) => isScorableCatalogProduct(product as Record<string, any>));
 
-  return dedupeCatalogFormulaProducts(products);
+  return sortCatalogProducts(dedupeCatalogFormulaProducts(products));
 }
 
 async function findCatalogByBarcode(
@@ -495,6 +643,31 @@ async function findCatalogByBarcode(
   if (variants.length === 0) return null;
 
   const products: Record<string, unknown>[] = [];
+  for (const variant of variants) {
+    const { data: skuData, error: skuError } = await supabase.rpc(
+      "resolve_verified_product_by_gtin",
+      {
+        q: variant,
+        max_results: 8,
+      },
+    );
+    if (skuError) {
+      console.log(
+        "[PRODUCT_LOOKUP] resolve_verified_product_by_gtin error:",
+        skuError.message,
+      );
+      break;
+    }
+    for (const row of Array.isArray(skuData) ? skuData : []) {
+      products.push({ ...normalizeCatalogProduct(row), rank: 120 });
+    }
+    if (products.length > 0) break;
+  }
+
+  if (products.length > 0) {
+    return pickExactBarcodeVersion(products);
+  }
+
   const { data, error } = await supabase
     .from("product_data")
     .select(CATALOG_SELECT)
@@ -522,15 +695,15 @@ async function findCatalogByBarcode(
   }
 
   const seen = new Set<string>();
-  return products
+  const exactProducts = products
     .filter((product) => {
       const typed = product as Record<string, any>;
       const key = compact(typed.cacheKey || typed.gtin || typed.barcode);
       if (!key || seen.has(key)) return false;
       seen.add(key);
       return isScorableCatalogProduct(typed, { requireRank: false });
-    })
-    .sort((left, right) => Number((right as Record<string, any>).ingredientCount || 0) - Number((left as Record<string, any>).ingredientCount || 0))[0] || null;
+    });
+  return pickExactBarcodeVersion(exactProducts);
 }
 
 async function lookupBarcode(supabase: any, barcode: string): Promise<Record<string, unknown>> {

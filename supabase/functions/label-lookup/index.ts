@@ -1,13 +1,14 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const FUNCTION_NAME = "label-lookup";
-const FUNCTION_AUDIT_VERSION = "2026-07-16-edge-label-single-attempt-v16";
+const FUNCTION_AUDIT_VERSION = "2026-08-20-edge-front-label-identity-v19";
 const MAX_IMAGE_B64_LENGTH = 2_400_000;
-// On-device OCR runs in parallel and handles the common fast path. Keep the
-// visual fallback bounded so a provider slowdown cannot double scan latency.
-const CLAUDE_ATTEMPT_TIMEOUT_MS = 3_200;
+// On-device OCR runs in parallel and handles the common fast path. The second,
+// shorter attempt is only for transient provider failures and stays within the
+// client's bounded reconciliation window.
+const CLAUDE_ATTEMPT_TIMEOUTS_MS = [4_800, 1_800];
 const PRIMARY_LABEL_MODEL = Deno.env.get("LABEL_LOOKUP_MODEL") || "claude-haiku-4-5-20251001";
-const LABEL_MAX_TOKENS = 180;
+const LABEL_MAX_TOKENS = 240;
 
 const DEFAULT_BROWSER_ORIGINS = new Set([
   "http://localhost:19006",
@@ -23,7 +24,7 @@ const DEFAULT_BROWSER_ORIGINS = new Set([
 const CORS_HEADERS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey, x-client-info",
-  "Access-Control-Expose-Headers": "X-Woof-Function-Name, X-Woof-Function-Audit-Version, X-Woof-Label-Model",
+  "Access-Control-Expose-Headers": "X-Woof-Function-Name, X-Woof-Function-Audit-Version, X-Woof-Label-Model, X-Woof-Label-Attempt",
   "Vary": "Origin",
 };
 
@@ -34,9 +35,15 @@ const DEPLOYMENT_HEADERS = {
 
 const LABEL_LOOKUP_PROMPT = `Identify a dog or cat food from its front-package photo or retailer product listing.
 
-Use visible front-package text and, when present, the visible retailer product title as identity evidence. A photo of a computer/phone screen or a product page is valid input: do not return found=false merely because page UI, prices, ratings, or controls are visible. Transcribe only visible identity text. The productName must include every prominent variant term needed to distinguish the exact package, including product line, puppy/kitten/senior or age, small/large breed, indoor, veterinary, support/condition, recipe, wild-caught, grain-free, and texture words when visible. Never return only the brand when more identity text is readable.
+Use visible front-package text and, when present, the visible retailer product title as identity evidence. A photo of a computer/phone screen or a product page is valid input: do not return found=false merely because page UI, prices, ratings, or controls are visible. Transcribe only visible identity text. The productName must include every prominent variant term needed to distinguish the exact package, including product line, puppy/kitten/senior or age, small/large breed, indoor, veterinary diet, recipe, wild-caught, grain-free, and texture words when visible. Never return only the brand when more identity text is readable.
 
-Determine petType independently and carefully. Use visible DOG/CAT wording plus unmistakable package evidence such as a dog or cat silhouette, species icon, or animal photo. A small cat silhouette printed on the front label is positive cat evidence and outranks learned familiarity with similarly named dog products. When no DOG or DOGS wording is visible, never return dog merely because the recipe or brand also sells dog food. Return unknown when the package does not provide reliable species evidence. For foodForm, preserve freeze-dried when it is visibly stated instead of reducing it to dry. Never infer ingredients, scores, reviews, recalls, or nutrition. If the package is not pet food or the identity is unreadable, return found=false. Return only compact JSON with no markdown.
+Separate the product identity from benefit badges and marketing claims. Phrases beginning with Supports, For, Made With, or Guaranteed are not automatically a product line, recipe, or condition. For example, "Supports Sensitive Skin & Stomach Guaranteed" on a Nutro package is a benefit badge: copy it to marketingClaims, but do not add Sensitive to productName, productLine, flavor, or searchQuery unless Sensitive is also visibly part of the main product title. Put the exact main-label phrases used for identity in identityEvidence and excluded badges in marketingClaims.
+
+Return the consumer-facing brand in brand, not a corporate parent. For Purina packages, use Beneful, Moist & Meaty, Purina ONE, Pro Plan, Fancy Feast, Friskies, Cat Chow, or Dog Chow when that name is visible; do not reduce those brands to Purina. Put a line such as Originals, RawMix, or Complete Essentials in productLine. Put every prominent protein or named recipe such as Farm-Raised Beef, Burger with Cheddar, or Wild Ocean in flavor as well as productName when visible.
+
+Determine petType independently and carefully. Use visible DOG/CAT wording plus unmistakable package evidence such as a dog or cat silhouette, species icon, or animal photo. A small cat silhouette printed on the front label is positive cat evidence and outranks learned familiarity with similarly named dog products. When no DOG or DOGS wording is visible, never return dog merely because the recipe or brand also sells dog food. Return unknown when the package does not provide reliable species evidence. For foodForm, preserve freeze-dried when it is visibly stated instead of reducing it to dry.
+
+Classify productCategory only from wording visibly printed on the centered package. Use complete_food for a normal dog/cat food, treat/topper/mixer/supplement only when that category is explicitly visible, and unknown when uncertain. Copy the exact short visible phrases supporting the category into categoryEvidence. Text on neighboring products, shelf tags, search results, reviews, recommendations, or navigation must not classify the centered product. If complete-food and non-complete wording conflict, return productCategory unknown. Never infer ingredients, scores, reviews, recalls, or nutrition. If the package is not pet food or the identity is unreadable, return found=false. Return only compact JSON with no markdown.
 
 Use this exact JSON shape:
 {
@@ -49,6 +56,10 @@ Use this exact JSON shape:
   "foodForm": "visible form, e.g. dry, wet, pate, freeze-dried, fresh, or empty string",
   "packageSize": "visible size/weight/count, e.g. 24 lb, 3 oz, 12 cans, or empty string",
   "petType": "dog" | "cat" | "unknown",
+  "productCategory": "complete_food" | "treat" | "topper" | "mixer" | "supplement" | "unknown",
+  "categoryEvidence": ["up to 4 exact short visible phrases supporting productCategory"],
+  "identityEvidence": ["up to 6 exact short main-label phrases used for identity"],
+  "marketingClaims": ["up to 4 excluded benefit-badge phrases"],
   "confidence": 0.0-1.0
 }`;
 
@@ -145,6 +156,17 @@ function normalizeLookup(raw: Record<string, unknown>): Record<string, unknown> 
   const packageSize = optionalString(raw.packageSize);
   const rawPetType = optionalString(raw.petType).toLowerCase();
   const petType = ["dog", "cat", "unknown"].includes(rawPetType) ? rawPetType : "unknown";
+  const rawProductCategory = optionalString(raw.productCategory).toLowerCase();
+  const productCategory = [
+    "complete_food",
+    "treat",
+    "topper",
+    "mixer",
+    "supplement",
+    "unknown",
+  ].includes(rawProductCategory)
+    ? rawProductCategory
+    : "unknown";
   const searchQuery = optionalString(raw.searchQuery) || [
     brand,
     productLine,
@@ -166,6 +188,10 @@ function normalizeLookup(raw: Record<string, unknown>): Record<string, unknown> 
     foodForm,
     packageSize,
     petType,
+    productCategory,
+    categoryEvidence: stringArray(raw.categoryEvidence).slice(0, 4),
+    identityEvidence: stringArray(raw.identityEvidence).slice(0, 6),
+    marketingClaims: stringArray(raw.marketingClaims).slice(0, 4),
     confidence: confidence(raw.confidence),
     searchQuery,
     visibleText: stringArray(raw.visibleText),
@@ -177,13 +203,15 @@ async function requestLabelLookup({
   model,
   anthropicKey,
   imageBase64,
+  timeoutMs,
 }: {
   model: string;
   anthropicKey: string;
   imageBase64: string;
+  timeoutMs: number;
 }): Promise<{ response: Response; lookup?: Record<string, unknown>; errorText?: string }> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), CLAUDE_ATTEMPT_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -310,34 +338,50 @@ Deno.serve(async (req) => {
   }
 
   try {
-    try {
-      const attempt = await requestLabelLookup({
-        model: PRIMARY_LABEL_MODEL,
-        anthropicKey,
-        imageBase64,
-      });
-      if (attempt.lookup) {
-        return json(attempt.lookup, 200, { "X-Woof-Label-Model": PRIMARY_LABEL_MODEL });
+    let lastError = "Label lookup failed.";
+    for (let attemptIndex = 0; attemptIndex < CLAUDE_ATTEMPT_TIMEOUTS_MS.length; attemptIndex += 1) {
+      try {
+        const attempt = await requestLabelLookup({
+          model: PRIMARY_LABEL_MODEL,
+          anthropicKey,
+          imageBase64,
+          timeoutMs: CLAUDE_ATTEMPT_TIMEOUTS_MS[attemptIndex],
+        });
+        if (attempt.lookup) {
+          return json(attempt.lookup, 200, {
+            "X-Woof-Label-Model": PRIMARY_LABEL_MODEL,
+            "X-Woof-Label-Attempt": String(attemptIndex + 1),
+          });
+        }
+        const status = attempt.response.status;
+        lastError = attempt.errorText || `Label provider returned ${status}`;
+        console.error(
+          "[LABEL_LOOKUP] Claude API error:",
+          PRIMARY_LABEL_MODEL,
+          status,
+          lastError.slice(0, 300),
+        );
+        const retryable = status === 408 || status === 429 || status >= 500;
+        if (!retryable || attemptIndex === CLAUDE_ATTEMPT_TIMEOUTS_MS.length - 1) {
+          return json(
+            { error: "Label lookup failed. Please try again." },
+            status >= 500 ? 502 : status,
+          );
+        }
+      } catch (err) {
+        lastError = (err as Error).message;
+        console.error(
+          "[LABEL_LOOKUP] Model response failed:",
+          PRIMARY_LABEL_MODEL,
+          `attempt=${attemptIndex + 1}`,
+          lastError,
+        );
+        if (attemptIndex === CLAUDE_ATTEMPT_TIMEOUTS_MS.length - 1) {
+          return json({ error: "Label lookup timed out. Search by name or try again." }, 504);
+        }
       }
-      const status = attempt.response.status;
-      console.error(
-        "[LABEL_LOOKUP] Claude API error:",
-        PRIMARY_LABEL_MODEL,
-        status,
-        (attempt.errorText || "").slice(0, 300),
-      );
-      return json(
-        { error: "Label lookup failed. Please try again." },
-        status >= 500 ? 502 : status,
-      );
-    } catch (err) {
-      console.error(
-        "[LABEL_LOOKUP] Model response failed:",
-        PRIMARY_LABEL_MODEL,
-        (err as Error).message,
-      );
-      return json({ error: "Label lookup timed out. Search by name or try again." }, 504);
     }
+    return json({ error: lastError }, 502);
   } catch (err) {
     console.error("[LABEL_LOOKUP] Failed:", (err as Error).message);
     return json({ error: "Label lookup failed. Please try again." }, 502);
