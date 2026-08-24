@@ -169,7 +169,7 @@ function ingredientReason(name, rating, index) {
     return "This ingredient lowers the quality score under Woof's ingredient rubric.";
   }
   if (includesAny(text, ["corn", "wheat", "soy"]) && index <= 2) {
-    return "This common filler appears high in the ingredient list.";
+    return "This low-nutrient binder appears high in the ingredient list.";
   }
   if (includesAny(text, LEGUME_STARCH_TERMS)) {
     return "Useful in some formulas, but too many legumes or starches can dilute animal protein.";
@@ -254,26 +254,88 @@ function numeric(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function normalizedAnalysisType(value) {
+  const text = lower(value).replace(/[_-]+/g, " ");
+  if (text.includes("typical") || text.includes("actual") || text.includes("laboratory")) {
+    return "typical";
+  }
+  if (text.includes("guaranteed") || text === "ga") return "guaranteed";
+  return "unknown";
+}
+
+function normalizedNutrientBasis(value) {
+  const text = lower(value).replace(/[_-]+/g, " ");
+  if (text.includes("dry matter") || text === "dm" || text === "dmb") return "dry_matter";
+  if (text.includes("as fed") || text.includes("as is") || text === "af") return "as_fed";
+  return "unknown";
+}
+
+function dryMatterPercent(value, nutriments = {}) {
+  const amount = numeric(value);
+  if (amount == null) return null;
+
+  const basis = normalizedNutrientBasis(
+    nutriments.basis || nutriments.valueBasis || nutriments.analysisBasis
+  );
+  if (basis === "dry_matter") return amount;
+
+  const moisture = numeric(nutriments.moisture);
+  if (basis === "as_fed" && moisture != null && moisture >= 0 && moisture < 100) {
+    return amount / ((100 - moisture) / 100);
+  }
+
+  return null;
+}
+
 function hasPublishedGuaranteedAnalysis(product = {}) {
   const hasPublishedNutrients = product.hasPublishedNutrients === true
     || product.has_published_nutrients === true;
   if (!hasPublishedNutrients) return false;
 
   const nutriments = product.nutriments || {};
-  return [nutriments.protein, nutriments.fat, nutriments.fiber]
+  return [
+    nutriments.protein,
+    nutriments.fat,
+    nutriments.fiber,
+    nutriments.moisture,
+    nutriments.calcium,
+    nutriments.phosphorus,
+  ]
     .some((value) => numeric(value) != null);
 }
 
-function scoreBalance(nutriments = {}, petType = "unknown") {
+function isGrowthLifeStage(lifeStage) {
+  const text = lower(lifeStage);
+  return includesAny(text, ["puppy", "kitten", "growth", "reproduction", "all life stages"]);
+}
+
+function scoreBalance(nutriments = {}, petType = "unknown", lifeStage = "") {
   const protein = numeric(nutriments.protein);
   const fat = numeric(nutriments.fat);
   const fiber = numeric(nutriments.fiber);
-  let score = 68;
-  let detail = "Limited guaranteed analysis data is available, so balance is scored conservatively.";
+  const calciumDm = dryMatterPercent(nutriments.calcium, nutriments);
+  const phosphorusDm = dryMatterPercent(nutriments.phosphorus, nutriments);
+  const calciumPhosphorusRatio = calciumDm != null && phosphorusDm > 0
+    ? calciumDm / phosphorusDm
+    : null;
+  const analysisType = normalizedAnalysisType(nutriments.analysisType || nutriments.analysis_type);
+  const basis = normalizedNutrientBasis(
+    nutriments.basis || nutriments.valueBasis || nutriments.analysisBasis
+  );
+  const isTypical = analysisType === "typical";
+  const comparableOnDryMatter = basis === "dry_matter"
+    || (basis === "as_fed" && numeric(nutriments.moisture) != null);
+  let score = 52;
+  let detail = "Full nutrient analysis is not published, so nutritional balance is scored conservatively.";
+  let concern = null;
 
   if (protein != null || fat != null || fiber != null) {
-    score = 74;
-    detail = "Protein, fat, and fiber data were considered from the product record.";
+    score = isTypical ? 80 : 68;
+    detail = isTypical
+      ? "Published typical nutrient values were considered, which is more informative than label minimums and maximums alone."
+      : "Published guaranteed-analysis values were considered, but label minimums and maximums do not show the full nutrient profile.";
+
+    if (isTypical && comparableOnDryMatter) score += 5;
 
     if (petType === "cat" && protein != null && protein < 8) score -= 12;
     if (petType !== "cat" && protein != null && protein < 18) score -= 8;
@@ -282,25 +344,72 @@ function scoreBalance(nutriments = {}, petType = "unknown") {
     if (fiber != null && fiber > 8) score -= 7;
   }
 
-  return { score: clampScore(score), detail };
+  if (calciumDm != null || phosphorusDm != null) {
+    score += isTypical ? 4 : 2;
+  }
+
+  if (petType === "dog" && calciumDm != null) {
+    // AAFCO dog profiles are expressed on a dry-matter basis. Growth,
+    // reproduction, and all-life-stages formulas use the 1.8% maximum;
+    // adult-maintenance formulas use 2.5%.
+    const calciumMaximum = isGrowthLifeStage(lifeStage) ? 1.8 : 2.5;
+    if (calciumDm > calciumMaximum) {
+      score = Math.min(score, 25);
+      concern = {
+        level: "avoid",
+        code: "calcium_above_profile_maximum",
+        summary: `Published calcium is ${percentText(calciumDm)} on a dry-matter basis, above the ${calciumMaximum}% AAFCO profile maximum used for this life-stage screen.`,
+      };
+      detail = concern.summary;
+    }
+  }
+
+  if (
+    calciumPhosphorusRatio != null
+    && (calciumPhosphorusRatio < 1 || calciumPhosphorusRatio > 2)
+  ) {
+    score = Math.min(score, 30);
+    concern = concern || {
+      level: "caution",
+      code: "calcium_phosphorus_ratio_outside_profile",
+      summary: `The published calcium-to-phosphorus ratio is ${calciumPhosphorusRatio.toFixed(2)}:1, outside the 1:1 to 2:1 profile range used by this screen.`,
+    };
+    detail = `${detail} ${concern.summary}`;
+  }
+
+  return {
+    score: clampScore(score),
+    detail,
+    analysisType,
+    basis,
+    calciumDm,
+    phosphorusDm,
+    calciumPhosphorusRatio,
+    concern,
+    transparencyLevel: isTypical && comparableOnDryMatter
+      ? "fuller"
+      : analysisType === "guaranteed"
+        ? "limited"
+        : "unknown",
+  };
 }
 
-function scoreFillers(names) {
+function scoreLowNutrientBinders(names) {
   const topThree = names.slice(0, 3).map(lower);
   const all = names.map(lower);
   let score = 78;
-  let detail = "No heavy top-three corn, wheat, or soy filler pattern was found.";
+  let detail = "No heavy top-three corn, wheat, or soy low-nutrient binder pattern was found.";
 
-  const topFiller = topThree.some((name) => includesAny(name, ["corn", "wheat", "soy"]));
+  const topBinder = topThree.some((name) => includesAny(name, ["corn", "wheat", "soy"]));
   const unnamedGrains = all.filter((name) => name.includes("grain") || name.includes("cereal")).length;
   const legumesAndStarches = all.filter((name) => includesAny(name, LEGUME_STARCH_TERMS)).length;
 
-  if (topFiller) {
+  if (topBinder) {
     score = 40;
     detail = "Corn, wheat, or soy appears in the top three ingredients.";
   } else if (unnamedGrains >= 2) {
     score = 35;
-    detail = "Multiple generic grain ingredients reduce filler quality.";
+    detail = "Multiple generic grain ingredients reduce binder quality.";
   } else if (legumesAndStarches >= 4) {
     score = 55;
     detail = "Several legumes or starches appear in the formula.";
@@ -342,7 +451,11 @@ function levelFromPercent(value, high, low) {
 
 function percentText(value) {
   const number = numeric(value);
-  return number == null ? "N/A" : `${number}%`;
+  if (number == null) return "N/A";
+  const formatted = Number.isInteger(number)
+    ? String(number)
+    : number.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+  return `${formatted}%`;
 }
 
 function lifestageFromName(name) {
@@ -355,27 +468,46 @@ function lifestageFromName(name) {
   return "Unknown";
 }
 
-function buildPros(names, categories) {
+function buildPros(names, categories, balance) {
   const pros = [];
   if (categories[0].score >= 70) pros.push("Uses a transparent named protein source.");
   if (names.some((name) => includesAny(lower(name), GOOD_SUPPORTS))) pros.push("Includes functional support ingredients.");
-  if (categories[3].score >= 70) pros.push("Does not rely heavily on top-listed corn, wheat, or soy fillers.");
+  if (categories[3].score >= 70) pros.push("Does not rely heavily on top-listed low-nutrient binders.");
   if (categories[4].score >= 80) pros.push("Avoids major artificial additive concerns.");
+  if (balance.transparencyLevel === "fuller") pros.push("Publishes fuller typical nutrient data on a comparable basis.");
   return pros.slice(0, 4);
 }
 
-function buildCons(names, categories) {
+function buildCons(names, categories, balance) {
   const cons = [];
+  if (balance.concern) cons.push(balance.concern.summary);
   if (categories[0].score <= 50) cons.push("Protein source transparency is limited.");
-  if (categories[3].score <= 55) cons.push("Filler or starch content lowers the score.");
+  if (categories[3].score <= 55) cons.push("Low-nutrient binder or starch content lowers the score.");
   if (categories[4].score <= 55) cons.push("Artificial additives or sweeteners reduce quality.");
   if (names.some(isByProduct)) cons.push("Contains by-products, which are less transparent than named meats.");
+  if (balance.transparencyLevel === "unknown") cons.push("Full typical nutrient values are not published in this product record.");
   return cons.slice(0, 4);
 }
 
-function buildPetSafety({ names, score, safetyScore, petType }) {
+function buildPetSafety({ names, score, safetyScore, petType, nutrientConcern }) {
   const all = lower(names.join(" "));
   const petLabel = petType === "cat" ? "cat" : petType === "dog" ? "dog" : "pet";
+
+  if (nutrientConcern?.level === "avoid") {
+    return {
+      level: "avoid",
+      label: `Avoid for your ${petLabel}`,
+      summary: `${nutrientConcern.summary} Confirm suitability with your veterinarian before feeding.`,
+    };
+  }
+
+  if (nutrientConcern?.level === "caution") {
+    return {
+      level: "caution",
+      label: `Use caution for your ${petLabel}`,
+      summary: `${nutrientConcern.summary} Confirm suitability with your veterinarian.`,
+    };
+  }
 
   if (includesAny(all, BAD_PRESERVATIVES) || all.includes("propylene glycol")) {
     return {
@@ -411,22 +543,23 @@ export function buildVerifiedPetFoodAnalysis(product = {}) {
   const nutriments = hasPublishedNutrients ? (product.nutriments || {}) : {};
   const protein = scoreProtein(names);
   const safety = scoreSafety(names);
-  const balance = scoreBalance(nutriments, petType);
-  const filler = scoreFillers(names);
+  const lifeStage = compact(product.lifeStage || product.life_stage || lifestageFromName(product.productName));
+  const balance = scoreBalance(nutriments, petType, `${lifeStage} ${product.productName || ""}`);
+  const binders = scoreLowNutrientBinders(names);
   const additives = scoreAdditives(names);
   const categories = [
     { name: "Protein Quality", score: protein.score, detail: protein.detail },
     { name: "Ingredient Safety", score: safety.score, detail: safety.detail },
     { name: "Nutritional Balance", score: balance.score, detail: balance.detail },
-    { name: "Filler Content", score: filler.score, detail: filler.detail },
+    { name: "Low-Nutrient Binders", score: binders.score, detail: binders.detail },
     { name: "Additives & Preservatives", score: additives.score, detail: additives.detail },
   ];
 
   let overallScore = (
-    protein.score * 0.25 +
+    protein.score * 0.20 +
     safety.score * 0.20 +
-    balance.score * 0.20 +
-    filler.score * 0.20 +
+    balance.score * 0.30 +
+    binders.score * 0.15 +
     additives.score * 0.15
   );
 
@@ -434,6 +567,8 @@ export function buildVerifiedPetFoodAnalysis(product = {}) {
   if (includesAny(all, BAD_PRESERVATIVES)) overallScore = Math.min(overallScore, 35);
   if (all.includes("propylene glycol")) overallScore = Math.min(overallScore, 40);
   if (isByProduct(primaryProteinSource(names))) overallScore = Math.min(overallScore, 50);
+  if (balance.concern?.level === "avoid") overallScore = Math.min(overallScore, 35);
+  if (balance.concern?.level === "caution") overallScore = Math.min(overallScore, 45);
 
   const score = clampScore(overallScore);
   const ingredientStatus = lower(product.ingredientVerificationStatus || product.ingredient_verification_status);
@@ -443,8 +578,8 @@ export function buildVerifiedPetFoodAnalysis(product = {}) {
       ? "Open Pet Food Facts record"
       : "Woof catalog record";
   const primaryProtein = primaryProteinSource(names);
-  const pros = buildPros(names, categories);
-  const cons = buildCons(names, categories);
+  const pros = buildPros(names, categories, balance);
+  const cons = buildCons(names, categories, balance);
   const rawProductName = product.productName || "Pet Food";
   const brand = product.brand || "Unknown";
   const displayProductName = brand !== "Unknown" && !lower(rawProductName).includes(lower(brand))
@@ -456,7 +591,22 @@ export function buildVerifiedPetFoodAnalysis(product = {}) {
     score,
     safetyScore: safety.score,
     petType,
+    nutrientConcern: balance.concern,
   });
+
+  const analysisTypeLabel = balance.analysisType === "typical"
+    ? "Typical Analysis"
+    : balance.analysisType === "guaranteed"
+      ? "Guaranteed Analysis"
+      : "Nutrient Analysis";
+  const analysisBasisLabel = balance.basis === "dry_matter"
+    ? "Dry matter"
+    : balance.basis === "as_fed"
+      ? "As fed"
+      : "Basis not stated";
+  const nutrientSummary = hasPublishedNutrients
+    ? `${analysisTypeLabel} (${analysisBasisLabel.toLowerCase()}) was included in the nutritional-balance score.`
+    : "A full source-backed nutrient analysis was unavailable, so nutritional balance was scored conservatively.";
 
   return {
     productName: displayProductName,
@@ -471,7 +621,7 @@ export function buildVerifiedPetFoodAnalysis(product = {}) {
     imageUrl: product.imageUrl || null,
     sourceUrl: product.sourceUrl || null,
     overallScore: score,
-    summary: `Scored from the ingredient list in the ${sourceLabel}. ${primaryProtein} is the primary protein signal used for this result.`,
+    summary: `Scored from the verified formula in the ${sourceLabel}. ${nutrientSummary}`,
     categories,
     nutritionAnalysis: {
       hasPublishedNutrients,
@@ -480,6 +630,25 @@ export function buildVerifiedPetFoodAnalysis(product = {}) {
       fatLevel: levelFromPercent(nutriments.fat, 18, 7),
       fatPercent: percentText(nutriments.fat),
       fiberPercent: percentText(nutriments.fiber),
+      moisturePercent: percentText(nutriments.moisture),
+      calciumPercent: percentText(nutriments.calcium),
+      phosphorusPercent: percentText(nutriments.phosphorus),
+      calciumDryMatterPercent: percentText(balance.calciumDm),
+      phosphorusDryMatterPercent: percentText(balance.phosphorusDm),
+      calciumPhosphorusRatio: balance.calciumPhosphorusRatio == null
+        ? "N/A"
+        : `${balance.calciumPhosphorusRatio.toFixed(2)}:1`,
+      analysisType: balance.analysisType,
+      analysisTypeLabel,
+      analysisBasis: balance.basis,
+      analysisBasisLabel,
+      transparencyLevel: balance.transparencyLevel,
+      transparencyNote: balance.transparencyLevel === "fuller"
+        ? "Fuller typical nutrient data is published and comparable on a dry-matter basis."
+        : balance.transparencyLevel === "limited"
+          ? "Guaranteed values are label minimums or maximums, not a full typical nutrient profile."
+          : "Full typical nutrient values are not available for this product record.",
+      nutrientConcern: balance.concern,
       primaryProteinSource: primaryProtein,
       grainFree: !names.some((name) => includesAny(lower(name), GRAIN_TERMS)),
       lifestage: lifestageFromName(product.productName),
@@ -501,10 +670,10 @@ export function buildVerifiedPetFoodAnalysis(product = {}) {
       };
     }),
     verdict: score >= 70
-      ? "This looks like a stronger option based on the verified ingredient list. Review the ingredient details for your pet's specific sensitivities."
+      ? "This looks like a stronger option based on the verified formula and available nutrient data. Review the details for your pet's specific sensitivities."
       : score >= 50
-        ? "This food is usable but has tradeoffs in protein transparency, fillers, or additive quality. Compare it with higher-scoring foods before buying."
-        : "This product has notable ingredient quality concerns under Woof's rubric. Consider a formula with clearer named proteins and fewer filler or additive flags.",
+        ? "This food has tradeoffs in nutrient balance, protein transparency, low-nutrient binders, or additive quality. Compare it with higher-scoring foods before buying."
+        : "This product has notable nutrient or ingredient concerns under Woof's rubric. Consider a formula with a clearer nutrient profile, named proteins, and fewer binder or additive flags.",
     petSafety,
     catalogQualityState: verificationState.state,
     verificationState,
@@ -513,6 +682,18 @@ export function buildVerifiedPetFoodAnalysis(product = {}) {
       source: product.source || product.sourceKind || "catalog",
       sourceQuality: product.sourceQuality || product.source_quality || null,
       sourceUrl: product.sourceUrl || null,
+      formulaEvidenceTier:
+        product.formulaEvidenceTier
+        || product.formula_evidence_tier
+        || product.nutritionalInfo?.formula_evidence_tier
+        || product.nutritional_info?.formula_evidence_tier
+        || null,
+      formulaVersionProvenance:
+        product.formulaVersionProvenance
+        || product.formula_version_provenance
+        || product.nutritionalInfo?.formula_version_provenance
+        || product.nutritional_info?.formula_version_provenance
+        || null,
       ingredientCount: names.length,
       verifiedAt: product.verifiedAt || product.verified_at || null,
       imageStatus: product.imageVerificationStatus || product.image_verification_status || null,

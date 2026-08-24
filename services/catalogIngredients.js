@@ -89,3 +89,33 @@ export function splitIngredientStatement(value) {
     return true;
   });
 }
+
+function normalizeIngredientEvidenceTerm(value) {
+  return compact(value)
+    .toLocaleLowerCase("en-US")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    // Official Open Farm trace cards may prefix certified proteins with
+    // "CH" (Certified Humane) or "G.A.P. Step N". Those are sourcing
+    // certifications, not part of the ingredient identity.
+    .replace(/^(?:g\.?\s*a\.?\s*p\.?\s*step\s*\d+|ch)\s+/iu, "")
+    // Manufacturer PDP cards sometimes omit the vitamin-number alias that is
+    // present on the linked label PDF. The chemical ingredient is unchanged.
+    .replace(/\s*\(\s*vitamin\s+[a-z](?:\s*-\s*|\s*)\d+\s*\)\s*$/iu, "")
+    // PDP copy alternates singular/plural for this same label ingredient.
+    .replace(/\bnatural\s+flavors\b/gu, "natural flavor")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function canonicalIngredientEvidence(value) {
+  const ingredients = Array.isArray(value)
+    ? value
+    : splitIngredientStatement(value);
+  return JSON.stringify(
+    ingredients
+      .map(normalizeIngredientEvidenceTerm)
+      .filter(Boolean)
+  );
+}

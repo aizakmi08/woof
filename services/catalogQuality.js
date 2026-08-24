@@ -109,10 +109,16 @@ const NON_ADULT_LIFE_STAGE_TERMS = new Set([
   "mature",
 ]);
 const PRODUCT_QUERY_EQUIVALENT_TERMS = {
+  cluster: new Set(["clusters"]),
+  clusters: new Set(["cluster"]),
+  grain: new Set(["grains"]),
+  grains: new Set(["grain"]),
   loaf: new Set(["mousse", "pat", "pate"]),
   mousse: new Set(["loaf", "pat", "pate"]),
   pat: new Set(["loaf", "mousse", "pate"]),
   pate: new Set(["loaf", "mousse", "pat"]),
+  stew: new Set(["stews"]),
+  stews: new Set(["stew"]),
 };
 
 function compact(value) {

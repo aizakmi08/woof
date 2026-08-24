@@ -11,7 +11,7 @@ const logger = createLogger("CLAUDE");
 // server-side before the client aborts the request.
 const CLIENT_ANALYSIS_TIMEOUT_MS = 55000;
 // On-device OCR is the fast path; the cloud resolver is a short visual fallback.
-const LABEL_LOOKUP_TIMEOUT_MS = 6500;
+const LABEL_LOOKUP_TIMEOUT_MS = 8500;
 const AUTH_REFRESH_TIMEOUT_MS = 12000;
 
 // Detect streaming capability at module load
@@ -487,6 +487,19 @@ function validateLabelLookupResult(result) {
     petType: ["dog", "cat", "unknown"].includes(String(result.petType).toLowerCase())
       ? String(result.petType).toLowerCase()
       : "unknown",
+    productCategory: [
+      "complete_food",
+      "treat",
+      "topper",
+      "mixer",
+      "supplement",
+      "unknown",
+    ].includes(String(result.productCategory).toLowerCase())
+      ? String(result.productCategory).toLowerCase()
+      : "unknown",
+    categoryEvidence: stringArray(result.categoryEvidence).slice(0, 4),
+    identityEvidence: stringArray(result.identityEvidence).slice(0, 6),
+    marketingClaims: stringArray(result.marketingClaims).slice(0, 4),
     confidence: normalizeConfidence(result.confidence),
     searchQuery: optionalString(result.searchQuery),
     visibleText: stringArray(result.visibleText),
