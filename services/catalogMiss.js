@@ -16,11 +16,11 @@ export function catalogLookupMissReason({
 } = {}) {
   if (errorMessage) return "lookup_failed";
   if (!normalizedQuery) return "empty_query";
-  if (resolutionDecision == null) return null;
-  if (resolutionDecision === LABEL_RESOLUTION_DECISIONS.NON_COMPLETE_CONFIRMED) return null;
-
-  const resolutionMiss = RESOLUTION_MISS_REASONS[resolutionDecision];
-  if (resolutionMiss) return resolutionMiss;
+  if (resolutionDecision != null) {
+    if (resolutionDecision === LABEL_RESOLUTION_DECISIONS.NON_COMPLETE_CONFIRMED) return null;
+    const resolutionMiss = RESOLUTION_MISS_REASONS[resolutionDecision];
+    if (resolutionMiss) return resolutionMiss;
+  }
 
   if (identification && identification.found === false) return "label_not_readable";
   if (summary.result_count === 0) return "no_results";

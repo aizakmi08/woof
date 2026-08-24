@@ -249,6 +249,7 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
   const anonymousSignInPromiseRef = useRef(null);
   const authTransitionRef = useRef(0);
   const latestUserRef = useRef(null);
+  const latestSessionRef = useRef(null);
   const automaticGuestPendingRef = useRef(false);
 
   const fetchProfile = useCallback(async (userId, { updateProState = true } = {}) => {
@@ -330,9 +331,23 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
         authTransitionRef.current !== transitionAtStart
         || (currentUser && !isAnonymousUser(currentUser))
       ) {
+        const currentSession = latestSessionRef.current;
+        if (currentSession?.user && !isAnonymousUser(currentSession.user)) {
+          const { error: restoreError } = await supabase.auth.setSession({
+            access_token: currentSession.access_token,
+            refresh_token: currentSession.refresh_token,
+          });
+          if (restoreError) throw restoreError;
+        } else {
+          const { error: discardError } = await supabase.auth.signOut({ scope: "local" });
+          if (discardError) throw discardError;
+        }
         trackEvent("anonymous_sign_in_discarded", {
           automatic,
           reason: "newer_non_anonymous_transition",
+          cleanup: currentSession?.user && !isAnonymousUser(currentSession.user)
+            ? "restored_non_anonymous_session"
+            : "signed_out_late_anonymous_session",
         });
         return null;
       }
@@ -578,6 +593,7 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
     setSession(updatedSession);
     setUser(updatedUser);
     latestUserRef.current = updatedUser;
+    latestSessionRef.current = updatedSession;
     setIsAnonymous(isAnonymousUser(updatedUser));
 
     if (!updatedUser) {
@@ -695,6 +711,7 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
 
         if (nextUser && !isAnonymousUser(nextUser)) authTransitionRef.current += 1;
         latestUserRef.current = nextUser;
+        latestSessionRef.current = s;
 
         setSession(s);
         setUser(nextUser);
@@ -722,6 +739,7 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
           const signedOutUserId = previousUser?.id || null;
           authTransitionRef.current += 1;
           latestUserRef.current = null;
+          latestSessionRef.current = null;
           if (signedOutUserId) clearCachedEntitlement(signedOutUserId).catch(() => {});
           trackEvent("auth_signed_out", {}, { queueWhenSignedOut: false });
           setupUserIdRef.current = null;
@@ -750,6 +768,7 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
         setSession(s);
         const initialUser = s?.user ?? null;
         latestUserRef.current = initialUser;
+        latestSessionRef.current = s;
         setUser(initialUser);
         setIsAnonymous(isAnonymousUser(initialUser));
 
@@ -855,6 +874,7 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
       setSession(updatedSession);
       setUser(updatedUser);
       latestUserRef.current = updatedUser;
+      latestSessionRef.current = updatedSession;
       setIsAnonymous(isAnonymousUser(updatedUser));
 
       if (updatedUser) {
@@ -902,6 +922,7 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
     setSession(null);
     setUser(null);
     latestUserRef.current = null;
+    latestSessionRef.current = null;
     setProfile(null);
     setIsPro(false);
     setIsAnonymous(false);

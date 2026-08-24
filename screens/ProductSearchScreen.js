@@ -211,6 +211,11 @@ function productIsReady(product) {
   return productIsVerifiedReady(product);
 }
 
+function ingredientStatusLabel({ exactConfirmed = false, ready = false } = {}) {
+  if (exactConfirmed) return "Exact label match";
+  return ready ? "Verified" : "Needs ingredients";
+}
+
 function productPackageSizeLabel(product) {
   const rawPackageSizes = [
     ...(Array.isArray(product?.availablePackageSizes) ? product.availablePackageSizes : []),
@@ -495,6 +500,7 @@ function ProductImage({ product, theme }) {
 
 function ProductRow({ product, theme, onPress, exactConfirmed = false }) {
   const ready = productIsReady(product);
+  const statusLabel = ingredientStatusLabel({ exactConfirmed, ready });
   const displayTitle = productDisplayTitle(product);
   const variantChips = productVariantChips(product);
   const chipSummary = variantChips.map((chip) => chip.label).join(", ");
@@ -511,7 +517,7 @@ function ProductRow({ product, theme, onPress, exactConfirmed = false }) {
         },
       ]}
       accessibilityRole="button"
-      accessibilityLabel={`${product.brand ? `${product.brand}. ` : ""}${displayTitle}${chipSummary ? `. ${chipSummary}` : ""}. ${exactConfirmed ? "Exact label match" : ready ? "Verified" : "Needs ingredient data"}`}
+      accessibilityLabel={`${product.brand ? `${product.brand}. ` : ""}${displayTitle}${chipSummary ? `. ${chipSummary}` : ""}. ${statusLabel}`}
       accessibilityHint={ready ? "Opens the product score" : "Shows options to scan ingredient data"}
     >
       <ProductImage product={product} theme={theme} />
@@ -567,7 +573,7 @@ function ProductRow({ product, theme, onPress, exactConfirmed = false }) {
               ]}
               numberOfLines={1}
             >
-              {exactConfirmed ? "Exact label match" : ready ? "Verified" : "Needs ingredients"}
+              {statusLabel}
             </Text>
           </View>
         </View>

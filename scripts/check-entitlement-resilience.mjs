@@ -99,8 +99,15 @@ const webhookSource = fs.readFileSync(
 assert(
   /anonymousSignInPromiseRef/.test(authSource)
     && /authTransitionRef/.test(authSource)
-    && /automaticGuestPendingRef/.test(authSource),
+    && /automaticGuestPendingRef/.test(authSource)
+    && /latestSessionRef/.test(authSource),
   "automatic guest sign-in must be single-flight, ordered, and splash-gated"
+);
+assert(
+  /anonymous_sign_in_discarded[\s\S]*restored_non_anonymous_session/.test(authSource)
+    && /supabase\.auth\.setSession\(\{[\s\S]*access_token: currentSession\.access_token[\s\S]*refresh_token: currentSession\.refresh_token/.test(authSource)
+    && /supabase\.auth\.signOut\(\{ scope: "local" \}\)/.test(authSource),
+  "a discarded late anonymous sign-in must restore the real session or clear the anonymous residue locally"
 );
 assert(
   /readPersistedScanCount/.test(authSource)

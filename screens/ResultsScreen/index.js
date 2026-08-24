@@ -103,6 +103,8 @@ const logger = createLogger("RESULTS");
 // Longer than the Edge Function timeout so server-side scan reversal can sync
 // back before the UI shows a local timeout.
 const RESULT_ANALYSIS_TIMEOUT_MS = 60000;
+const LOADING_MESSAGE_INTERVAL_MS = 1_800;
+const SLOW_LOADING_THRESHOLD_MS = 12_000;
 
 function shareUrlHost(value) {
   if (!value) return null;
@@ -1029,16 +1031,16 @@ export default function ResultsScreen({ route, navigation }) {
         "Preparing the verified breakdown...",
       ];
     let messageIndex = 0;
-    setLoadingStatus(messages[messageIndex]);
     const messageInterval = setInterval(() => {
-      if (messageIndex >= messages.length - 1) {
-        clearInterval(messageInterval);
-        setIsSlowLoading(true);
-        return;
-      }
-      messageIndex += 1;
       setLoadingStatus(messages[messageIndex]);
-    }, 1_800);
+      messageIndex += 1;
+      if (messageIndex >= messages.length) {
+        clearInterval(messageInterval);
+      }
+    }, LOADING_MESSAGE_INTERVAL_MS);
+    const slowLoadingTimeout = setTimeout(() => {
+      setIsSlowLoading(true);
+    }, SLOW_LOADING_THRESHOLD_MS);
     const timeout = setTimeout(() => {
       if (!done) {
         logger.debug("[RESULTS] Analysis timeout — showing error");
@@ -1058,6 +1060,7 @@ export default function ResultsScreen({ route, navigation }) {
     }, RESULT_ANALYSIS_TIMEOUT_MS);
     return () => {
       clearInterval(messageInterval);
+      clearTimeout(slowLoadingTimeout);
       clearTimeout(timeout);
     };
   }, [devFixtureLoadingStatus, done, isHumanFood, mode, streaming]);
