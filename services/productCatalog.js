@@ -2054,11 +2054,7 @@ export async function searchCatalogProducts(query, {
     const results = filterScorableCatalogResults(
       filterByRequiredQueryTerms(
         filterByPetType(
-          await searchWoofCatalogForLabelIdentity(
-            catalogIdentitySearchQueries(searchQuery),
-            catalogLimit,
-            signal
-          ),
+          await searchWoofCatalog(searchQuery, catalogLimit, { signal }),
           targetPetType
         ),
         validationQuery

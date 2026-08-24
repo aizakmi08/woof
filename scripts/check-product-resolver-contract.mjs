@@ -1197,6 +1197,10 @@ function checkRelaxedCatalogQueries(api) {
     /filterProductsForOcr\(results,\s*correctedQuery\)/.test(searchCatalogProductsSource),
     "relaxed catalog results must still enforce brand, species, form, protein, and variant compatibility"
   );
+  assert(
+    /await searchWoofCatalog\(searchQuery,\s*catalogLimit,\s*\{\s*signal\s*\}\)/.test(searchCatalogProductsSource),
+    "typed catalog search must use hydrated verified-product rows so package sizes remain visible"
+  );
 }
 
 function checkStrictLabelCandidateMatching(api) {
