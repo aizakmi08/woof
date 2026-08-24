@@ -23,6 +23,10 @@ import {
   resolveProduct,
 } from "../services/productCatalog";
 import { labelOcrIsAvailable, recognizeLabelText } from "../services/labelOcr";
+import {
+  filterProductsForOcr,
+  primaryPackageOcrText,
+} from "../services/labelOcrMatching";
 import { productIsVerifiedReady } from "../services/catalogQuality";
 import {
   getCachedCatalogSearch,
@@ -211,9 +215,10 @@ function productIsReady(product) {
   return productIsVerifiedReady(product);
 }
 
-function ingredientStatusLabel({ exactConfirmed = false, ready = false } = {}) {
+function ingredientStatusLabel({ exactConfirmed = false, ready = false, labelCandidate = false } = {}) {
   if (exactConfirmed) return "Exact label match";
-  return ready ? "Verified" : "Needs ingredients";
+  if (!ready) return "Needs ingredients";
+  return labelCandidate ? "Catalog data verified" : "Verified";
 }
 
 function productPackageSizeLabel(product) {
@@ -442,10 +447,16 @@ function collectLabelOutcomes({
   });
 }
 
-function mergeAutomaticLabelRecovery(previousResult, recoveryResult, recognizedQuery) {
-  const recoveredProducts = Array.isArray(recoveryResult?.products)
-    ? recoveryResult.products
-    : [];
+function mergeAutomaticLabelRecovery(
+  previousResult,
+  recoveryResult,
+  recognizedQuery,
+  packageOcrText
+) {
+  const recoveredProducts = filterProductsForOcr(
+    Array.isArray(recoveryResult?.products) ? recoveryResult.products : [],
+    packageOcrText
+  );
   if (recoveredProducts.length === 0) return previousResult;
 
   const previousEvidence = previousResult?.resolutionEvidence || {};
@@ -498,9 +509,9 @@ function ProductImage({ product, theme }) {
   );
 }
 
-function ProductRow({ product, theme, onPress, exactConfirmed = false }) {
+function ProductRow({ product, theme, onPress, exactConfirmed = false, labelCandidate = false }) {
   const ready = productIsReady(product);
-  const statusLabel = ingredientStatusLabel({ exactConfirmed, ready });
+  const statusLabel = ingredientStatusLabel({ exactConfirmed, ready, labelCandidate });
   const displayTitle = productDisplayTitle(product);
   const variantChips = productVariantChips(product);
   const chipSummary = variantChips.map((chip) => chip.label).join(", ");
@@ -1407,7 +1418,12 @@ export default function ProductSearchScreen({ navigation, route }) {
               signal: recoveryController.signal,
             });
             if (lifecycleController.signal.aborted) return;
-            result = mergeAutomaticLabelRecovery(result, recoveryResult, recognizedQuery);
+            result = mergeAutomaticLabelRecovery(
+              result,
+              recoveryResult,
+              recognizedQuery,
+              primaryPackageOcrText(recognizedOcr.text, recognizedOcr.lines)
+            );
             automaticRecoverySucceeded = result.decision
               !== LABEL_RESOLUTION_DECISIONS.TIMED_OUT;
           } catch (recoveryError) {
@@ -1809,6 +1825,9 @@ export default function ProductSearchScreen({ navigation, route }) {
     if (products.length > 0) {
       return { message: "Label read — choose your exact package", badge: "Not confirmed" };
     }
+    if (resolutionDecision && !labelLoading) {
+      return { message: "Exact formula not confirmed — try the front label again", badge: "No match" };
+    }
     if (recognizedIdentityText || identification?.found) {
       return { message: "Label read — checking the catalog", badge: "Checking" };
     }
@@ -2013,6 +2032,7 @@ export default function ProductSearchScreen({ navigation, route }) {
               confirmedFormulaKey
               && productFormulaKey(item) === confirmedFormulaKey
             )}
+            labelCandidate={labelFlowActive}
           />
         )}
         ItemSeparatorComponent={() => <View style={{ height: 10 }} />}

@@ -533,16 +533,60 @@ function checkLabelOcrMatchingCases(api) {
   );
   const hillsSevenRanked = api.rankProductsForOcr(hillsSevenMatches, hillsSevenOcr);
   assert(
-    hillsSevenMatches.length === 2
+    hillsSevenMatches.length === 1
       && hillsSevenRanked[0]?.gtin === "052742909905"
-      && hillsSevenRanked[1]?.gtin === "052742909806",
-    `on-device OCR must gate Adult 7+, Small & Mini, and Chicken identity, then prefer the photographed 15.5 lb package; matches=${JSON.stringify(hillsSevenMatches.map((product) => product.gtin))}; ranked=${JSON.stringify(hillsSevenRanked.map((product) => [product.gtin, product.ocrMatchScore]))}`
+      && hillsSevenRanked[0]?.ocrPackageSizeMatch === 1,
+    `on-device OCR must gate Adult 7+, Small & Mini, Chicken identity, and the photographed 15.5 lb package; matches=${JSON.stringify(hillsSevenMatches.map((product) => product.gtin))}; ranked=${JSON.stringify(hillsSevenRanked.map((product) => [product.gtin, product.ocrMatchScore]))}`
   );
   assert(
     api.labelOcrSearchQueries(hillsSevenOcr).every((query) => (
       !/\b15\.5\b|\blb\b|\bbag\b/i.test(query)
     )),
     "on-device OCR package-size tokens must not enter catalog retrieval queries"
+  );
+
+  const reportedHillsOcr = [
+    "Hill's",
+    "SCIENCE DIET",
+    "ADULT 1-6",
+    "35 lb bag",
+  ].join("\n");
+  const reportedHillsWrongCat = {
+    brand: "Hill's Science Diet",
+    productName: "Adult Perfect Digestion Salmon Dry Cat Food",
+    productLine: "Perfect Digestion",
+    flavor: "Salmon",
+    lifeStage: "adult",
+    petType: "cat",
+    foodForm: "dry",
+    packageSize: "6 lb",
+  };
+  const reportedHillsCorrectDog = {
+    brand: "Hill's Science Diet",
+    productName: "Adult 1-6 Chicken & Barley Recipe Dry Dog Food",
+    productLine: "Adult 1-6",
+    flavor: "Chicken & Barley Recipe",
+    lifeStage: "adult",
+    petType: "dog",
+    foodForm: "dry",
+    packageSize: "35 lb",
+  };
+  assert(
+    api.filterProductsForOcr(
+      [reportedHillsWrongCat, reportedHillsCorrectDog],
+      reportedHillsOcr
+    ).length === 0,
+    "brand plus Adult 1-6 must safely abstain when OCR did not read recipe or species; it must never invent Perfect Digestion Salmon cat identity from a catalog row"
+  );
+  const reportedHillsCompleteOcr = `${reportedHillsOcr}\nCHICKEN & BARLEY RECIPE\nDOG FOOD`;
+  const reportedHillsCompleteMatches = api.filterProductsForOcr(
+    [reportedHillsWrongCat, reportedHillsCorrectDog],
+    reportedHillsCompleteOcr
+  );
+  assert(
+    reportedHillsCompleteMatches.length === 1
+      && reportedHillsCompleteMatches[0].petType === "dog",
+    "visible Hill's recipe and species evidence must admit the exact Adult 1-6 dog formula while rejecting the cat sibling"
   );
 
   const nutroSmallBreedMatches = api.filterProductsForOcr(
@@ -1497,8 +1541,33 @@ function checkStrictLabelResolution(api) {
   ], { strictMatching: true, autoOpenEnabled: true });
   assert(
     benefulConflict.decision === api.LABEL_RESOLUTION_DECISIONS.RECOGNIZERS_DISAGREE
-      && !benefulConflict.selectedProduct,
-    "Beneful dog evidence must never auto-open a Purina Pro Plan cat product"
+      && !benefulConflict.selectedProduct
+      && benefulConflict.products.length === 0,
+    "Beneful dog evidence must never auto-open or display a Purina Pro Plan cat product when recognizers disagree"
+  );
+
+  const hiddenHillsFormula = api.compareLabelIdentities(
+    {
+      brand: "Hill's Science Diet",
+      productName: "Adult 1-6",
+      lifeStage: "adult",
+    },
+    {
+      brand: "Hill's Science Diet",
+      productName: "Adult Perfect Digestion Salmon Dry Cat Food",
+      productLine: "Perfect Digestion",
+      flavor: "Salmon",
+      lifeStage: "adult",
+      petType: "cat",
+      foodForm: "dry",
+    },
+    { requireVisibleCandidateVariants: true }
+  );
+  assert(
+    !hiddenHillsFormula.compatible
+      && hiddenHillsFormula.reasonCodes.includes("candidate_recipe_not_visible")
+      && hiddenHillsFormula.reasonCodes.includes("candidate_condition_not_visible"),
+    "reconciliation must reject catalog-only Hill's recipe and condition details that were not visible in the package evidence"
   );
 
   const moistMeaty = product({
@@ -2028,9 +2097,11 @@ function checkResolverWiring() {
     /onTimeout: abortRequests/.test(productSearchScreen)
       && /finish\(\{ cancelPending: true \}\)/.test(productSearchScreen)
       && /mergeAutomaticLabelRecovery/.test(productSearchScreen)
+      && /const recoveredProducts = filterProductsForOcr\(/.test(productSearchScreen)
+      && /primaryPackageOcrText\(recognizedOcr\.text, recognizedOcr\.lines\)/.test(productSearchScreen)
       && /automatic_recovery_attempted/.test(productSearchScreen)
       && /recognizedOcrRef/.test(productSearchScreen),
-    "label resolution must cancel slow cloud work and automatically recover from readable OCR"
+    "label resolution must cancel slow cloud work and evidence-gate automatic recovery with the photographed package OCR"
   );
   assert(
     /await getCatalogProduct\(product\.cacheKey\)/.test(productSearchScreen)

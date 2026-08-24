@@ -72,12 +72,14 @@ const FORMULA_VARIANT_TERMS = new Set([
 ]);
 const CONDITION_TERMS = new Set([
   "digestive",
+  "digestion",
   "hairball",
   "hydrolyzed",
   "indoor",
   "joint",
   "large breed",
   "mobility",
+  "perfect digestion",
   "sensitive",
   "small breed",
   "skin and coat",
@@ -221,6 +223,7 @@ export function adultAgeBand(value = {}) {
     value.product_name,
     value.flavor,
   ].map(compact).filter(Boolean).join(" "));
+  if (/\badult\s+1\s+(?:to\s+)?6\b/.test(text)) return "adult_1_6";
   const adultAge = text.match(/\badult\s+(7|11)(?:\s+plus)?\b/);
   if (adultAge) return `adult_${adultAge[1]}_plus`;
   const seniorAge = text.match(/\b(7|11)(?:\s+plus)?\s+(?:senior|adult)\b/);
@@ -368,7 +371,7 @@ export function compareLabelIdentities(left = {}, right = {}, {
 
   if (requireVisibleCandidateVariants) {
     const hiddenCandidateRecipes = rightRecipes.filter((term) => !leftRecipes.includes(term));
-    if (leftRecipes.length && hiddenCandidateRecipes.length) {
+    if (hiddenCandidateRecipes.length) {
       disagreementFields.push("recipe");
       reasonCodes.push("candidate_recipe_not_visible");
     }
@@ -609,7 +612,7 @@ export function reconcileLabelOutcomes(outcomes = [], {
   const visual = completed.find((outcome) => outcome.path === "cloud_image");
   const ocr = completed.find((outcome) => outcome.path === "on_device_ocr");
   const errors = outcomes.filter((outcome) => outcome?.error);
-  const products = mergeCandidateProducts(completed);
+  let products = mergeCandidateProducts(completed);
   const primary = ocr || visual || completed[0] || null;
   const primaryIdentification = { ...outcomeIdentity(primary) };
   const visualIdentification = outcomeIdentity(visual);
@@ -636,6 +639,7 @@ export function reconcileLabelOutcomes(outcomes = [], {
     || (visual && ocr && !identityComparison.compatible)
   ) {
     decision = LABEL_RESOLUTION_DECISIONS.RECOGNIZERS_DISAGREE;
+    products = [];
     reasonCodes.push("recognizer_identity_conflict");
   } else if (visual && ocr && visualSelected && ocrSelected) {
     const sameFormula = productKey(visualSelected) === productKey(ocrSelected);
@@ -649,6 +653,7 @@ export function reconcileLabelOutcomes(outcomes = [], {
       confirmedProduct = visualSelected;
     } else {
       decision = LABEL_RESOLUTION_DECISIONS.RECOGNIZERS_DISAGREE;
+      products = [];
       reasonCodes.push(
         ...visibleCandidateComparison.reasonCodes,
         sameFormula ? "candidate_variant_not_confirmed" : "recognizers_selected_different_products"
