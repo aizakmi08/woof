@@ -172,7 +172,7 @@ const PAGES = [
   {
     key: "scan",
     title: "Scan the front label",
-    body: `${BRAND_NAME} reads the product name from the front of the bag or can. Start with a front-label photo or search by name.`,
+    body: `${BRAND_NAME} reads the product name from the front of the bag or can. Start with a front-label photo or search by name. Scan first, no account required.`,
     highlights: [
       "Product name",
       "Search works too",
