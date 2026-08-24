@@ -3,32 +3,38 @@ import { useColorScheme } from "react-native";
 // --- Design Tokens ---
 
 export const Colors = {
+  // Woof brand. The live mark is black with a green verification check.
+  brandMidnight: "#111111",
+  brandApricot: "#666662",
+  brandMint: "#64D161",
+  brandIvory: "#F7F7F4",
+
   // Core surfaces
-  background: "#FAFAFA",
+  background: "#F7F7F4",
   card: "#FFFFFF",
-  surface: "#F5F5F5",
-  divider: "#F0F0F0",
+  surface: "#EFEFEB",
+  divider: "#DEDED8",
 
   // Text
-  textPrimary: "#1C1C1E",
-  textSecondary: "#6B7280",
-  textTertiary: "#9CA3AF",
+  textPrimary: "#111111",
+  textSecondary: "#51514D",
+  textTertiary: "#7A7A73",
 
   // Button
-  buttonPrimary: "#1C1C1E",
+  buttonPrimary: "#111111",
   buttonText: "#FFFFFF",
 
   // Score tiers
-  scoreExcellent: "#34C759",
-  scoreGreat: "#34C759",
-  scoreDecent: "#E8A317",
-  scoreFair: "#F97316",
-  scoreConcerning: "#EF4444",
+  scoreExcellent: "#2F8F5B",
+  scoreGreat: "#2F8F5B",
+  scoreDecent: "#D8941C",
+  scoreFair: "#D96A32",
+  scoreConcerning: "#C74A46",
 
   // Ingredient quality
-  ingredientGood: "#34C759",
+  ingredientGood: "#2F8F5B",
   ingredientNeutral: "#9CA3AF",
-  ingredientBad: "#EF4444",
+  ingredientBad: "#C74A46",
 
   // Semantic
   recallBorder: "rgba(239, 68, 68, 0.25)",
@@ -41,11 +47,11 @@ export const Colors = {
 
   // Score tiers — nested for backward compat
   score: {
-    excellent: "#34C759",
-    good: "#34C759",
-    decent: "#E8A317",
-    poor: "#F97316",
-    bad: "#EF4444",
+    excellent: "#2F8F5B",
+    good: "#2F8F5B",
+    decent: "#D8941C",
+    poor: "#D96A32",
+    bad: "#C74A46",
   },
 
   // Semantic accent
@@ -54,46 +60,46 @@ export const Colors = {
 
   // Light palette
   light: {
-    bg: "#FAFAFA",
+    bg: "#F7F7F4",
     card: "#FFFFFF",
-    surface: "#F5F5F5",
-    textPrimary: "#1C1C1E",
-    textSecondary: "#6B7280",
-    textTertiary: "#9CA3AF",
-    separator: "#F0F0F0",
-    fill: "rgba(0,0,0,0.04)",
-    fillSecondary: "rgba(0,0,0,0.08)",
+    surface: "#EFEFEB",
+    textPrimary: "#111111",
+    textSecondary: "#51514D",
+    textTertiary: "#7A7A73",
+    separator: "#DEDED8",
+    fill: "rgba(17,17,17,0.045)",
+    fillSecondary: "rgba(17,17,17,0.085)",
     statusBar: "dark",
   },
 
   // Dark palette
   dark: {
-    bg: "#1C1C1E",
-    card: "#2C2C2E",
-    surface: "#3A3A3C",
-    textPrimary: "#F5F5F5",
-    textSecondary: "#AEAEB2",
-    textTertiary: "#A3A3A8",
-    separator: "#3A3A3C",
-    fill: "rgba(255,255,255,0.06)",
+    bg: "#0E0E0D",
+    card: "#171716",
+    surface: "#20201F",
+    textPrimary: "#F7F7F4",
+    textSecondary: "#B7B7B0",
+    textTertiary: "#8A8A83",
+    separator: "#30302E",
+    fill: "rgba(255,255,255,0.055)",
     fillSecondary: "rgba(255,255,255,0.10)",
     statusBar: "light",
   },
 };
 
 export const Typography = {
-  screenTitle: { fontSize: 34, fontWeight: "700", letterSpacing: 0 },
-  sectionHeader: { fontSize: 22, fontWeight: "600", letterSpacing: 0 },
+  screenTitle: { fontSize: 32, fontWeight: "700", letterSpacing: 0 },
+  sectionHeader: { fontSize: 20, fontWeight: "700", letterSpacing: 0 },
   cardTitle: { fontSize: 17, fontWeight: "600" },
   body: { fontSize: 15, fontWeight: "400", lineHeight: 22 },
   bodySecondary: { fontSize: 15, fontWeight: "400", lineHeight: 22 },
   caption: { fontSize: 13, fontWeight: "400" },
-  label: { fontSize: 11, fontWeight: "600", letterSpacing: 0, textTransform: "uppercase" },
+  label: { fontSize: 12, fontWeight: "600", letterSpacing: 0 },
   scoreLarge: { fontSize: 48, fontWeight: "700", letterSpacing: 0 },
   scoreLabel: { fontSize: 13, fontWeight: "600", letterSpacing: 0, textTransform: "uppercase" },
   statValue: { fontSize: 16, fontWeight: "600" },
   statLabel: { fontSize: 11, fontWeight: "600", letterSpacing: 0, textTransform: "uppercase" },
-  button: { fontSize: 17, fontWeight: "600", letterSpacing: 0 },
+  button: { fontSize: 16, fontWeight: "600", letterSpacing: 0 },
 
   // Legacy aliases (used in ResultsScreen styles)
   bodyBold: { fontSize: 15, fontWeight: "600", lineHeight: 22 },
@@ -113,31 +119,31 @@ export const Spacing = {
 
   // Design system semantic tokens
   screenPadding: 20,
-  sectionGap: 36,
+  sectionGap: 28,
   subsectionGap: 24,
   elementGap: 12,
   cardPadding: 16,
   cardGap: 12,
   rowHeight: 72,
-  buttonHeight: 54,
+  buttonHeight: 56,
   buttonRadius: 14,
-  cardRadius: 14,
+  cardRadius: 16,
   dividerIndent: 20,
 
   // Legacy aliases (used in other screens)
   section: 20,
   screenH: 24,
   cardPad: 20,
-  radius: 16,
+  radius: 18,
   radiusSm: 12,
 };
 
 export const Shadows = {
   card: {
-    boxShadow: "0 2px 8px rgba(0, 0, 0, 0.06)",
+    boxShadow: "0 1px 2px rgba(0, 0, 0, 0.045)",
   },
   button: {
-    boxShadow: "0 2px 12px rgba(0, 0, 0, 0.08)",
+    boxShadow: "0 8px 24px rgba(0, 0, 0, 0.14)",
   },
   scoreGlow: (color) => ({ boxShadow: `0 0 40px ${color}14` }),
 };
@@ -154,11 +160,11 @@ export const Animation = {
 // --- Score Config ---
 
 export function getScoreConfig(score) {
-  if (score >= 85) return { label: "EXCELLENT", color: Colors.scoreExcellent, bg: "rgba(52,199,89,0.08)" };
-  if (score >= 70) return { label: "GOOD", color: Colors.scoreGreat, bg: "rgba(52,199,89,0.08)" };
-  if (score >= 50) return { label: "AVERAGE", color: Colors.scoreDecent, bg: "rgba(232,163,23,0.08)" };
-  if (score >= 30) return { label: "BELOW AVERAGE", color: Colors.scoreFair, bg: "rgba(249,115,22,0.08)" };
-  return { label: "POOR", color: Colors.scoreConcerning, bg: "rgba(239,68,68,0.08)" };
+  if (score >= 85) return { label: "EXCELLENT", color: Colors.scoreExcellent, bg: "rgba(47,143,91,0.08)" };
+  if (score >= 70) return { label: "GOOD", color: Colors.scoreGreat, bg: "rgba(47,143,91,0.08)" };
+  if (score >= 50) return { label: "AVERAGE", color: Colors.scoreDecent, bg: "rgba(216,148,28,0.08)" };
+  if (score >= 30) return { label: "BELOW AVERAGE", color: Colors.scoreFair, bg: "rgba(217,106,50,0.08)" };
+  return { label: "POOR", color: Colors.scoreConcerning, bg: "rgba(199,74,70,0.08)" };
 }
 
 // --- Theme Hook ---
@@ -173,6 +179,13 @@ export function useTheme() {
     amber: Colors.amber,
     green: Colors.scoreExcellent,
     red: Colors.scoreConcerning,
+    brandMidnight: Colors.brandMidnight,
+    brandApricot: Colors.brandApricot,
+    brandMint: Colors.brandMint,
+    brandIvory: Colors.brandIvory,
+    dangerSurface: isDark ? "rgba(199,74,70,0.22)" : "rgba(199,74,70,0.10)",
+    cautionSurface: isDark ? "rgba(216,148,28,0.20)" : "rgba(216,148,28,0.10)",
+    successSurface: isDark ? "rgba(47,143,91,0.20)" : "rgba(47,143,91,0.10)",
     buttonPrimary: isDark ? "#F5F5F5" : Colors.buttonPrimary,
     buttonText: isDark ? "#1C1C1E" : Colors.buttonText,
   };

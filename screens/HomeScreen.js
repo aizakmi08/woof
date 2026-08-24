@@ -22,6 +22,7 @@ import Animated, {
   withSpring,
   withDelay,
   Easing,
+  useReducedMotion,
 } from "react-native-reanimated";
 import Svg, { Circle } from "react-native-svg";
 import { useFocusEffect } from "@react-navigation/native";
@@ -42,6 +43,8 @@ import {
   removePendingCatalogContribution,
 } from "../services/catalogContributions";
 import { findVerifiedCatalogProductForLookup } from "../services/productCatalog";
+import { navigationTimingParams } from "../services/performanceTimings";
+import { DEV_QA_HISTORY } from "../services/devQaFixtures";
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 const logger = createLogger("HOME");
@@ -67,6 +70,7 @@ function relativeDate(dateString) {
 
 function MiniScoreRing({ score, delay = 0 }) {
   const theme = useTheme();
+  const reduceMotion = useReducedMotion();
   const size = 36;
   const strokeWidth = 2.5;
   const radius = (size - strokeWidth) / 2;
@@ -76,15 +80,17 @@ function MiniScoreRing({ score, delay = 0 }) {
   const progress = useSharedValue(0);
 
   useEffect(() => {
-    progress.value = 0;
-    progress.value = withDelay(
-      delay,
-      withTiming(score / 100, {
-        duration: 800,
-        easing: Easing.out(Easing.cubic),
-      })
-    );
-  }, [score, delay]);
+    progress.value = reduceMotion ? score / 100 : 0;
+    if (!reduceMotion) {
+      progress.value = withDelay(
+        delay,
+        withTiming(score / 100, {
+          duration: 800,
+          easing: Easing.out(Easing.cubic),
+        })
+      );
+    }
+  }, [delay, reduceMotion, score]);
 
   const animatedProps = useAnimatedProps(() => ({
     strokeDashoffset: circumference * (1 - progress.value),
@@ -123,11 +129,11 @@ function MiniScoreRing({ score, delay = 0 }) {
 
 // --- Safety color for human food entries ---
 
-function safetyColor(level) {
+function safetyColor(level, theme) {
   if (level === "safe") return Colors.scoreExcellent;
   if (level === "caution") return Colors.scoreDecent;
   if (level === "dangerous") return Colors.scoreConcerning;
-  return Colors.textTertiary;
+  return theme.textSecondary;
 }
 
 function safetyLabel(level) {
@@ -407,12 +413,12 @@ function HistoryRow({ item, onPress, onCompare, compareSelected, theme, index })
               style={[
                 styles.safetyPill,
                 {
-                  backgroundColor: `${safetyColor(item.safetyLevel)}18`,
-                  borderColor: safetyColor(item.safetyLevel),
+                  backgroundColor: `${safetyColor(item.safetyLevel, theme)}18`,
+                  borderColor: safetyColor(item.safetyLevel, theme),
                 },
               ]}
             >
-              <Text style={[styles.safetyPillText, { color: safetyColor(item.safetyLevel) }]}>
+              <Text style={[styles.safetyPillText, { color: safetyColor(item.safetyLevel, theme) }]}>
                 {safetyLabel(item.safetyLevel).replace(" safety", "").replace(/^./, (letter) => letter.toUpperCase())}
               </Text>
             </View>
@@ -739,7 +745,7 @@ const HOME_FREE_SCAN_STATUS_SOURCE_SURFACE = "home_free_scan_status";
 const HOME_EMPTY_STATE_SOURCE_SURFACE = "home_empty_state";
 const LAST_HUMAN_FOOD_PET_KEY = "@woof/last_human_food_pet_type";
 
-export default function HomeScreen({ navigation }) {
+export default function HomeScreen({ navigation, route }) {
   const [history, setHistory] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [showPetPicker, setShowPetPicker] = useState(false);
@@ -758,6 +764,7 @@ export default function HomeScreen({ navigation }) {
   const { profile, canScan, isPro, remainingScans, updatePetProfile } = useAuth();
   const savedPetProfile = normalizePetProfile(profile?.pet_profile);
   const hasSavedPet = hasUsablePetProfile(savedPetProfile);
+  const devHistoryFixture = __DEV__ ? route.params?.devHistoryFixture : null;
 
   // Scan button press animation
   const scanScale = useSharedValue(1);
@@ -801,6 +808,11 @@ export default function HomeScreen({ navigation }) {
     setHistoryLoading(true);
 
     try {
+      if (__DEV__ && devHistoryFixture) {
+        setHistory(devHistoryFixture === "populated" ? DEV_QA_HISTORY : []);
+        setHistoryError(false);
+        return;
+      }
       // Add timeout to prevent infinite loading
       const timeoutMs = 8000;
       const timeout = new Promise((_, reject) =>
@@ -821,13 +833,13 @@ export default function HomeScreen({ navigation }) {
     } finally {
       setHistoryLoading(false);
     }
-  }, []);
+  }, [devHistoryFixture]);
 
   useFocusEffect(
     useCallback(() => {
       loadHistory();
-      checkContributionStatus();
-    }, [loadHistory, checkContributionStatus])
+      if (!devHistoryFixture) checkContributionStatus();
+    }, [loadHistory, checkContributionStatus, devHistoryFixture])
   );
 
   // Subscribe to background analysis completions for real-time history updates
@@ -895,7 +907,10 @@ export default function HomeScreen({ navigation }) {
       });
       return;
     }
-    navigation.navigate("Scanner", { mode: "label_lookup" });
+    navigation.navigate("Scanner", {
+      mode: "label_lookup",
+      ...navigationTimingParams(sourceSurface),
+    });
   };
 
   const handleIngredientCapture = async () => {
@@ -926,6 +941,7 @@ export default function HomeScreen({ navigation }) {
       mode: "ingredient_capture",
       sourceSurface: HOME_INGREDIENT_CAPTURE_SOURCE_SURFACE,
       catalogEvidenceConsent,
+      ...navigationTimingParams(HOME_INGREDIENT_CAPTURE_SOURCE_SURFACE),
     });
   };
 
@@ -961,6 +977,7 @@ export default function HomeScreen({ navigation }) {
         mode: "human_food",
         petType: savedPetProfile.petType,
         petName: savedPetProfile.name,
+        ...navigationTimingParams(sourceSurface),
       });
       return;
     }
@@ -1168,7 +1185,11 @@ export default function HomeScreen({ navigation }) {
     }
     setSaveHumanFoodPet(false);
     setHumanFoodPetName("");
-    navigation.navigate("Scanner", { mode: "human_food", petType });
+    navigation.navigate("Scanner", {
+      mode: "human_food",
+      petType,
+      ...navigationTimingParams(HOME_HUMAN_FOOD_CTA_ANALYTICS.source_surface),
+    });
   };
 
   const handleCompareClose = (closeReason = "dismissed") => {
@@ -1249,6 +1270,7 @@ export default function HomeScreen({ navigation }) {
             <BrandLogo size={36} />
             <Text style={[styles.title, { color: theme.textPrimary }]}>{BRAND_NAME}</Text>
           </View>
+          <View style={styles.headerActions}>
           <Pressable
             onPress={() => {
               Haptics.selectionAsync();
@@ -1269,10 +1291,28 @@ export default function HomeScreen({ navigation }) {
               )}
             </View>
           </Pressable>
+          </View>
         </View>
         <Text style={[styles.tagline, { color: theme.textTertiary }]}>
           {BRAND_TAGLINE}
         </Text>
+        {__DEV__ ? (
+          <Pressable
+            onPress={() => navigation.navigate("DevQA")}
+            style={({ pressed }) => [
+              styles.qaEntry,
+              {
+                backgroundColor: theme.surface,
+                borderColor: theme.separator,
+                opacity: pressed ? 0.6 : 1,
+              },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Open development QA fixtures"
+          >
+            <Text style={[styles.qaEntryText, { color: theme.textSecondary }]}>Development QA fixtures</Text>
+          </Pressable>
+        ) : null}
       </View>
 
       <Text style={[styles.actionEyebrow, { color: theme.textSecondary }]}>Pet food check</Text>
@@ -1719,6 +1759,24 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     letterSpacing: 0,
   },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  qaEntry: {
+    minHeight: 44,
+    marginTop: Spacing.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Spacing.cardRadius,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: Spacing.md,
+  },
+  qaEntryText: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
   profileButton: {
     width: 32,
     height: 32,
@@ -1989,7 +2047,8 @@ const styles = StyleSheet.create({
   historyRowInner: {
     flexDirection: "row",
     alignItems: "center",
-    height: Spacing.rowHeight,
+    minHeight: Spacing.rowHeight,
+    paddingVertical: 10,
   },
   historyThumb: {
     width: 44,

@@ -18,6 +18,7 @@ import Animated, {
   interpolate,
   Extrapolation,
   FadeInUp,
+  useReducedMotion,
 } from "react-native-reanimated";
 import { ChevronLeft, Share2, Utensils, X, AlertTriangle, CheckCircle2, AlertCircle, ShieldCheck, Calendar, PawPrint } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
@@ -93,6 +94,10 @@ import {
   normalizePetProfile,
   personalizePetSafety,
 } from "../../services/petProfile";
+import {
+  logCaptureToResult,
+  navigationTimingParams,
+} from "../../services/performanceTimings";
 
 const logger = createLogger("RESULTS");
 // Longer than the Edge Function timeout so server-side scan reversal can sync
@@ -297,6 +302,14 @@ export default function ResultsScreen({ route, navigation }) {
     historyEntryId,
     historyProductName,
     historyResultSnapshot,
+    captureStartedAt,
+    devFixtureResult,
+    devFixtureError,
+    devFixtureLoadingStatus,
+    devFixtureHoldStreaming,
+    devFixtureIsPro,
+    devPetProfile,
+    devPrompt,
   } = route.params;
   const isHumanFood = mode === "human_food" || scanMode === "human_food";
   const isIngredientCapture = mode === "ingredient_capture";
@@ -325,9 +338,10 @@ export default function ResultsScreen({ route, navigation }) {
     : result;
   const variantSummary = productVariantSummary(result, displayProductName);
   const { styles, theme } = useStyles();
+  const reduceMotion = useReducedMotion();
   const insets = useSafeAreaInsets();
   const {
-    isPro,
+    isPro: authenticatedIsPro,
     isAnonymous,
     user,
     incrementScanCount,
@@ -338,6 +352,10 @@ export default function ResultsScreen({ route, navigation }) {
     signInWithGoogle,
     profile,
   } = useAuth();
+  const isPro = authenticatedIsPro || (__DEV__ && devFixtureIsPro === true);
+  const isDevFixture = __DEV__ && Boolean(
+    devFixtureResult || devFixtureError || devFixtureLoadingStatus || devFixtureHoldStreaming
+  );
 
   // Reanimated scroll
   const scrollY = useSharedValue(0);
@@ -513,6 +531,28 @@ export default function ResultsScreen({ route, navigation }) {
     if (analysisStartedRef.current) return;
     analysisStartedRef.current = true;
     timerRef.current.start = Date.now();
+
+    if (__DEV__ && devFixtureLoadingStatus) {
+      setLoadingStatus(devFixtureLoadingStatus);
+      setStreaming(true);
+      setResult(null);
+      return;
+    }
+
+    if (__DEV__ && devFixtureError) {
+      setError(devFixtureError);
+      setStreaming(false);
+      setDone(true);
+      return;
+    }
+
+    if (__DEV__ && devFixtureResult) {
+      setResult(devFixtureResult);
+      setDataSource("verified");
+      setStreaming(devFixtureHoldStreaming === true);
+      setDone(devFixtureHoldStreaming !== true);
+      return;
+    }
 
     // History mode: simple cache lookup, no background service needed
     if (mode === "history") {
@@ -723,7 +763,7 @@ export default function ResultsScreen({ route, navigation }) {
       setStreaming(false);
       setDone(true);
     }
-  }, [analysisPreflightState, mode, barcode, base64, cacheKey, uri, petType, isHumanFood, isIngredientCapture, scanMode, catalogProduct, throttledSetResult, historyEntryId, historyProductName, historyResultSnapshot]);
+  }, [analysisPreflightState, mode, barcode, base64, cacheKey, uri, petType, isHumanFood, isIngredientCapture, scanMode, catalogProduct, throttledSetResult, historyEntryId, historyProductName, historyResultSnapshot, devFixtureError, devFixtureHoldStreaming, devFixtureLoadingStatus, devFixtureResult]);
 
   useEffect(() => {
     if (!isIngredientCapture || !done || error || !result || ingredientSubmissionRef.current) return;
@@ -891,6 +931,7 @@ export default function ResultsScreen({ route, navigation }) {
                       sourceSurface: "barcode_verification",
                       catalogEvidenceConsent,
                       verificationMessage: `Found ${resolvedName || "this product"} — scan its ingredient panel to verify.`,
+                      ...navigationTimingParams("barcode_verification"),
                     },
                   },
                 ],
@@ -907,6 +948,7 @@ export default function ResultsScreen({ route, navigation }) {
                 params: {
                   fallbackToPhoto: true,
                   failedBarcode: barcode || event.barcode || null,
+                  ...navigationTimingParams("barcode_not_found"),
                 },
               },
             ],
@@ -962,38 +1004,58 @@ export default function ResultsScreen({ route, navigation }) {
 
   const [isSlowLoading, setIsSlowLoading] = useState(false);
 
-  // Progressive loading messages + timeout
+  // Progressive loading messages + timeout. Keep visible feedback changing
+  // throughout long server work instead of leaving a static spinner.
   useEffect(() => {
     if (!streaming || done) return;
+    if (__DEV__ && devFixtureLoadingStatus) {
+      setLoadingStatus(devFixtureLoadingStatus);
+      return;
+    }
     setIsSlowLoading(false);
-    const timers = [
-      setTimeout(() => setLoadingStatus("Reading ingredients..."), 8000),
-      setTimeout(() => {
-        setLoadingStatus("Still analyzing — complex ingredients take longer...");
-        setIsSlowLoading(true);
-      }, 15000),
-      setTimeout(() => setLoadingStatus("Almost there..."), 25000),
-      // Hard timeout after the server has had a chance to return reversed usage
-      setTimeout(() => {
-        if (!done) {
-          logger.debug("[RESULTS] Analysis timeout — showing error");
-          setError("Analysis is taking too long. Please try again.");
-          setStreaming(false);
-          setDone(true);
-          trackEvent("scan_analysis_timeout", scanFailureProperties({
-            mode,
-            scan_mode: isHumanFood ? "human_food" : mode,
-            event: {
-              error: "Analysis is taking too long. Please try again.",
-              errorCode: "RESULT_ANALYSIS_TIMEOUT",
-              scanId: scanIdFromAnalysis(serviceKeyRef.current),
-            },
-          }));
-        }
-      }, RESULT_ANALYSIS_TIMEOUT_MS),
-    ];
-    return () => timers.forEach(clearTimeout);
-  }, [streaming, done]);
+    const messages = isHumanFood
+      ? [
+        "Identifying the food...",
+        "Checking pet safety guidance...",
+        "Reviewing portion and preparation...",
+        "Checking age guidance...",
+      ]
+      : [
+        "Reading exact ingredients...",
+        "Checking ingredient roles...",
+        "Calculating the quality score...",
+        "Checking your pet profile...",
+        "Preparing the verified breakdown...",
+      ];
+    let messageIndex = 0;
+    setLoadingStatus(messages[messageIndex]);
+    const messageInterval = setInterval(() => {
+      messageIndex += 1;
+      setLoadingStatus(messages[messageIndex % messages.length]);
+      if (messageIndex >= 7) setIsSlowLoading(true);
+    }, 1_800);
+    const timeout = setTimeout(() => {
+      if (!done) {
+        logger.debug("[RESULTS] Analysis timeout — showing error");
+        setError("Analysis is taking too long. Please try again.");
+        setStreaming(false);
+        setDone(true);
+        trackEvent("scan_analysis_timeout", scanFailureProperties({
+          mode,
+          scan_mode: isHumanFood ? "human_food" : mode,
+          event: {
+            error: "Analysis is taking too long. Please try again.",
+            errorCode: "RESULT_ANALYSIS_TIMEOUT",
+            scanId: scanIdFromAnalysis(serviceKeyRef.current),
+          },
+        }));
+      }
+    }, RESULT_ANALYSIS_TIMEOUT_MS);
+    return () => {
+      clearInterval(messageInterval);
+      clearTimeout(timeout);
+    };
+  }, [devFixtureLoadingStatus, done, isHumanFood, mode, streaming]);
 
   // Error haptic
   useEffect(() => {
@@ -1010,9 +1072,18 @@ export default function ResultsScreen({ route, navigation }) {
     logger.debug(`[TIMER] Full analysis complete: ${totalMs}ms (${totalSec}s)`);
   }, [done]);
 
+  useEffect(() => {
+    if (!done) return;
+    logCaptureToResult({
+      captureStartedAt,
+      mode: isHumanFood ? "human_food" : mode,
+      outcome: error ? "error" : "success",
+    });
+  }, [captureStartedAt, done, error, isHumanFood, mode]);
+
   // Increment scan count for free users when a new analysis completes
   useEffect(() => {
-    if (!done || error || !result || scanCounted || isPro || mode === "history") return;
+    if (!done || error || !result || scanCounted || isPro || isDevFixture || mode === "history") return;
     setScanCounted(true);
     try {
       incrementScanCount(scanUsage);
@@ -1026,11 +1097,11 @@ export default function ResultsScreen({ route, navigation }) {
     } catch (err) {
       logger.debug("[RESULTS] Error incrementing scan count:", err.message);
     }
-  }, [done, error, result, scanCounted, isPro, mode, incrementScanCount, scanUsage]);
+  }, [done, error, result, scanCounted, isPro, isDevFixture, mode, incrementScanCount, scanUsage]);
 
   // Sync server scan count on failures too, including reversed scans.
   useEffect(() => {
-    if (!done || !error || !scanUsage || scanCounted || isPro || mode === "history") return;
+    if (!done || !error || !scanUsage || scanCounted || isPro || isDevFixture || mode === "history") return;
     setScanCounted(true);
     try {
       incrementScanCount(scanUsage);
@@ -1045,7 +1116,7 @@ export default function ResultsScreen({ route, navigation }) {
     } catch (err) {
       logger.debug("[RESULTS] Error syncing failed scan count:", err.message);
     }
-  }, [done, error, scanUsage, scanCounted, isPro, mode, incrementScanCount, isHumanFood]);
+  }, [done, error, scanUsage, scanCounted, isPro, isDevFixture, mode, incrementScanCount, isHumanFood]);
 
   // History saving is now handled by analysisService on completion
 
@@ -1348,7 +1419,7 @@ export default function ResultsScreen({ route, navigation }) {
       index: 1,
       routes: [
         { name: "Home" },
-        { name: "Scanner", params },
+        { name: "Scanner", params: { ...params, ...navigationTimingParams("results_retry") } },
       ],
     });
   };
@@ -1395,6 +1466,10 @@ export default function ResultsScreen({ route, navigation }) {
   };
   const handleBack = () => {
     cancelRunningAnalysis("back_button");
+    if (__DEV__ && route.params?.devReturnToQa && navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
     if (mode === "catalog" && navigation.canGoBack()) {
       navigation.goBack();
       return;
@@ -1577,7 +1652,9 @@ export default function ResultsScreen({ route, navigation }) {
   );
   const identityImageUri = userPhotoWhileIdentifying ? uri : petFoodImageUri;
   const ingredientVerification = result?.ingredientVerification || {};
-  const savedPetProfile = normalizePetProfile(profile?.pet_profile);
+  const savedPetProfile = normalizePetProfile(
+    __DEV__ && devPetProfile ? devPetProfile : profile?.pet_profile
+  );
   const petSafety = !isHumanFood ? personalizePetSafety({ ...result, dataSource }, savedPetProfile) : null;
   const humanFoodPetName = routePetName || (
     savedPetProfile.petType === (petType || result?.petType)
@@ -1721,7 +1798,7 @@ export default function ResultsScreen({ route, navigation }) {
 
             {/* Food name */}
             {result.foodName ? (
-              <Animated.View entering={FadeInUp.delay(200).duration(400).damping(20).stiffness(300)}>
+              <Animated.View entering={reduceMotion ? undefined : FadeInUp.delay(200).duration(400).damping(20).stiffness(300)}>
                 <Text style={[styles.productName, { marginTop: 0, marginBottom: 4 }]} numberOfLines={2}>
                   {result.foodName}
                 </Text>
@@ -1807,7 +1884,7 @@ export default function ResultsScreen({ route, navigation }) {
                 <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
                   {result.toxicCompounds && result.toxicCompounds.length > 0 && result.toxicCompounds[0] !== "None" && (
                     result.toxicCompounds.map((c, i) => (
-                      <View key={`t${i}`} style={{ flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: Colors.recallBackground, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16 }}>
+                      <View key={`t${i}`} style={{ flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: theme.dangerSurface, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16 }}>
                         <AlertTriangle size={12} color={Colors.scoreConcerning} strokeWidth={2} />
                         <Text style={{ color: Colors.scoreConcerning, fontSize: 12, fontWeight: "600" }}>{c}</Text>
                       </View>
@@ -1842,7 +1919,7 @@ export default function ResultsScreen({ route, navigation }) {
             {/* Symptoms warning */}
             {done && result.symptoms && result.symptoms !== "N/A" ? (
               <StreamSection visible delay={350}>
-                <View style={{ backgroundColor: Colors.recallBackground, borderRadius: Spacing.cardRadius, padding: 16, marginTop: 12, borderLeftWidth: 3, borderLeftColor: Colors.scoreConcerning }}>
+                <View style={{ backgroundColor: theme.dangerSurface, borderRadius: Spacing.cardRadius, padding: 16, marginTop: 12, borderLeftWidth: 3, borderLeftColor: Colors.scoreConcerning }}>
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
                     <AlertCircle size={16} color={Colors.scoreConcerning} strokeWidth={2} />
                     <Text style={{ color: Colors.scoreConcerning, fontSize: 11, fontWeight: "700", letterSpacing: 0, textTransform: "uppercase" }}>
@@ -1943,52 +2020,21 @@ export default function ResultsScreen({ route, navigation }) {
               </View>
             ) : null}
 
-            {showProminentPetSafety ? (
-              <StreamSection visible delay={45}>
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "flex-start",
-                    gap: 12,
-                    padding: 16,
-                    marginTop: 12,
-                    borderRadius: Spacing.cardRadius,
-                    borderWidth: petSafety.level === "avoid" ? 2 : 1,
-                    borderColor: petSafetyColor,
-                    backgroundColor: petSafety.level === "avoid"
-                      ? "rgba(199,74,70,0.13)"
-                      : "rgba(216,148,28,0.10)",
-                  }}
-                  accessible
-                  accessibilityRole="alert"
-                  accessibilityLabel={`${petSafety.label}. ${petSafety.summary}`}
-                >
-                  <AlertTriangle size={24} color={petSafetyColor} strokeWidth={2.4} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: petSafetyColor, fontSize: 17, fontWeight: "800", marginBottom: 4 }}>
-                      {petSafety.level === "avoid" ? "DO NOT FEED" : "USE CAUTION"}
-                    </Text>
-                    <Text style={{ color: theme.textPrimary, fontSize: 16, fontWeight: "700", marginBottom: 4 }}>
-                      {petSafety.label}
-                    </Text>
-                    <Text style={{ color: theme.textSecondary, fontSize: 14, lineHeight: 20 }}>
-                      {petSafety.summary}
-                    </Text>
-                  </View>
-                </View>
-              </StreamSection>
-            ) : null}
-
             {/* 2. Score overview */}
             {hasScore ? (
               <StreamSection visible delay={50}>
                 <View
                   style={[
                     styles.scoreOverviewCard,
-                    { backgroundColor: theme.card, borderColor: theme.separator },
+                    {
+                      backgroundColor: theme.card,
+                      borderColor: petSafety?.personalized ? petSafetyColor : theme.separator,
+                      borderWidth: petSafety?.level === "avoid" && petSafety?.personalized ? 2 : 1,
+                    },
                   ]}
                   accessible
-                  accessibilityLabel={`Ingredient quality score ${result.overallScore} out of 100, ${scoreConfig.label}`}
+                  accessibilityRole={showProminentPetSafety ? "alert" : "summary"}
+                  accessibilityLabel={`Ingredient quality score ${result.overallScore} out of 100, ${scoreConfig.label}. ${petSafety?.label || "General ingredient check"}. ${petSafety?.summary || ""}`}
                 >
                   <CircularScore score={result.overallScore} size={132} strokeWidth={10} />
                   <View style={styles.scoreOverviewCopy}>
@@ -2001,8 +2047,62 @@ export default function ResultsScreen({ route, navigation }) {
                     <Text style={[styles.scoreOverviewText, { color: theme.textSecondary }]}>
                       {hasFullResultAccess
                         ? "Based on this formula’s exact ingredient list. Open the breakdown below to see what shaped it."
-                        : `Based on this formula’s exact ingredient list. Upgrade to see the full breakdown below.`}
+                        : "Based on this formula’s exact ingredient list. Upgrade to unlock the full quality breakdown and nutrition details."}
                     </Text>
+                    {petSafety?.personalized ? (
+                      <View
+                        style={[
+                          styles.petVerdictHero,
+                          {
+                            backgroundColor: petSafety.level === "avoid"
+                              ? theme.dangerSurface
+                              : petSafety.level === "caution"
+                                ? theme.cautionSurface
+                                : theme.successSurface,
+                            borderColor: petSafetyColor,
+                          },
+                        ]}
+                      >
+                        {petSafety.level === "safe" ? (
+                          <CheckCircle2 size={18} color={petSafetyColor} strokeWidth={2.4} />
+                        ) : (
+                          <AlertTriangle size={18} color={petSafetyColor} strokeWidth={2.4} />
+                        )}
+                        <View style={styles.petVerdictHeroCopy}>
+                          <Text style={[styles.petVerdictHeroEyebrow, { color: petSafetyColor }]}>
+                            {petSafety.level === "avoid" ? "AVOID FOR THIS PET" : petSafety.level === "caution" ? "CHECK FOR THIS PET" : "PET FIT"}
+                          </Text>
+                          <Text style={[styles.petVerdictHeroTitle, { color: theme.textPrimary }]}>
+                            {petSafety.label}
+                          </Text>
+                          <Text style={[styles.petVerdictHeroSummary, { color: theme.textSecondary }]}>
+                            {petSafety.summary}
+                          </Text>
+                        </View>
+                      </View>
+                    ) : (
+                      <Pressable
+                        onPress={() => navigation.navigate("Profile", {
+                          openPetEditor: true,
+                          returnAfterPetSave: true,
+                        })}
+                        style={({ pressed }) => [
+                          styles.petVerdictHero,
+                          {
+                            backgroundColor: theme.surface,
+                            borderColor: theme.separator,
+                            opacity: pressed ? 0.7 : 1,
+                          },
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel="Add pet details to personalize this result"
+                      >
+                        <PawPrint size={18} color={theme.textSecondary} strokeWidth={2.2} />
+                        <Text style={[styles.petVerdictHeroPrompt, { color: theme.textPrimary }]}>
+                          Add pet details for a personalized fit check
+                        </Text>
+                      </Pressable>
+                    )}
                   </View>
                 </View>
               </StreamSection>
@@ -2027,20 +2127,20 @@ export default function ResultsScreen({ route, navigation }) {
             </StreamSection>
 
             {/* 4. Verification and pet safety */}
-            <StreamSection visible={isIngredientCapture || !!ingredientVerification.status || !!petSafety} delay={150}>
+            <StreamSection visible={isIngredientCapture || !!ingredientVerification.status} delay={150}>
               <View style={{ backgroundColor: theme.card, borderRadius: Spacing.cardRadius, padding: 16, marginTop: 12, borderWidth: 1, borderColor: theme.separator }}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
                   <ShieldCheck size={18} color={petSafetyColor} strokeWidth={2.2} />
                   <Text style={{ color: theme.textPrimary, fontSize: 16, fontWeight: "700", flex: 1 }}>
                     {isIngredientCapture
                       ? ingredientSubmission.status === "submitted" ? "Submitted for catalog review" : "Scanned ingredients"
-                      : petSafety?.label || "Verified catalog result"}
+                      : "Verification details"}
                   </Text>
                 </View>
                 <Text style={{ color: theme.textSecondary, fontSize: 14, lineHeight: 20, marginBottom: 12 }}>
                   {isIngredientCapture
                     ? ingredientSubmissionCopy
-                    : petSafety?.summary || "Scored only from source-backed catalog ingredients and a verified product image."}
+                    : "Scored only from source-backed catalog ingredients for this exact formula."}
                 </Text>
                 {petSafety?.personalized ? (
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 12 }}>
@@ -2206,7 +2306,7 @@ export default function ResultsScreen({ route, navigation }) {
             )}
 
             {/* Post-scan upgrade prompt (once, after the third free scan) */}
-            {showPostScanPrompt && (
+            {(showPostScanPrompt || (__DEV__ && devPrompt === "post_scan")) && (
               <PostScanPrompt
                 onUpgrade={() => {
                   dismissPostScanPrompt();
@@ -2227,7 +2327,7 @@ export default function ResultsScreen({ route, navigation }) {
           </>
         )}
 
-        {showGuestSavePrompt && (
+        {(showGuestSavePrompt || (__DEV__ && devPrompt === "guest_save")) && (
           <GuestSavePrompt
             onSave={handleGuestSave}
             onDismiss={dismissGuestSavePrompt}
@@ -2237,9 +2337,9 @@ export default function ResultsScreen({ route, navigation }) {
         )}
       </Animated.ScrollView>
 
-      <FirstScanToast visible={!hasFullResultAccess && showFirstScanToast} />
+      <FirstScanToast visible={!hasFullResultAccess && (showFirstScanToast || (__DEV__ && devPrompt === "first_scan"))} />
 
-      {showReviewPrompt ? (
+      {(showReviewPrompt || (__DEV__ && devPrompt === "review")) ? (
         <View style={{ position: "absolute", left: 16, right: 16, bottom: Math.max(insets.bottom, 12) + 12, zIndex: 30 }}>
           <ReviewPrompt
             onVisible={handleReviewVisible}
@@ -2264,6 +2364,7 @@ export default function ResultsScreen({ route, navigation }) {
             humanFood={isHumanFood}
             petType={petType || result?.petType}
             petName={humanFoodPetName}
+            petSafety={petSafety}
           />
         </View>
       )}

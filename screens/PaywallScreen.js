@@ -17,6 +17,7 @@ import Animated, {
   withTiming,
   Easing,
   FadeIn,
+  useReducedMotion,
 } from "react-native-reanimated";
 import Svg, { Circle } from "react-native-svg";
 import { LinearGradient } from "expo-linear-gradient";
@@ -470,7 +471,7 @@ function TrialTimeline({ theme }) {
         <View style={[styles.timelineLineSegment, { borderColor: theme.fillSecondary }]} />
         <View style={styles.timelineStop}>
           <View style={[styles.timelineDot, { backgroundColor: theme.textTertiary }]} />
-          <Text style={[styles.timelineDotLabel, { color: theme.textPrimary }]}>Before billing</Text>
+          <Text style={[styles.timelineDotLabel, { color: theme.textPrimary }]}>Trial end</Text>
           <Text style={[styles.timelineDotSub, { color: theme.textTertiary }]}>Cancel anytime</Text>
         </View>
         <View style={[styles.timelineLineSegment, { borderColor: theme.fillSecondary }]} />
@@ -486,8 +487,10 @@ function TrialTimeline({ theme }) {
 
 export default function PaywallScreen({ route, navigation }) {
   const theme = useTheme();
+  const reduceMotion = useReducedMotion();
   const { refreshProStatus, isPro, user } = useAuth();
   const { source, productName, score } = route.params || {};
+  const devForceOfferingsError = __DEV__ && route.params?.devForceOfferingsError === true;
 
   const [offerings, setOfferings] = useState(null);
   const [offeringsLoaded, setOfferingsLoaded] = useState(false);
@@ -532,8 +535,8 @@ export default function PaywallScreen({ route, navigation }) {
   }));
 
   useEffect(() => {
-    contentOpacity.value = withTiming(1, { duration: 200 });
-  }, []);
+    contentOpacity.value = reduceMotion ? 1 : withTiming(1, { duration: 200 });
+  }, [reduceMotion]);
 
   useEffect(() => {
     let isActive = true;
@@ -543,6 +546,12 @@ export default function PaywallScreen({ route, navigation }) {
     logger.debug("[PAYWALL] viewed", { source, productName, score });
     const revenueCatConfig = getRevenueCatConfigStatus();
     (async () => {
+      if (devForceOfferingsError && offeringReloadKey === 0) {
+        setOfferings(null);
+        setOfferingsLoaded(true);
+        setOfferingsError(true);
+        return;
+      }
       const purchasesInitialized = user?.id
         ? await initializePurchases(user.id)
         : false;
@@ -683,7 +692,7 @@ export default function PaywallScreen({ route, navigation }) {
     return () => {
       isActive = false;
     };
-  }, [productName, score, source, user?.id, offeringReloadKey]);
+  }, [devForceOfferingsError, productName, score, source, user?.id, offeringReloadKey]);
 
   const weeklyPkg = getWeeklyPackage(offerings);
   const monthlyPkg = getMonthlyPackage(offerings);
@@ -859,10 +868,10 @@ export default function PaywallScreen({ route, navigation }) {
     logger.debug("[PAYWALL] purchase_started", { plan: selectedPlan.key });
     trackEvent("purchase_started", getPlanAnalytics());
     setPurchasing(true);
-    ctaWidthPercent.value = withTiming(18, { duration: 400, easing: Easing.out(Easing.cubic) });
+    ctaWidthPercent.value = reduceMotion ? 18 : withTiming(18, { duration: 400, easing: Easing.out(Easing.cubic) });
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const result = await purchasePackage(selectedPkg);
-    ctaWidthPercent.value = withTiming(100, { duration: 300, easing: Easing.out(Easing.cubic) });
+    ctaWidthPercent.value = reduceMotion ? 100 : withTiming(100, { duration: 300, easing: Easing.out(Easing.cubic) });
     const resultAnalytics = getRevenueCatResultAnalytics(result);
 
     if (result.success) {
@@ -1252,8 +1261,8 @@ export default function PaywallScreen({ route, navigation }) {
           ) : null}
           <Pressable
             onPress={handlePurchase}
-            onPressIn={() => { if (!purchaseDisabled) ctaScale.value = withSpring(0.97, { damping: 20, stiffness: 300 }); }}
-            onPressOut={() => { if (!purchaseDisabled) ctaScale.value = withSpring(1, { damping: 15, stiffness: 150 }); }}
+            onPressIn={() => { if (!purchaseDisabled) ctaScale.value = reduceMotion ? 1 : withSpring(0.97, { damping: 20, stiffness: 300 }); }}
+            onPressOut={() => { if (!purchaseDisabled) ctaScale.value = reduceMotion ? 1 : withSpring(1, { damping: 15, stiffness: 150 }); }}
             disabled={purchaseDisabled}
             accessibilityRole="button"
             accessibilityLabel={ctaText}
@@ -1276,14 +1285,14 @@ export default function PaywallScreen({ route, navigation }) {
               ]}
             >
               {purchasing || activatingPurchase ? (
-                <Animated.View key="loader" entering={FadeIn.duration(200)}>
+                <Animated.View key="loader" entering={reduceMotion ? undefined : FadeIn.duration(200)}>
                   <ActivityIndicator color={theme.buttonText} />
                 </Animated.View>
               ) : (
                 <Animated.Text
                   maxFontSizeMultiplier={MAX_FONT_SIZE_MULTIPLIER}
                   key="text"
-                  entering={FadeIn.duration(200)}
+                  entering={reduceMotion ? undefined : FadeIn.duration(200)}
                   style={[styles.ctaText, { color: theme.buttonText }]}
                   numberOfLines={1}
                 >

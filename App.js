@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, Component } from "react";
-import { ActivityIndicator, View, Pressable } from "react-native";
+import { ActivityIndicator, View, Pressable, LogBox } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { DefaultTheme, NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
@@ -16,6 +16,7 @@ import { SENTRY_DSN } from "./config/env";
 import { AppText as Text } from "./components/AppText";
 import { BRAND_NAME } from "./config/brand";
 import { BrandLogo } from "./components/BrandLogo";
+import { markColdStartInteractive } from "./services/performanceTimings";
 
 import OnboardingScreen, { ONBOARDING_KEY } from "./screens/OnboardingScreen";
 import AuthScreen from "./screens/AuthScreen";
@@ -26,12 +27,19 @@ import ResultsScreen from "./screens/ResultsScreen";
 import ProfileScreen from "./screens/ProfileScreen";
 import PaywallScreen from "./screens/PaywallScreen";
 import WebViewScreen from "./screens/WebViewScreen";
+import DevQAScreen from "./screens/DevQAScreen";
 
 const logger = createLogger("APP");
 const expoConfig = Constants.expoConfig || {};
 const appVersion = expoConfig.version || Constants.nativeAppVersion || "unknown";
 const nativeBuildVersion = Constants.nativeBuildVersion || "unknown";
 const sentryEnabled = typeof SENTRY_DSN === "string" && /^https?:\/\//i.test(SENTRY_DSN);
+
+if (__DEV__) {
+  // The native SDK reports unavailable local StoreKit offerings as a console
+  // error. Keep it in runtime logs, but do not let LogBox cover simulator QA.
+  LogBox.ignoreLogs(["[RevenueCat]"]);
+}
 
 function redactDiagnosticString(value) {
   return String(value || "")
@@ -179,7 +187,7 @@ function getDevPaywallPreviewSource() {
   return DEV_PAYWALL_PREVIEW_SOURCES.has(requested) ? requested : "profile";
 }
 
-function AppNavigator({ initialRouteName = "Home", onInitialRouteConsumed, devPaywallPreviewSource = null }) {
+function AppNavigator({ initialRouteName = "Home", initialRouteParams = null, onInitialRouteConsumed, devPaywallPreviewSource = null }) {
   const theme = useTheme();
   const { user, loading } = useAuth();
 
@@ -188,6 +196,12 @@ function AppNavigator({ initialRouteName = "Home", onInitialRouteConsumed, devPa
       onInitialRouteConsumed?.();
     }
   }, [loading, user, initialRouteName, onInitialRouteConsumed]);
+
+  useEffect(() => {
+    if (!loading) {
+      markColdStartInteractive(user ? initialRouteName.toLowerCase() : "auth");
+    }
+  }, [initialRouteName, loading, user]);
 
   if (devPaywallPreviewSource) {
     return (
@@ -273,7 +287,9 @@ function AppNavigator({ initialRouteName = "Home", onInitialRouteConsumed, devPa
         <Stack.Screen
           name="Scanner"
           component={ScannerScreen}
-          initialParams={initialRouteName === "Scanner" ? { mode: "label_lookup" } : undefined}
+          initialParams={initialRouteName === "Scanner"
+            ? { mode: "label_lookup", ...(initialRouteParams || {}) }
+            : undefined}
           options={{ title: `${BRAND_NAME} Scanner` }}
         />
         <Stack.Screen name="Results" component={ResultsScreen} />
@@ -288,6 +304,7 @@ function AppNavigator({ initialRouteName = "Home", onInitialRouteConsumed, devPa
           }}
         />
         <Stack.Screen name="WebView" component={WebViewScreen} />
+        {__DEV__ ? <Stack.Screen name="DevQA" component={DevQAScreen} /> : null}
       </Stack.Navigator>
     </NavigationContainer>
   );
@@ -298,6 +315,7 @@ function App() {
   const [isReady, setIsReady] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [initialRouteName, setInitialRouteName] = useState("Home");
+  const [initialRouteParams, setInitialRouteParams] = useState(null);
   const devPaywallPreviewSource = getDevPaywallPreviewSource();
 
   useEffect(() => {
@@ -320,13 +338,15 @@ function App() {
       });
   }, []);
 
-  const handleOnboardingComplete = useCallback(({ nextRoute = "Home" } = {}) => {
+  const handleOnboardingComplete = useCallback(({ nextRoute = "Home", routeParams = null } = {}) => {
     setInitialRouteName(nextRoute);
+    setInitialRouteParams(routeParams);
     setShowOnboarding(false);
   }, []);
 
   const handleInitialRouteConsumed = useCallback(() => {
     setInitialRouteName("Home");
+    setInitialRouteParams(null);
   }, []);
 
   // Keep the first painted frame branded while onboarding state loads.
@@ -352,6 +372,7 @@ function App() {
           ) : (
             <AppNavigator
               initialRouteName={initialRouteName}
+              initialRouteParams={initialRouteParams}
               onInitialRouteConsumed={handleInitialRouteConsumed}
               devPaywallPreviewSource={devPaywallPreviewSource}
             />

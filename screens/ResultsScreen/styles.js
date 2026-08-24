@@ -377,6 +377,43 @@ export function createStyles(theme) {
       fontWeight: "400",
       lineHeight: 18,
     },
+    petVerdictHero: {
+      minHeight: 54,
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 8,
+      borderRadius: 10,
+      borderWidth: 1,
+      padding: 10,
+      marginTop: 10,
+    },
+    petVerdictHeroCopy: {
+      flex: 1,
+      minWidth: 0,
+    },
+    petVerdictHeroEyebrow: {
+      fontSize: 9,
+      fontWeight: "800",
+      letterSpacing: 0,
+      marginBottom: 2,
+    },
+    petVerdictHeroTitle: {
+      fontSize: 13,
+      fontWeight: "700",
+      lineHeight: 17,
+    },
+    petVerdictHeroSummary: {
+      fontSize: 11,
+      fontWeight: "400",
+      lineHeight: 15,
+      marginTop: 3,
+    },
+    petVerdictHeroPrompt: {
+      flex: 1,
+      fontSize: 12,
+      fontWeight: "700",
+      lineHeight: 17,
+    },
 
     // --- Quick Stats 2x2 Grid ---
     statsGrid: {

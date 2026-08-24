@@ -5,7 +5,7 @@
     "version": "1.2.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "scheme": "woof",
     "runtimeVersion": {
       "policy": "appVersion"
@@ -16,7 +16,7 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#FAFAFA"
+      "backgroundColor": "#F7F7F4"
     },
     "ios": {
       "supportsTablet": true,
@@ -46,7 +46,7 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#FFFFFF",
+          "backgroundColor": "#F7F7F4",
           "image": "./assets/splash-icon.png",
           "imageWidth": 200
         }
