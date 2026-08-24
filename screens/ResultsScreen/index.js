@@ -37,8 +37,11 @@ import { buildVerifiedPetFoodAnalysis } from "../../services/verifiedScoring";
 import { useAuth } from "../../services/auth";
 import { trackEvent } from "../../services/analytics";
 import { submitCatalogIngredientCapture } from "../../services/catalogCoverage";
+import { requestCatalogEvidenceConsent } from "../../services/catalogEvidenceConsent";
+import { savePendingCatalogContribution } from "../../services/catalogContributions";
 import { createLogger } from "../../services/logger";
 import { WOOF_SHARE_URL } from "../../config/env";
+import { BRAND_NAME } from "../../config/brand";
 import {
   hasSeenGuestSavePrompt,
   markGuestSavePromptSeen,
@@ -80,7 +83,9 @@ import {
 } from "./components";
 import { useStyles } from "./styles";
 import {
+  acknowledgeReviewComplete,
   dismissReviewPrompt,
+  markReviewPromptVisible,
   maybeShowReviewPrompt,
   openStoreReview,
 } from "../../services/reviewPrompt";
@@ -110,9 +115,30 @@ function shareUrlDisplay(value) {
 
 function titleCaseStatus(value) {
   return String(value || "")
+    .toLowerCase()
     .replace(/_/g, " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase())
     .trim();
+}
+
+const DISPLAY_VALUE_LABELS = {
+  ai: "AI-assisted",
+  verified: "Verified catalog",
+  catalog: "Verified catalog",
+  manufacturer: "Manufacturer",
+  manufacturer_current_exact: "Current manufacturer formula",
+  retailer_web_version: "Exact retailer package version",
+  web_label_version: "Exact package-label version",
+  ready: "Verified",
+  verified_ready: "Verified",
+  verified_ingredients: "Verified ingredients",
+  user_submission: "User submission",
+  pending_review: "Pending review",
+};
+
+function displayValueLabel(value, fallback = "") {
+  const key = String(value || "").trim().toLowerCase();
+  return DISPLAY_VALUE_LABELS[key] || (key ? titleCaseStatus(key) : fallback);
 }
 
 function dateDisplay(value) {
@@ -142,6 +168,16 @@ function shareWasDismissed(result = {}) {
   return result?.action === Share.dismissedAction;
 }
 
+function hasMeaningfulAnalysisResult(result) {
+  if (!result || typeof result !== "object") return false;
+  return Boolean(
+    result.productName
+    || result.foodName
+    || result.overallScore != null
+    || result.safetyLevel
+  );
+}
+
 function scanFailureCategory({ errorCode, errorStatus, message } = {}) {
   const code = String(errorCode || "").toUpperCase();
   const text = String(message || "").toLowerCase();
@@ -153,7 +189,7 @@ function scanFailureCategory({ errorCode, errorStatus, message } = {}) {
   if (errorStatus === 413 || text.includes("too large")) return "payload_size";
   if (errorStatus === 429 || text.includes("rate limit")) return "rate_limit";
   if (errorStatus >= 500) return "backend";
-  if (code === "ANALYSIS_RESULT_ERROR" || text.includes("missing") || text.includes("invalid") || text.includes("parse")) return "ai_validation";
+  if (code === "ANALYSIS_RESULT_ERROR" || code === "EMPTY_ANALYSIS_RESULT" || text.includes("missing") || text.includes("invalid") || text.includes("parse")) return "ai_validation";
   if (text.includes("network") || text.includes("fetch") || text.includes("offline")) return "network";
   return "unknown";
 }
@@ -203,12 +239,27 @@ function productVariantSummary(result = {}, productName = "") {
   const product = result || {};
   const normalizedName = String(productName || "").toLowerCase();
   const seen = new Set();
+  const rawPackageSizes = [
+    ...(Array.isArray(product.availablePackageSizes) ? product.availablePackageSizes : []),
+    product.packageSize,
+  ].map((value) => String(value || "").trim()).filter(Boolean);
+  const packageSizes = rawPackageSizes.flatMap((value) => {
+    if (!value.includes(",")) return [value];
+    const parts = value.split(",").map((part) => part.trim()).filter(Boolean);
+    return parts.length > 1 && parts.every((part) => (
+      /^\d+(?:\.\d+)?(?:\s*(?:lb|lbs|oz|kg|g|ct|count))?$/i.test(part)
+    )) ? parts : [value];
+  }).filter((value, index, values) => (
+    values.findIndex((candidate) => candidate.toLowerCase() === value.toLowerCase()) === index
+  ));
+  const packageSize = packageSizes.length > 1 ? "Multiple sizes" : packageSizes[0];
+
   return [
     product.productLine,
     product.flavor,
     product.lifeStage,
     product.foodForm,
-    product.packageSize,
+    packageSize,
   ]
     .map((value) => String(value || "").trim())
     .filter((value) => value && value.toLowerCase() !== "other")
@@ -219,6 +270,11 @@ function productVariantSummary(result = {}, productName = "") {
       seen.add(key);
       return true;
     })
+    .map((value) => (
+      value === "Multiple sizes"
+        ? value
+        : value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase())
+    ))
     .join(" • ");
 }
 
@@ -237,6 +293,7 @@ export default function ResultsScreen({ route, navigation }) {
     candidateProduct,
     labelIdentification,
     sourceSurface,
+    catalogEvidenceConsent,
     historyEntryId,
     historyProductName,
     historyResultSnapshot,
@@ -255,6 +312,13 @@ export default function ResultsScreen({ route, navigation }) {
   const [scanCounted, setScanCounted] = useState(false);
   const [scanUsage, setScanUsage] = useState(null);
   const [scanLimitReached, setScanLimitReached] = useState(false);
+  const [ingredientSubmission, setIngredientSubmission] = useState({ status: "idle", reason: null });
+  const reusableResultKey = mode === "barcode"
+    ? barcode
+    : mode === "catalog" ? catalogProduct?.cacheKey : null;
+  const [analysisPreflightState, setAnalysisPreflightState] = useState(
+    reusableResultKey ? "checking" : "ready"
+  );
   const displayProductName = String(opffData?.productName || result?.productName || "").trim();
   const displayResult = result && displayProductName
     ? { ...result, productName: displayProductName }
@@ -267,6 +331,7 @@ export default function ResultsScreen({ route, navigation }) {
     isAnonymous,
     user,
     incrementScanCount,
+    canScan,
     remainingScans,
     refreshProStatus,
     signInWithApple,
@@ -289,7 +354,7 @@ export default function ResultsScreen({ route, navigation }) {
 
   const headerBorderStyle = useAnimatedStyle(() => ({
     borderBottomWidth: interpolate(scrollY.value, [200, 260], [0, 0.5], Extrapolation.CLAMP),
-    borderBottomColor: Colors.divider,
+    borderBottomColor: theme.separator,
   }));
 
   const miniBadgeStyle = useAnimatedStyle(() => ({
@@ -380,7 +445,7 @@ export default function ResultsScreen({ route, navigation }) {
     timerRef.current.start = Date.now();
     serviceKeyRef.current = key;
     const retryScanId = scanIdFromAnalysis(key);
-    setResult({});
+    setResult(null);
     trackEvent("scan_limit_recovery_retried", {
       mode,
       scan_mode: isHumanFood ? "human_food" : mode,
@@ -399,6 +464,52 @@ export default function ResultsScreen({ route, navigation }) {
   }, [mode, isHumanFood, refreshProStatus, base64, barcode, uri, petType, catalogProduct]);
 
   useEffect(() => {
+    if (analysisPreflightState !== "checking" || !reusableResultKey) return;
+    let active = true;
+    analysisService.getLocalResult(reusableResultKey).then((saved) => {
+      if (!active) return;
+      if (!hasMeaningfulAnalysisResult(saved?.analysis)) {
+        setAnalysisPreflightState("ready");
+        return;
+      }
+      Alert.alert(
+        "You scanned this before",
+        "View the saved result for free, or scan it again to refresh the analysis.",
+        [
+          {
+            text: "View Saved Result",
+            onPress: () => {
+              setResult(saved.analysis);
+              setDataSource(saved.dataSource || "verified");
+              if (saved.opffData) setOpffData(saved.opffData);
+              setFromCache(true);
+              setScanCounted(true);
+              setStreaming(false);
+              setDone(true);
+              setAnalysisPreflightState("viewed");
+              trackEvent("saved_result_viewed_before_rescan", {
+                mode,
+                scan_mode: mode,
+              });
+            },
+          },
+          {
+            text: "Scan Again",
+            onPress: () => setAnalysisPreflightState("ready"),
+          },
+        ],
+        { cancelable: false }
+      );
+    }).catch(() => {
+      if (active) setAnalysisPreflightState("ready");
+    });
+    return () => {
+      active = false;
+    };
+  }, [analysisPreflightState, mode, reusableResultKey]);
+
+  useEffect(() => {
+    if (analysisPreflightState !== "ready") return;
     if (analysisStartedRef.current) return;
     analysisStartedRef.current = true;
     timerRef.current.start = Date.now();
@@ -432,6 +543,12 @@ export default function ResultsScreen({ route, navigation }) {
       }
 
       if (active && active.status === "complete") {
+        if (!hasMeaningfulAnalysisResult(active.result)) {
+          setResult(null);
+          setError("Analysis finished without a usable result. Please try again.");
+          setDone(true);
+          return;
+        }
         setResult(active.result);
         setDataSource(active.dataSource);
         if (active.opffData) setOpffData(active.opffData);
@@ -551,7 +668,7 @@ export default function ResultsScreen({ route, navigation }) {
             : (isIngredientCapture ? "Reading ingredients..." : "Analyzing product...")))
     );
     setStreaming(true);
-    setResult({});
+    setResult(null);
 
     const key = analysisService.startAnalysis({ mode, base64, barcode, uri, petType, catalogProduct });
     serviceKeyRef.current = key;
@@ -583,6 +700,22 @@ export default function ResultsScreen({ route, navigation }) {
     // If service already had a completed result (re-scan dedup), apply immediately
     const existing = analysisService.getAnalysis(key);
     if (existing?.status === "complete") {
+      if (!hasMeaningfulAnalysisResult(existing.result)) {
+        setResult(null);
+        setError("Analysis finished without a usable result. Please try again.");
+        setStreaming(false);
+        setDone(true);
+        trackEvent("scan_analysis_failed", scanFailureProperties({
+          mode,
+          scan_mode: isHumanFood ? "human_food" : mode,
+          event: {
+            error: "Analysis finished without a usable result. Please try again.",
+            errorCode: "EMPTY_ANALYSIS_RESULT",
+            scanId: existing.scanId || null,
+          },
+        }));
+        return;
+      }
       setResult(existing.result);
       setDataSource(existing.dataSource);
       if (existing.opffData) setOpffData(existing.opffData);
@@ -590,12 +723,13 @@ export default function ResultsScreen({ route, navigation }) {
       setStreaming(false);
       setDone(true);
     }
-  }, [mode, barcode, base64, cacheKey, uri, petType, isHumanFood, isIngredientCapture, scanMode, catalogProduct, throttledSetResult, historyEntryId, historyProductName, historyResultSnapshot]);
+  }, [analysisPreflightState, mode, barcode, base64, cacheKey, uri, petType, isHumanFood, isIngredientCapture, scanMode, catalogProduct, throttledSetResult, historyEntryId, historyProductName, historyResultSnapshot]);
 
   useEffect(() => {
     if (!isIngredientCapture || !done || error || !result || ingredientSubmissionRef.current) return;
     ingredientSubmissionRef.current = true;
     const scanId = scanIdFromAnalysis(serviceKeyRef.current);
+    setIngredientSubmission({ status: "submitting", reason: null });
 
     submitCatalogIngredientCapture({
       analysis: result,
@@ -605,9 +739,34 @@ export default function ResultsScreen({ route, navigation }) {
       source: "ingredient_capture_result",
       sourceSurface,
       scanId,
+      userConsent: catalogEvidenceConsent === true,
     }).then((submission) => {
       if (submission?.reason === "not_authenticated") {
         setShowGuestSavePrompt(true);
+      }
+      const submissionStatus = submission?.submitted === true
+        ? "submitted"
+        : submission?.reason === "explicit_consent_required"
+          ? "private"
+          : "failed";
+      setIngredientSubmission({
+        status: submissionStatus,
+        reason: submission?.reason || null,
+      });
+      if (submission?.submitted === true) {
+        savePendingCatalogContribution({
+          productName: candidateProduct?.productName || result?.productName || acquisitionQuery,
+          brand: candidateProduct?.brand || result?.brand,
+          petType: candidateProduct?.petType || result?.petType || petType,
+          cacheKey: candidateProduct?.cacheKey || cacheKey,
+          gtin: candidateProduct?.gtin || candidateProduct?.barcode || barcode,
+        }).catch(() => {});
+      }
+      if (submission?.reason === "rpc_error") {
+        Alert.alert(
+          "Submission not sent",
+          `Your scan was scored, but ${BRAND_NAME} couldn't send it to the catalog review queue. Your result remains private on this device.`
+        );
       }
       trackEvent("catalog_ingredient_capture_submitted", {
         submitted: submission?.submitted === true,
@@ -618,6 +777,7 @@ export default function ResultsScreen({ route, navigation }) {
         ingredient_count: Array.isArray(result?.ingredients) ? result.ingredients.length : 0,
       });
     }).catch((err) => {
+      setIngredientSubmission({ status: "failed", reason: "unexpected_error" });
       trackEvent("catalog_ingredient_capture_submit_failed", {
         message: err.message,
         scan_id: scanId,
@@ -632,6 +792,10 @@ export default function ResultsScreen({ route, navigation }) {
     candidateProduct,
     labelIdentification,
     sourceSurface,
+    catalogEvidenceConsent,
+    petType,
+    cacheKey,
+    barcode,
   ]);
 
   // Subscribe to service events
@@ -649,6 +813,22 @@ export default function ResultsScreen({ route, navigation }) {
         throttledSetResult(event.result);
         if (event.opffData) setOpffData(event.opffData);
       } else if (event.type === "complete") {
+        if (!hasMeaningfulAnalysisResult(event.result)) {
+          setResult(null);
+          setError("Analysis finished without a usable result. Please try again.");
+          setStreaming(false);
+          setDone(true);
+          trackEvent("scan_analysis_failed", scanFailureProperties({
+            mode,
+            scan_mode: isHumanFood ? "human_food" : mode,
+            event: {
+              ...event,
+              error: "Analysis finished without a usable result. Please try again.",
+              errorCode: "EMPTY_ANALYSIS_RESULT",
+            },
+          }));
+          return;
+        }
         setResult(event.result);
         setDataSource(event.dataSource);
         if (event.opffData) setOpffData(event.opffData);
@@ -687,11 +867,48 @@ export default function ResultsScreen({ route, navigation }) {
           brand_present: !!event.brand,
         });
         redirectTimerRef.current = setTimeout(() => {
+          if (needsVerification) {
+            requestCatalogEvidenceConsent().then((catalogEvidenceConsent) => {
+              if (catalogEvidenceConsent == null) {
+                navigation.reset({ index: 0, routes: [{ name: "Home" }] });
+                return;
+              }
+              const resolvedName = [event.brand, event.productName].filter(Boolean).join(" ").trim();
+              navigation.reset({
+                index: 1,
+                routes: [
+                  { name: "Home" },
+                  {
+                    name: "Scanner",
+                    params: {
+                      mode: "ingredient_capture",
+                      acquisitionQuery: resolvedName,
+                      candidateProduct: {
+                        productName: event.productName || resolvedName,
+                        brand: event.brand || null,
+                        gtin: event.barcode || barcode || null,
+                      },
+                      sourceSurface: "barcode_verification",
+                      catalogEvidenceConsent,
+                      verificationMessage: `Found ${resolvedName || "this product"} — scan its ingredient panel to verify.`,
+                    },
+                  },
+                ],
+              });
+            });
+            return;
+          }
           navigation.reset({
             index: 1,
             routes: [
               { name: "Home" },
-              { name: "Scanner", params: { fallbackToPhoto: true } },
+              {
+                name: "Scanner",
+                params: {
+                  fallbackToPhoto: true,
+                  failedBarcode: barcode || event.barcode || null,
+                },
+              },
             ],
           });
         }, 1500);
@@ -836,14 +1053,10 @@ export default function ResultsScreen({ route, navigation }) {
   const [selectedIngredient, setSelectedIngredient] = useState(null);
   const [showPostScanPrompt, setShowPostScanPrompt] = useState(false);
   const [showReviewPrompt, setShowReviewPrompt] = useState(false);
+  const [reviewPromptEligibility, setReviewPromptEligibility] = useState(null);
   const [showGuestSavePrompt, setShowGuestSavePrompt] = useState(false);
   const [savingGuestProvider, setSavingGuestProvider] = useState(null);
-  const hasCompletedResultForPrompt = Boolean(
-    result?.overallScore != null ||
-    result?.safetyLevel ||
-    result?.foodName ||
-    result?.productName
-  );
+  const hasCompletedResultForPrompt = hasMeaningfulAnalysisResult(result);
 
   // First scan toast (one-time celebratory message)
   const [showFirstScanToast, setShowFirstScanToast] = useState(false);
@@ -859,11 +1072,12 @@ export default function ResultsScreen({ route, navigation }) {
     return () => { clearTimeout(showTimer); clearTimeout(hideTimer); };
   }, [done, isPro, mode, result?.overallScore, user?.id]);
 
-  // Check if post-scan prompt should show (once, after 2+ scans, free users only)
+  // The upgrade card appears only after the third free scan so it does not
+  // compete with the first-use guidance.
   useEffect(() => {
     if (!done || isPro || mode === "history") return;
     const scansUsed = 3 - remainingScans();
-    if (scansUsed < 2) return;
+    if (scansUsed < 3) return;
     hasSeenPostScanPrompt(user?.id || null).then((seen) => {
       if (!seen) {
         setShowPostScanPrompt(true);
@@ -914,7 +1128,7 @@ export default function ResultsScreen({ route, navigation }) {
           });
         })
         .catch(() => {});
-    }, 700);
+    }, 5000);
 
     return () => {
       cancelled = true;
@@ -1039,6 +1253,7 @@ export default function ResultsScreen({ route, navigation }) {
       maybeShowReviewPrompt(reviewContext())
         .then((eligibility) => {
           if (!cancelled && eligibility.show) {
+            setReviewPromptEligibility(eligibility);
             setShowReviewPrompt(true);
           }
         })
@@ -1067,15 +1282,26 @@ export default function ResultsScreen({ route, navigation }) {
     dismissReviewPrompt(reviewContext());
   };
 
+  const handleReviewVisible = useCallback(() => {
+    if (!reviewPromptEligibility) return;
+    markReviewPromptVisible(reviewContext(), reviewPromptEligibility).catch(() => {});
+    setReviewPromptEligibility(null);
+  }, [reviewContext, reviewPromptEligibility]);
+
   const handleReviewRate = async () => {
     setShowReviewPrompt(false);
     const opened = await openStoreReview(reviewContext());
     if (!opened) {
       Alert.alert(
         "Could Not Open App Store",
-        "Ratings are available from the App Store version of Woof. Please try again later."
+        `Ratings are available from the App Store version of ${BRAND_NAME}. Please try again later.`
       );
     }
+  };
+
+  const handleReviewAlreadyCompleted = async () => {
+    setShowReviewPrompt(false);
+    await acknowledgeReviewComplete(reviewContext());
   };
 
   const handleScanAnother = () => {
@@ -1102,6 +1328,21 @@ export default function ResultsScreen({ route, navigation }) {
     resetToScanner({ mode: "label_lookup" });
   };
 
+  const handleHistorySearch = () => {
+    const query = String(historyProductName || "").trim();
+    trackEvent("history_result_search_tapped", {
+      query_present: !!query,
+      scan_mode: scanMode || "pet_food",
+    });
+    navigation.reset({
+      index: 1,
+      routes: [
+        { name: "Home" },
+        { name: "ProductSearch", params: { initialQuery: query, sourceSurface: "history_recovery" } },
+      ],
+    });
+  };
+
   const resetToScanner = (params = {}) => {
     navigation.reset({
       index: 1,
@@ -1119,6 +1360,15 @@ export default function ResultsScreen({ route, navigation }) {
       pet_type: petType,
     });
 
+    if (!canScan()) {
+      trackEvent("scan_retry_blocked_by_limit", {
+        mode,
+        scan_mode: isHumanFood ? "human_food" : mode,
+      });
+      navigatePaywall("scan_limit");
+      return;
+    }
+
     if (isHumanFood) {
       resetToScanner({ mode: "human_food", petType });
       return;
@@ -1131,6 +1381,7 @@ export default function ResultsScreen({ route, navigation }) {
         candidateProduct,
         labelIdentification,
         sourceSurface,
+        catalogEvidenceConsent,
       });
       return;
     }
@@ -1159,12 +1410,15 @@ export default function ResultsScreen({ route, navigation }) {
   }, [navigation, cancelRunningAnalysis]);
 
   const handleShare = async () => {
-    if (!displayProductName || !result?.overallScore) return;
+    const shareDisplayName = isHumanFood
+      ? String(result?.foodName || result?.productName || "Food safety check").trim()
+      : displayProductName;
+    if (!shareDisplayName || (!isHumanFood && !result?.overallScore) || (isHumanFood && !result?.safetyLevel)) return;
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const shareUrl = typeof WOOF_SHARE_URL === "string" ? WOOF_SHARE_URL.trim() : "";
     const shareProperties = {
-      score: result.overallScore,
+      score: result.overallScore ?? null,
       is_pro: isPro,
       scan_mode: mode,
       data_source: dataSource,
@@ -1172,16 +1426,18 @@ export default function ResultsScreen({ route, navigation }) {
       share_url_host: shareUrlHost(shareUrl),
     };
     trackEvent("share_started", shareProperties);
-    const config = getScoreConfig(result.overallScore);
-    const cleanName = displayProductName
+    const config = !isHumanFood ? getScoreConfig(result.overallScore) : null;
+    const cleanName = shareDisplayName
       .replace(/[^a-zA-Z0-9\s]/g, "")
       .replace(/\s+/g, "-")
       .substring(0, 30)
       .toLowerCase();
-    const desiredName = `Woof-${cleanName}-${result.overallScore}`;
+    const desiredName = `${BRAND_NAME}-${cleanName}-${isHumanFood ? result.safetyLevel : result.overallScore}`;
     const shareMessage = [
-      `${displayProductName} scored ${result.overallScore}/100 (${config.label}) on Woof!`,
-      shareUrl ? `Scan your pet food with Woof: ${shareUrl}` : null,
+      isHumanFood
+        ? `${shareDisplayName}: ${String(result.safetyLevel).toUpperCase()} for ${humanFoodPetName || petType || "my pet"} on ${BRAND_NAME}.`
+        : `${shareDisplayName} scored ${result.overallScore}/100 (${config.label}) on ${BRAND_NAME}!`,
+      shareUrl ? `Check pet food and everyday foods with ${BRAND_NAME}: ${shareUrl}` : null,
     ].filter(Boolean).join("\n\n");
     try {
       const tmpUri = await captureRef(shareCardRef, {
@@ -1206,7 +1462,9 @@ export default function ResultsScreen({ route, navigation }) {
       } else {
         await Sharing.shareAsync(cleanUri, {
           mimeType: "image/png",
-          dialogTitle: `Woof Score: ${result.overallScore}/100`,
+          dialogTitle: isHumanFood
+            ? `${BRAND_NAME} Food Safety: ${String(result.safetyLevel).toUpperCase()}`
+            : `${BRAND_NAME} Score: ${result.overallScore}/100`,
         });
         trackEvent("share_completed", { ...shareProperties, method: "image" });
       }
@@ -1292,7 +1550,10 @@ export default function ResultsScreen({ route, navigation }) {
           onScanAnother={mode === "history"
             ? handleHistoryRecovery
             : (mode === "barcode" ? handleTakePhoto : handleScanAnother)}
+          onHistorySearch={mode === "history" && !isHumanFood ? handleHistorySearch : undefined}
+          historyProductName={historyProductName}
           historyScanMode={scanMode}
+          scanReversed={scanUsage?.reversed === true}
         />
       </View>
     );
@@ -1302,14 +1563,22 @@ export default function ResultsScreen({ route, navigation }) {
 
   // --- Derived data ---
   const hasScore = result?.overallScore != null;
+  const hasShareableResult = done && (hasScore || (isHumanFood && !!result?.safetyLevel));
   const { nutritionAnalysis, categories } = result || {};
   const hasGuaranteedAnalysis = nutritionAnalysis?.hasPublishedNutrients === true;
   const remainingScanCount = remainingScans();
   const hasFullResultAccess = isPro || !Number.isFinite(remainingScanCount);
   const petFoodImageUri = !isHumanFood ? productImageUri({ result, opffData, uri }) : null;
+  const userPhotoWhileIdentifying = Boolean(
+    streaming
+    && !displayProductName
+    && uri
+    && (mode === "photo" || isIngredientCapture)
+  );
+  const identityImageUri = userPhotoWhileIdentifying ? uri : petFoodImageUri;
   const ingredientVerification = result?.ingredientVerification || {};
   const savedPetProfile = normalizePetProfile(profile?.pet_profile);
-  const petSafety = !isHumanFood ? personalizePetSafety(result, savedPetProfile) : null;
+  const petSafety = !isHumanFood ? personalizePetSafety({ ...result, dataSource }, savedPetProfile) : null;
   const humanFoodPetName = routePetName || (
     savedPetProfile.petType === (petType || result?.petType)
       ? savedPetProfile.name
@@ -1322,20 +1591,30 @@ export default function ResultsScreen({ route, navigation }) {
       : petSafety?.level === "caution"
         ? Colors.scoreDecent
         : Colors.scoreExcellent;
+  const showProminentPetSafety = petSafety?.personalized === true
+    && (petSafety.level === "avoid" || petSafety.level === "caution");
   const verificationSource = isIngredientCapture
     ? "User submission"
-    : titleCaseStatus(
+    : displayValueLabel(
       ingredientVerification.sourceQuality ||
       ingredientVerification.source ||
       dataSource
     );
   const ingredientStatus = isIngredientCapture
     ? "Pending review"
-    : titleCaseStatus(ingredientVerification.status || result?.verificationState?.ingredientVerificationStatus);
+    : displayValueLabel(ingredientVerification.status || result?.verificationState?.ingredientVerificationStatus, "Not verified");
   const imageStatus = isIngredientCapture
     ? "User photo"
-    : titleCaseStatus(ingredientVerification.imageStatus || result?.verificationState?.imageVerificationStatus);
+    : displayValueLabel(ingredientVerification.imageStatus || result?.verificationState?.imageVerificationStatus, "Not verified");
   const sourceHost = shareUrlHost(ingredientVerification.sourceUrl || result?.sourceUrl);
+  const formulaEvidenceTier = ingredientVerification.formulaEvidenceTier || "";
+  const formulaVersionLabel = formulaEvidenceTier === "manufacturer_current_exact"
+    ? "Current manufacturer formula"
+    : formulaEvidenceTier === "retailer_web_version"
+      ? "Exact retailer package version"
+      : formulaEvidenceTier === "web_label_version"
+        ? "Exact package-label version"
+        : "";
   const hasVerifiedCatalogEvidence = Boolean(
     !isIngredientCapture &&
     ingredientStatus &&
@@ -1343,6 +1622,22 @@ export default function ResultsScreen({ route, navigation }) {
     sourceHost &&
     !/unverified|candidate|missing|pending/i.test(`${ingredientStatus} ${imageStatus}`)
   );
+  const scoreConfig = hasScore ? getScoreConfig(result.overallScore) : null;
+  const identityEvidenceColor = hasVerifiedCatalogEvidence
+    ? Colors.scoreExcellent
+    : theme.textTertiary;
+  const identityEvidenceLabel = formulaVersionLabel
+    || (hasVerifiedCatalogEvidence ? "Exact ingredients and photo verified" : ingredientStatus)
+    || "Catalog evidence";
+  const ingredientSubmissionCopy = ingredientSubmission.status === "submitted"
+    ? `${BRAND_NAME} sent the recognized product name and ingredients to a private catalog review queue. It is not verified or added automatically.`
+    : ingredientSubmission.status === "private"
+      ? "This scan was scored for you only. It was not submitted to or added to the catalog."
+      : ingredientSubmission.status === "failed"
+        ? `This scan was scored, but ${BRAND_NAME} could not send it for catalog review. Your result remains private.`
+        : ingredientSubmission.status === "submitting"
+          ? "Your result is ready. Sending the recognized product name and ingredients to the private review queue…"
+          : "This result uses the ingredients scanned from your photo. Catalog verification has not completed.";
 
   // --- Success — unified scrollable page ---
   return (
@@ -1365,7 +1660,11 @@ export default function ResultsScreen({ route, navigation }) {
             <Animated.View
               style={[
                 styles.miniScoreBadge,
-                { backgroundColor: getScoreConfig(result.overallScore).color },
+                {
+                  backgroundColor: showProminentPetSafety
+                    ? petSafetyColor
+                    : getScoreConfig(result.overallScore).color,
+                },
                 miniBadgeStyle,
               ]}
             >
@@ -1381,20 +1680,18 @@ export default function ResultsScreen({ route, navigation }) {
           <View style={{ flex: 1 }} />
         )}
 
-        {!isHumanFood && (
-          <TouchableOpacity
-            style={[styles.shareButton, !(done && hasScore) && { opacity: 0.3 }]}
+        <TouchableOpacity
+            style={[styles.shareButton, !hasShareableResult && { opacity: 0.3 }]}
             onPress={handleShare}
             activeOpacity={0.7}
-            disabled={!(done && hasScore)}
+            disabled={!hasShareableResult}
             accessibilityRole="button"
             accessibilityLabel="Share results"
-            accessibilityHint="Shares a Woof result card"
-            accessibilityState={{ disabled: !(done && hasScore) }}
+            accessibilityHint={`Shares a ${BRAND_NAME} result card`}
+            accessibilityState={{ disabled: !hasShareableResult }}
           >
             <Share2 size={24} color={theme.textPrimary} strokeWidth={2} />
           </TouchableOpacity>
-        )}
       </Animated.View>
 
       <Animated.ScrollView
@@ -1588,51 +1885,125 @@ export default function ResultsScreen({ route, navigation }) {
         {/* === Pet Food Analysis Layout === */}
         {!isHumanFood && (
           <>
-            {petFoodImageUri ? (
+            {/* 1. Exact product identity and evidence */}
+            {displayProductName || userPhotoWhileIdentifying ? (
               <StreamSection visible delay={40}>
-                <View style={styles.productImageHero}>
-                  <Image
-                    source={{ uri: petFoodImageUri }}
-                    style={styles.productImage}
-                    resizeMode="contain"
-                    accessibilityLabel={`${displayProductName || "Product"} package image`}
-                  />
+                <View
+                  style={[
+                    styles.productIdentityCard,
+                    { backgroundColor: theme.card, borderColor: theme.separator },
+                  ]}
+                >
+                  {identityImageUri ? (
+                    <View style={styles.productImageHero}>
+                      <Image
+                        source={{ uri: identityImageUri }}
+                        style={styles.productImage}
+                        resizeMode="contain"
+                        accessibilityLabel={`${displayProductName || "Product"} package image`}
+                      />
+                    </View>
+                  ) : null}
+                  {displayProductName ? <View style={styles.productIdentityCopy}>
+                    <Text style={[styles.productEyebrow, { color: theme.textTertiary }]}>
+                      {hasVerifiedCatalogEvidence ? "VERIFIED FORMULA" : "PET FOOD ANALYSIS"}
+                    </Text>
+                    <Text style={styles.productName} numberOfLines={4}>
+                      {streaming && !hasScore ? (
+                        <StreamingText
+                          text={displayProductName}
+                          streaming
+                          done={done}
+                          style={styles.productName}
+                        />
+                      ) : (
+                        displayProductName
+                      )}
+                    </Text>
+                    {variantSummary ? (
+                      <Text style={styles.productVariant} numberOfLines={3}>
+                        {variantSummary}
+                      </Text>
+                    ) : null}
+                    <View style={styles.productEvidenceLine}>
+                      <ShieldCheck size={14} color={identityEvidenceColor} strokeWidth={2.2} />
+                      <Text
+                        style={[styles.productEvidenceText, { color: identityEvidenceColor }]}
+                        numberOfLines={2}
+                      >
+                        {identityEvidenceLabel}
+                      </Text>
+                    </View>
+                  </View> : null}
                 </View>
               </StreamSection>
-            ) : null}
-
-            {/* 1. Product Name */}
-            {result.productName ? (
-              <Animated.View entering={FadeInUp.delay(200).duration(400).damping(20).stiffness(300)}>
-                <Text style={styles.productName} numberOfLines={3}>
-                  {streaming && !hasScore ? (
-                    <StreamingText
-                      text={displayProductName}
-                      streaming
-                      done={done}
-                      style={styles.productName}
-                    />
-                  ) : (
-                    displayProductName
-                  )}
-                </Text>
-                {variantSummary ? (
-                  <Text style={styles.productVariant} numberOfLines={2}>
-                    {variantSummary}
-                  </Text>
-                ) : null}
-              </Animated.View>
             ) : streaming ? (
               <View style={{ alignItems: "center", paddingVertical: 8 }}>
                 <SkeletonBar width="65%" height={22} />
               </View>
             ) : null}
 
-            {/* 2. Score Ring (hero) */}
+            {showProminentPetSafety ? (
+              <StreamSection visible delay={45}>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "flex-start",
+                    gap: 12,
+                    padding: 16,
+                    marginTop: 12,
+                    borderRadius: Spacing.cardRadius,
+                    borderWidth: petSafety.level === "avoid" ? 2 : 1,
+                    borderColor: petSafetyColor,
+                    backgroundColor: petSafety.level === "avoid"
+                      ? "rgba(199,74,70,0.13)"
+                      : "rgba(216,148,28,0.10)",
+                  }}
+                  accessible
+                  accessibilityRole="alert"
+                  accessibilityLabel={`${petSafety.label}. ${petSafety.summary}`}
+                >
+                  <AlertTriangle size={24} color={petSafetyColor} strokeWidth={2.4} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: petSafetyColor, fontSize: 17, fontWeight: "800", marginBottom: 4 }}>
+                      {petSafety.level === "avoid" ? "DO NOT FEED" : "USE CAUTION"}
+                    </Text>
+                    <Text style={{ color: theme.textPrimary, fontSize: 16, fontWeight: "700", marginBottom: 4 }}>
+                      {petSafety.label}
+                    </Text>
+                    <Text style={{ color: theme.textSecondary, fontSize: 14, lineHeight: 20 }}>
+                      {petSafety.summary}
+                    </Text>
+                  </View>
+                </View>
+              </StreamSection>
+            ) : null}
+
+            {/* 2. Score overview */}
             {hasScore ? (
               <StreamSection visible delay={50}>
-                <View style={styles.heroSection}>
-                  <CircularScore score={result.overallScore} />
+                <View
+                  style={[
+                    styles.scoreOverviewCard,
+                    { backgroundColor: theme.card, borderColor: theme.separator },
+                  ]}
+                  accessible
+                  accessibilityLabel={`Ingredient quality score ${result.overallScore} out of 100, ${scoreConfig.label}`}
+                >
+                  <CircularScore score={result.overallScore} size={132} strokeWidth={10} />
+                  <View style={styles.scoreOverviewCopy}>
+                    <Text style={[styles.scoreOverviewEyebrow, { color: theme.textTertiary }]}>
+                      INGREDIENT QUALITY
+                    </Text>
+                    <Text style={[styles.scoreOverviewTitle, { color: scoreConfig.color }]}>
+                      {titleCaseStatus(scoreConfig.label)}
+                    </Text>
+                    <Text style={[styles.scoreOverviewText, { color: theme.textSecondary }]}>
+                      {hasFullResultAccess
+                        ? "Based on this formula’s exact ingredient list. Open the breakdown below to see what shaped it."
+                        : `Based on this formula’s exact ingredient list. Upgrade to see the full breakdown below.`}
+                    </Text>
+                  </View>
                 </View>
               </StreamSection>
             ) : streaming ? (
@@ -1642,9 +2013,13 @@ export default function ResultsScreen({ route, navigation }) {
             ) : null}
 
             {/* Scan limit banner (free users, new scans only) */}
-            {done && !hasFullResultAccess && mode !== "history" && hasScore && (
-              <ScanLimitBanner remaining={remainingScanCount} />
-            )}
+            {!isPro && mode !== "history" ? (
+              <View style={{ minHeight: 54 }}>
+                {done && !hasFullResultAccess && hasScore ? (
+                  <ScanLimitBanner remaining={remainingScanCount} />
+                ) : null}
+              </View>
+            ) : null}
 
             {/* 3. Quick Stats */}
             <StreamSection visible={!!nutritionAnalysis} delay={100}>
@@ -1657,12 +2032,14 @@ export default function ResultsScreen({ route, navigation }) {
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
                   <ShieldCheck size={18} color={petSafetyColor} strokeWidth={2.2} />
                   <Text style={{ color: theme.textPrimary, fontSize: 16, fontWeight: "700", flex: 1 }}>
-                    {isIngredientCapture ? "Pending catalog verification" : petSafety?.label || "Verified catalog result"}
+                    {isIngredientCapture
+                      ? ingredientSubmission.status === "submitted" ? "Submitted for catalog review" : "Scanned ingredients"
+                      : petSafety?.label || "Verified catalog result"}
                   </Text>
                 </View>
                 <Text style={{ color: theme.textSecondary, fontSize: 14, lineHeight: 20, marginBottom: 12 }}>
                   {isIngredientCapture
-                    ? "This result uses the ingredients scanned from your photo. Woof has saved the submission for catalog review, but it is not verified yet."
+                    ? ingredientSubmissionCopy
                     : petSafety?.summary || "Scored only from source-backed catalog ingredients and a verified product image."}
                 </Text>
                 {petSafety?.personalized ? (
@@ -1724,6 +2101,14 @@ export default function ResultsScreen({ route, navigation }) {
                       {[verificationSource, isIngredientCapture ? "" : sourceHost].filter(Boolean).join(" • ") || "Catalog"}
                     </Text>
                   </View>
+                  {!isIngredientCapture && formulaVersionLabel ? (
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
+                      <Text style={{ color: theme.textTertiary, fontSize: 12, fontWeight: "600" }}>Formula version</Text>
+                      <Text style={{ color: theme.textPrimary, fontSize: 12, fontWeight: "700", flexShrink: 1, textAlign: "right" }}>
+                        {formulaVersionLabel}
+                      </Text>
+                    </View>
+                  ) : null}
                   {!isIngredientCapture ? (
                     <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
                       <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
@@ -1758,14 +2143,10 @@ export default function ResultsScreen({ route, navigation }) {
               />
             </StreamSection>
 
-            {/* First scan toast (free users only) */}
-            <FirstScanToast visible={!hasFullResultAccess && showFirstScanToast} />
-
             {/* ProGateOverlay — shown for free users when analysis is done */}
-            {!hasFullResultAccess && done && hasScore && !showPostScanPrompt && (
+            {!hasFullResultAccess && done && hasScore && (
               <ProGateOverlay
                 onUpgrade={() => navigatePaywall("results_gate")}
-                remainingScans={remainingScanCount}
               />
             )}
 
@@ -1809,9 +2190,11 @@ export default function ResultsScreen({ route, navigation }) {
 
             {/* Streaming footer */}
             {streaming && (
-              <View style={styles.streamingFooter}>
-                <StreamingDots />
-                <Text style={styles.streamingFooterText}>Analyzing...</Text>
+              <View style={{ minHeight: !isPro ? 360 : 100, justifyContent: "flex-start" }}>
+                <View style={styles.streamingFooter}>
+                  <StreamingDots />
+                  <Text style={styles.streamingFooterText}>{loadingStatus}</Text>
+                </View>
               </View>
             )}
 
@@ -1822,7 +2205,7 @@ export default function ResultsScreen({ route, navigation }) {
               </StreamSection>
             )}
 
-            {/* Post-scan upgrade prompt (once, after 2+ scans) */}
+            {/* Post-scan upgrade prompt (once, after the third free scan) */}
             {showPostScanPrompt && (
               <PostScanPrompt
                 onUpgrade={() => {
@@ -1830,13 +2213,6 @@ export default function ResultsScreen({ route, navigation }) {
                   navigatePaywall("post_scan_prompt");
                 }}
                 onDismiss={dismissPostScanPrompt}
-              />
-            )}
-
-            {showReviewPrompt && (
-              <ReviewPrompt
-                onRate={handleReviewRate}
-                onDismiss={handleReviewDismiss}
               />
             )}
 
@@ -1861,8 +2237,21 @@ export default function ResultsScreen({ route, navigation }) {
         )}
       </Animated.ScrollView>
 
+      <FirstScanToast visible={!hasFullResultAccess && showFirstScanToast} />
+
+      {showReviewPrompt ? (
+        <View style={{ position: "absolute", left: 16, right: 16, bottom: Math.max(insets.bottom, 12) + 12, zIndex: 30 }}>
+          <ReviewPrompt
+            onVisible={handleReviewVisible}
+            onRate={handleReviewRate}
+            onDismiss={handleReviewDismiss}
+            onAlreadyReviewed={handleReviewAlreadyCompleted}
+          />
+        </View>
+      ) : null}
+
       {/* Off-screen share card for view-shot capture */}
-      {done && hasScore && (
+      {hasShareableResult && (
         <View
           style={{ position: "absolute", left: -9999, top: 0, pointerEvents: "none" }}
           collapsable={false}
@@ -1872,6 +2261,9 @@ export default function ResultsScreen({ route, navigation }) {
             result={displayResult}
             nutrition={nutritionAnalysis}
             shareUrl={shareUrlDisplay(WOOF_SHARE_URL)}
+            humanFood={isHumanFood}
+            petType={petType || result?.petType}
+            petName={humanFoodPetName}
           />
         </View>
       )}

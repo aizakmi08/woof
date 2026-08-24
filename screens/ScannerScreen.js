@@ -7,6 +7,8 @@ import {
   Alert,
   Pressable,
   Linking,
+  Platform,
+  ActivityIndicator,
 } from "react-native";
 import { AppText as Text } from "../components/AppText";
 import * as ImageManipulator from "expo-image-manipulator";
@@ -31,12 +33,21 @@ import { useTheme, Colors, Spacing, Shadows } from "../theme";
 import { useAuth } from "../services/auth";
 import { trackEvent } from "../services/analytics";
 import { createLogger } from "../services/logger";
+import {
+  cropLabelToNormalizedRegion,
+  labelOcrIsAvailable,
+  nativeLabelCropIsAvailable,
+  recognizeLabelText,
+} from "../services/labelOcr";
+import { projectScanFrameToPhoto } from "../services/cameraCrop";
 import * as Haptics from "expo-haptics";
+import { BRAND_NAME } from "../config/brand";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 const SCAN_SIZE = 260;
 const SCAN_Y = Math.round(SCREEN_H * 0.28);
 const SCAN_X = Math.round((SCREEN_W - SCAN_SIZE) / 2);
+const SCAN_FRAME_INSET = 5;
 
 const CORNER_LEN = 40;
 const CORNER_W = 3;
@@ -97,7 +108,7 @@ function scannerInstructionText({ showFallbackBanner, isHumanFood, isLabelLookup
 }
 
 function scannerTipText({ showFallbackBanner, isHumanFood, isLabelLookup, isIngredientCapture }) {
-  if (isLabelLookup) return "Brand and product name readable";
+  if (isLabelLookup) return "Brand and product name readable • avoid glare";
   if (isIngredientCapture) return "Keep the full ingredients list readable";
   if (showFallbackBanner) return "Keep brand and ingredients readable";
   if (isHumanFood) return "Good light • fill the frame • hold steady";
@@ -187,9 +198,15 @@ async function captureBarcodePreview(cameraRef) {
   }
 }
 
+const failedBarcodesThisSession = new Set();
+
+function normalizedBarcode(value) {
+  return String(value || "").trim();
+}
+
 export default function ScannerScreen({ navigation, route }) {
   // Extract mode params for human food scanning
-  const { fallbackToPhoto, mode: scanMode, petType, petName } = route.params || {};
+  const { fallbackToPhoto, failedBarcode, fallbackMessage, verificationMessage, mode: scanMode, petType, petName } = route.params || {};
   const isHumanFood = scanMode === "human_food";
   const isLabelLookup = scanMode === "label_lookup";
   const isIngredientCapture = scanMode === "ingredient_capture";
@@ -198,25 +215,28 @@ export default function ScannerScreen({ navigation, route }) {
     : (isLabelLookup ? "Find Product" : (isIngredientCapture ? "Add Ingredients" : "Scan"));
 
   const cameraRef = useRef(null);
+  const cameraViewportRef = useRef({ width: SCREEN_W, height: SCREEN_H });
   const scannedRef = useRef(false);
   const captureRunIdRef = useRef(0);
   const [permission, requestPermission] = useCameraPermissions();
   const [capturing, setCapturing] = useState(false);
   const [showFallbackBanner, setShowFallbackBanner] = useState(false);
   const [barcodeEnabled, setBarcodeEnabled] = useState(!isHumanFood && !isLabelLookup && !isIngredientCapture);
+  const [sessionReady, setSessionReady] = useState(null);
   const theme = useTheme();
-  const { checkSession } = useAuth();
+  const { checkSession, isPro, remainingScans } = useAuth();
+  const freeScansLeft = remainingScans();
   const isFocused = useIsFocused(); // Only show camera when screen is focused
   const scanModeForAnalytics = isHumanFood
     ? "human_food"
     : (isLabelLookup ? "label_lookup" : (isIngredientCapture ? "ingredient_capture" : "pet_food"));
   const cameraPermissionCopy = isHumanFood
-    ? "Woof needs camera access to check food items for your pet."
+    ? `${BRAND_NAME} needs camera access to check food items for your pet.`
     : (isLabelLookup
-      ? "Woof needs camera access to identify pet food labels from the shelf."
+      ? `Photograph the front package so ${BRAND_NAME} can identify the exact food.`
       : (isIngredientCapture
-        ? "Woof needs camera access to capture ingredient lists for catalog review."
-        : "Woof needs camera access to scan pet food labels and packaging."));
+        ? `Photograph the ingredient panel so the exact formula can be reviewed.`
+        : `${BRAND_NAME} needs camera access to scan pet food labels and packaging.`));
   const cameraPermissionBlocked = permission?.canAskAgain === false;
   const cameraPermissionButtonText = cameraPermissionBlocked ? "Open Settings" : "Allow Camera";
   const cameraPermissionAccessibilityLabel = cameraPermissionBlocked
@@ -227,6 +247,17 @@ export default function ScannerScreen({ navigation, route }) {
     : "Opens the system camera permission prompt";
   const scannerInstruction = scannerInstructionText({ showFallbackBanner, isHumanFood, isLabelLookup, isIngredientCapture });
   const scannerTip = scannerTipText({ showFallbackBanner, isHumanFood, isLabelLookup, isIngredientCapture });
+  const scanFrameWidth = SCAN_SIZE;
+  const scanFrameHeight = isLabelLookup ? Math.round(SCAN_SIZE * 4 / 3) : SCAN_SIZE;
+  const scanFrameX = Math.round((SCREEN_W - scanFrameWidth) / 2);
+  const scanFrameY = isLabelLookup ? Math.round(SCREEN_H * 0.20) : SCAN_Y;
+
+  const handleCameraViewportLayout = useCallback((event) => {
+    const { width, height } = event.nativeEvent.layout || {};
+    if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) {
+      cameraViewportRef.current = { width, height };
+    }
+  }, []);
 
   useEffect(() => {
     trackEvent("scanner_viewed", {
@@ -240,9 +271,12 @@ export default function ScannerScreen({ navigation, route }) {
 
   // Proactively refresh auth session when scanner mounts
   useEffect(() => {
-    checkSession().catch((err) => {
-      logger.debug("[SCANNER] Session check failed:", err.message);
-    });
+    checkSession()
+      .then((ready) => setSessionReady(ready === true))
+      .catch((err) => {
+        setSessionReady(false);
+        logger.debug("[SCANNER] Session check failed:", err.message);
+      });
   }, [checkSession]);
 
   // Keep barcode detection aligned with the active scanner mode.
@@ -251,18 +285,25 @@ export default function ScannerScreen({ navigation, route }) {
     setBarcodeEnabled(!isHumanFood && !isLabelLookup && !isIngredientCapture);
   }, [fallbackToPhoto, isHumanFood, isLabelLookup, isIngredientCapture]);
 
-  // Barcode-not-found fallback: show banner and briefly disable barcode scanning
+  // Barcode-not-found fallback: ignore the failed value for the rest of this app session.
   useEffect(() => {
     if (!fallbackToPhoto) return;
+    const normalizedFailedBarcode = normalizedBarcode(failedBarcode);
+    if (normalizedFailedBarcode) failedBarcodesThisSession.add(normalizedFailedBarcode);
     setShowFallbackBanner(true);
-    setBarcodeEnabled(false);
-    const enableTimer = setTimeout(() => !isHumanFood && !isLabelLookup && !isIngredientCapture && setBarcodeEnabled(true), 3000);
+    setBarcodeEnabled(!isHumanFood && !isLabelLookup && !isIngredientCapture);
     const bannerTimer = setTimeout(() => setShowFallbackBanner(false), 5000);
     return () => {
-      clearTimeout(enableTimer);
       clearTimeout(bannerTimer);
     };
-  }, [route.params, isHumanFood, isLabelLookup, isIngredientCapture]);
+  }, [failedBarcode, fallbackToPhoto, isHumanFood, isLabelLookup, isIngredientCapture]);
+
+  useEffect(() => {
+    if (!verificationMessage) return;
+    setShowFallbackBanner(true);
+    const bannerTimer = setTimeout(() => setShowFallbackBanner(false), 7_000);
+    return () => clearTimeout(bannerTimer);
+  }, [verificationMessage]);
 
   // --- Reanimated shared values ---
   const pulseAnim = useSharedValue(0);
@@ -341,6 +382,16 @@ export default function ScannerScreen({ navigation, route }) {
   const handleBarcodeScanned = useCallback(
     async ({ data }) => {
       if (scannedRef.current || capturing) return;
+      const barcodeValue = normalizedBarcode(data);
+      if (!barcodeValue || failedBarcodesThisSession.has(barcodeValue)) {
+        if (barcodeValue) {
+          trackEvent("barcode_ignored_after_failed_lookup", {
+            scan_mode: "barcode",
+            barcode_length: barcodeValue.length,
+          });
+        }
+        return;
+      }
       scannedRef.current = true;
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
@@ -357,7 +408,7 @@ export default function ScannerScreen({ navigation, route }) {
         preview_timeout_ms: BARCODE_PREVIEW_TIMEOUT_MS,
       });
 
-      navigation.push("Results", { mode: "barcode", barcode: data, uri: previewUri });
+      navigation.push("Results", { mode: "barcode", barcode: barcodeValue, uri: previewUri });
       setTimeout(() => {
         scannedRef.current = false;
       }, 2000);
@@ -366,6 +417,10 @@ export default function ScannerScreen({ navigation, route }) {
   );
 
   const handleCapture = async () => {
+    if (sessionReady === false) {
+      Alert.alert("Session Needs Refresh", "Reconnect or sign in again before taking a scan.");
+      return;
+    }
     if (!cameraRef.current || capturing) return;
     const captureRunId = captureRunIdRef.current + 1;
     captureRunIdRef.current = captureRunId;
@@ -402,17 +457,74 @@ export default function ScannerScreen({ navigation, route }) {
         setCapturing(false);
         return;
       }
+      captureStage = "scan_frame_crop";
+      const cameraViewport = cameraViewportRef.current;
+      const scanFrameCrop = projectScanFrameToPhoto({
+        photoWidth: photo.width,
+        photoHeight: photo.height,
+        previewWidth: cameraViewport.width,
+        previewHeight: cameraViewport.height,
+        frame: {
+          x: scanFrameX,
+          y: scanFrameY,
+          width: scanFrameWidth,
+          height: scanFrameHeight,
+        },
+        inset: SCAN_FRAME_INSET,
+      });
+      const normalizedCrop = {
+        x: scanFrameCrop.originX / photo.width,
+        y: scanFrameCrop.originY / photo.height,
+        width: scanFrameCrop.width / photo.width,
+        height: scanFrameCrop.height / photo.height,
+      };
+      const shouldUseNativeCrop = Platform.OS === "ios" && nativeLabelCropIsAvailable();
+      const nativeFramedPhoto = shouldUseNativeCrop
+        ? await cropLabelToNormalizedRegion(photo.uri, normalizedCrop)
+        : null;
+      if (shouldUseNativeCrop && !nativeFramedPhoto) {
+        throw new Error("The highlighted label frame could not be cropped safely.");
+      }
+      const framedPhoto = nativeFramedPhoto || await ImageManipulator.manipulateAsync(
+        photo.uri,
+        [{ crop: scanFrameCrop }],
+        {
+          compress: 0.96,
+          format: ImageManipulator.SaveFormat.JPEG,
+        }
+      );
+      const cropEngine = nativeFramedPhoto
+        ? "woof_native_uikit"
+        : "expo_image_manipulator_fallback";
+      if (!isCurrentCapture()) return;
+
       // Start at a label-readable size that usually meets the upload target in
       // one pass, avoiding extra image transformations on the hot scan path.
       captureStage = "image_optimization";
-      // A centered crop drops the page title on retailer listings and can cut
-      // off a tall bag's brand or flavor. The full optimized frame keeps all
-      // visible identity cues while remaining well under the upload limit.
-      const resized = await optimizePhotoForAnalysis(photo.uri, isLabelLookup ? {
-        targetBase64Length: TARGET_LABEL_IMAGE_BASE64_LENGTH,
-        steps: LABEL_IMAGE_OPTIMIZATION_STEPS,
-      } : undefined);
+      // OCR and visual recognition must inspect the same pixels inside the
+      // highlighted frame. Never allow surrounding shelf or browser text to
+      // compete with the product label the user intentionally framed.
+      const labelOcrPromise = isLabelLookup && labelOcrIsAvailable()
+        ? recognizeLabelText(framedPhoto.uri)
+        : Promise.resolve(null);
+      const [resized, labelOcr] = await Promise.all([
+        optimizePhotoForAnalysis(framedPhoto.uri, isLabelLookup ? {
+          targetBase64Length: TARGET_LABEL_IMAGE_BASE64_LENGTH,
+          steps: LABEL_IMAGE_OPTIMIZATION_STEPS,
+        } : undefined),
+        labelOcrPromise,
+      ]);
       if (!isCurrentCapture()) return;
+
+      if (isLabelLookup) {
+        trackEvent("label_ocr_completed", {
+          usable: labelOcr?.usable === true,
+          duration_ms: Math.round(labelOcr?.durationMs || 0),
+          line_count: labelOcr?.lines?.length || 0,
+          text_length: labelOcr?.text?.length || 0,
+          stage: "scanner_parallel_capture",
+        });
+      }
 
       if (!resized?.base64) {
         trackEvent("photo_capture_failed", {
@@ -453,11 +565,21 @@ export default function ScannerScreen({ navigation, route }) {
         estimated_decoded_bytes: Math.round(base64Length * 0.75),
         original_width: photo.width,
         original_height: photo.height,
+        camera_preview_width: cameraViewport.width,
+        camera_preview_height: cameraViewport.height,
         optimized_width: resized.width,
         optimized_height: resized.height,
-        crop_width: resized.crop?.width || null,
-        crop_height: resized.crop?.height || null,
-        label_image_scope: isLabelLookup ? "full_camera_frame" : null,
+        crop_origin_x: scanFrameCrop.originX,
+        crop_origin_y: scanFrameCrop.originY,
+        crop_width: scanFrameCrop.width,
+        crop_height: scanFrameCrop.height,
+        cropped_output_width: framedPhoto.width || null,
+        cropped_output_height: framedPhoto.height || null,
+        crop_source_width: nativeFramedPhoto?.sourceWidth || null,
+        crop_source_height: nativeFramedPhoto?.sourceHeight || null,
+        crop_engine: cropEngine,
+        image_scope: "highlighted_scan_frame",
+        label_image_scope: isLabelLookup ? "highlighted_scan_frame" : null,
         optimization_step: resized.optimizationStep,
         target_width: resized.targetWidth,
         compression: resized.compression,
@@ -469,9 +591,13 @@ export default function ScannerScreen({ navigation, route }) {
       if (isLabelLookup) {
         const labelLookupParams = {
           labelImageBase64: resized.base64,
-          labelImageUri: resized.uri || photo.uri,
+          labelImageUri: resized.uri || framedPhoto.uri,
+          labelOcrText: labelOcr?.usable ? labelOcr.text : "",
+          labelOcrLines: labelOcr?.usable ? labelOcr.lines : [],
+          labelOcrDurationMs: labelOcr?.usable ? labelOcr.durationMs : null,
           labelCaptureId: `${Date.now()}`,
           labelCaptureStartedAt: captureStartedAt,
+          labelAttempt: Math.max(1, Number(route.params?.labelAttempt) || 1),
           sourceSurface: "scanner_label_lookup",
         };
 
@@ -484,11 +610,12 @@ export default function ScannerScreen({ navigation, route }) {
         navigation.replace("Results", {
           mode: isHumanFood ? "human_food" : (isIngredientCapture ? "ingredient_capture" : "photo"),
           base64: resized.base64,
-          uri: photo.uri,
+          uri: framedPhoto.uri,
           acquisitionQuery: route.params?.acquisitionQuery || null,
           candidateProduct: route.params?.candidateProduct || null,
           labelIdentification: route.params?.labelIdentification || null,
           sourceSurface: route.params?.sourceSurface || null,
+          catalogEvidenceConsent: route.params?.catalogEvidenceConsent === true,
           ...(isHumanFood && { petType, petName }),
         });
       }
@@ -502,7 +629,12 @@ export default function ScannerScreen({ navigation, route }) {
         error_name: err?.name || "unknown",
         message: err.message,
       });
-      Alert.alert("Capture Failed", "Something went wrong. Please try again.");
+      const captureFailure = captureStage === "scan_frame_crop"
+        ? ["Couldn't Frame the Label", "Keep the full package inside the guide and retake the photo."]
+        : captureStage === "image_optimization"
+          ? ["Couldn't Prepare the Photo", "Retake the photo in good light and hold the camera steady."]
+          : ["Camera Capture Failed", "The camera couldn't finish the photo. Please try again."];
+      Alert.alert(captureFailure[0], captureFailure[1]);
     } finally {
       if (isCurrentCapture()) {
         setCapturing(false);
@@ -532,7 +664,7 @@ export default function ScannerScreen({ navigation, route }) {
     if (isHumanFood) {
       Alert.alert(
         "How to Check Food",
-        "1. Use good light and keep the food or label readable\n\n2. Fill the frame and tap the capture button\n\n3. Woof checks safety guidance for your selected pet",
+        `1. Use good light and keep the food or label readable\n\n2. Fill the frame and tap the capture button\n\n3. ${BRAND_NAME} checks safety guidance for your selected pet`,
         [{ text: "Got it" }]
       );
       return;
@@ -541,7 +673,7 @@ export default function ScannerScreen({ navigation, route }) {
     if (isLabelLookup) {
       Alert.alert(
         "How to Find Products",
-        "1. Point at the front of the bag or can\n\n2. Make the brand and product name readable\n\n3. Woof searches by product name, not barcode",
+        `1. Point at the front of the bag or can\n\n2. Make the brand and product name readable\n\n3. ${BRAND_NAME} searches by product name, not barcode`,
         [{ text: "Got it" }]
       );
       return;
@@ -550,7 +682,7 @@ export default function ScannerScreen({ navigation, route }) {
     if (isIngredientCapture) {
       Alert.alert(
         "How to Add Ingredients",
-        "1. Capture the full ingredients list\n\n2. Keep the text sharp and readable\n\n3. Woof saves it for catalog review before verified results are shared",
+        `1. Capture the full ingredients list\n\n2. Keep the text sharp and readable\n\n3. ${BRAND_NAME} saves it for catalog review before verified results are shared`,
         [{ text: "Got it" }]
       );
       return;
@@ -558,7 +690,7 @@ export default function ScannerScreen({ navigation, route }) {
 
     Alert.alert(
       "How to Scan",
-      "1. Keep the product name or ingredients readable\n\n2. Use good light and avoid glare\n\n3. Woof works best from the front label or product name",
+      `1. Keep the product name or ingredients readable\n\n2. Use good light and avoid glare\n\n3. ${BRAND_NAME} works best from the front label or product name`,
       [{ text: "Got it" }]
     );
   };
@@ -584,7 +716,7 @@ export default function ScannerScreen({ navigation, route }) {
         });
         Alert.alert(
           "Open Settings",
-          "Please open your device settings and allow camera access for Woof."
+          `Please open your device settings and allow camera access for ${BRAND_NAME}.`
         );
       }
       return;
@@ -609,7 +741,11 @@ export default function ScannerScreen({ navigation, route }) {
 
   // --- Permission screens ---
   if (!permission) {
-    return <View style={styles.container} />;
+    return (
+      <View style={[styles.container, { backgroundColor: theme.bg, alignItems: "center", justifyContent: "center" }]}>
+        <ActivityIndicator color={theme.textSecondary} />
+      </View>
+    );
   }
 
   if (!permission.granted) {
@@ -631,14 +767,20 @@ export default function ScannerScreen({ navigation, route }) {
           </Pressable>
         </View>
         <View style={styles.permissionContainer}>
-          <View style={styles.permissionIconWrap}>
-            <CameraOff size={48} color={theme.textTertiary} strokeWidth={1.5} />
+          <View style={[styles.permissionIconWrap, { backgroundColor: theme.surface }]}>
+            <CameraOff size={34} color={theme.textSecondary} strokeWidth={1.6} />
           </View>
+          <Text style={[styles.permissionEyebrow, { color: theme.textTertiary }]}>
+            {scannerTitle}
+          </Text>
           <Text style={[styles.permissionTitle, { color: theme.textPrimary }]}>
-            Camera Access Needed
+            Use your camera to scan
           </Text>
           <Text style={[styles.permissionText, { color: theme.textSecondary }]}>
             {cameraPermissionCopy}
+          </Text>
+          <Text style={[styles.permissionPrivacy, { color: theme.textTertiary }]}>
+            Photos are used only for product lookup and ingredient analysis.
           </Text>
           <Pressable
             style={({ pressed }) => [
@@ -661,7 +803,7 @@ export default function ScannerScreen({ navigation, route }) {
 
   // --- Camera UI ---
   return (
-    <View style={styles.container}>
+    <View style={styles.container} onLayout={handleCameraViewportLayout}>
       {/* Only render camera when screen is focused (turns off during results screen) */}
       {isFocused && (
         <CameraView
@@ -677,10 +819,10 @@ export default function ScannerScreen({ navigation, route }) {
 
       {/* Dark mask overlay with cutout */}
       <View style={[StyleSheet.absoluteFill, { pointerEvents: "none" }]}>
-        <View style={[styles.mask, { top: 0, height: SCAN_Y, left: 0, right: 0 }]} />
-        <View style={[styles.mask, { top: SCAN_Y, height: SCAN_SIZE, left: 0, width: SCAN_X }]} />
-        <View style={[styles.mask, { top: SCAN_Y, height: SCAN_SIZE, right: 0, width: SCAN_X }]} />
-        <View style={[styles.mask, { top: SCAN_Y + SCAN_SIZE, bottom: 0, left: 0, right: 0 }]} />
+        <View style={[styles.mask, { top: 0, height: scanFrameY, left: 0, right: 0 }]} />
+        <View style={[styles.mask, { top: scanFrameY, height: scanFrameHeight, left: 0, width: scanFrameX }]} />
+        <View style={[styles.mask, { top: scanFrameY, height: scanFrameHeight, right: 0, width: scanFrameX }]} />
+        <View style={[styles.mask, { top: scanFrameY + scanFrameHeight, bottom: 0, left: 0, right: 0 }]} />
       </View>
 
       {/* Darkening overlay during processing */}
@@ -689,7 +831,7 @@ export default function ScannerScreen({ navigation, route }) {
       />
 
       {/* Scan frame: corners + flash + processing */}
-      <View style={[styles.scanFrame, { pointerEvents: "box-none" }]}>
+      <View style={[styles.scanFrame, { pointerEvents: "box-none", top: scanFrameY, left: scanFrameX, width: scanFrameWidth, height: scanFrameHeight }]}>
         <Animated.View style={[StyleSheet.absoluteFill, cornerAnimStyle]}>
           <Animated.View style={[styles.corner, styles.cornerTL, cornerTLStyle]} />
           <Animated.View style={[styles.corner, styles.cornerTR, cornerTRStyle]} />
@@ -708,7 +850,7 @@ export default function ScannerScreen({ navigation, route }) {
       </View>
 
       {/* Instruction pill below scan area */}
-      <View style={[styles.instructionWrap, { pointerEvents: "none" }]}>
+      <View style={[styles.instructionWrap, { pointerEvents: "none", top: scanFrameY + scanFrameHeight + Spacing.lg }]}>
         <BlurView intensity={32} tint="dark" style={styles.instructionBlur}>
           <Text style={styles.instructionLight}>
             {scannerInstruction}
@@ -766,10 +908,28 @@ export default function ScannerScreen({ navigation, route }) {
             style={styles.fallbackBanner}
           >
             <Text style={styles.fallbackBannerText}>
-              Barcode not found — capture the ingredient label instead
+              {verificationMessage || fallbackMessage || "Barcode not in the verified catalog — capture the front label instead"}
             </Text>
           </Animated.View>
         )}
+
+        {sessionReady === false ? (
+          <View style={styles.sessionBanner} accessible accessibilityRole="alert">
+            <Text style={styles.sessionBannerText}>Session needs a refresh before scanning</Text>
+          </View>
+        ) : null}
+
+        {!isPro && Number.isFinite(freeScansLeft) ? (
+          <View
+            style={styles.freeScansPill}
+            accessible
+            accessibilityLabel={`${Math.max(0, freeScansLeft)} free scans left`}
+          >
+            <Text style={styles.freeScansPillText}>
+              {Math.max(0, freeScansLeft)} free scan{freeScansLeft === 1 ? "" : "s"} left
+            </Text>
+          </View>
+        ) : null}
 
         <View style={{ flex: 1 }} />
 
@@ -783,7 +943,7 @@ export default function ScannerScreen({ navigation, route }) {
           <View style={{ height: 20 }} />
           <Pressable
             onPress={handleCapture}
-            disabled={capturing}
+            disabled={capturing || sessionReady === false}
             onPressIn={() => {
               captureScale.value = withSpring(0.92, { damping: 20, stiffness: 300 });
             }}
@@ -793,7 +953,7 @@ export default function ScannerScreen({ navigation, route }) {
             accessibilityRole="button"
             accessibilityLabel={capturing ? "Scanning" : "Capture photo"}
             accessibilityHint={isHumanFood ? "Takes a photo of the food item" : "Takes a photo of the pet food package or label"}
-            accessibilityState={{ disabled: capturing }}
+            accessibilityState={{ disabled: capturing || sessionReady === false }}
           >
             <Animated.View style={[styles.captureBtn, captureScaleStyle]}>
               <View style={[
@@ -1049,6 +1209,39 @@ const styles = StyleSheet.create({
     textAlign: "center",
     letterSpacing: 0,
   },
+  sessionBanner: {
+    alignSelf: "center",
+    backgroundColor: "rgba(180, 45, 45, 0.94)",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    marginTop: 10,
+    marginHorizontal: Spacing.screenPadding,
+    zIndex: 9,
+  },
+  sessionBannerText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  freeScansPill: {
+    position: "absolute",
+    top: 112,
+    alignSelf: "center",
+    backgroundColor: "rgba(17,17,17,0.78)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.24)",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    zIndex: 8,
+  },
+  freeScansPillText: {
+    color: "#F7F7F4",
+    fontSize: 12,
+    fontWeight: "700",
+  },
 
   // Permission screen
   permissionHeader: {
@@ -1066,26 +1259,51 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    paddingHorizontal: 40,
+    paddingHorizontal: 32,
+    paddingBottom: 56,
   },
   permissionIconWrap: {
-    marginBottom: 24,
+    width: 82,
+    height: 82,
+    borderRadius: 24,
+    borderCurve: "continuous",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 22,
+  },
+  permissionEyebrow: {
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0,
+    textTransform: "uppercase",
+    marginBottom: 8,
   },
   permissionTitle: {
-    fontSize: 22,
+    fontSize: 26,
     fontWeight: "700",
-    marginBottom: Spacing.md,
+    marginBottom: 10,
     letterSpacing: 0,
+    textAlign: "center",
   },
   permissionText: {
     fontSize: 16,
     textAlign: "center",
-    marginBottom: 32,
-    lineHeight: 24,
+    lineHeight: 23,
+    maxWidth: 310,
+  },
+  permissionPrivacy: {
+    fontSize: 12,
+    textAlign: "center",
+    lineHeight: 17,
+    maxWidth: 290,
+    marginTop: 10,
+    marginBottom: 28,
   },
   permissionButton: {
     height: Spacing.buttonHeight,
-    paddingHorizontal: 32,
+    width: "100%",
+    maxWidth: 300,
+    paddingHorizontal: 24,
     borderRadius: Spacing.buttonRadius,
     justifyContent: "center",
     alignItems: "center",

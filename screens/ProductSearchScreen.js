@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   Alert,
   FlatList,
+  findNodeHandle,
   Image,
   Keyboard,
   Pressable,
@@ -11,14 +13,15 @@ import {
 } from "react-native";
 import { AppText as Text, AppTextInput as TextInput } from "../components/AppText";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { BadgeCheck, Camera, ChevronLeft, Search, ScanLine, X } from "lucide-react-native";
+import { Camera, ChevronLeft, Search, ScanLine, X } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import {
   collapseRepeatedIdentityText,
+  getCatalogProduct,
+  labelOcrSearchQueries,
   resolveProduct,
 } from "../services/productCatalog";
 import { labelOcrIsAvailable, recognizeLabelText } from "../services/labelOcr";
-import { filterProductsForOcr } from "../services/labelOcrMatching";
 import {
   catalogVerificationState,
   productIsVerifiedReady,
@@ -33,13 +36,24 @@ import {
 } from "../services/catalogCoverage";
 import { trackEvent } from "../services/analytics";
 import { createLogger } from "../services/logger";
+import {
+  LABEL_RESOLUTION_DECISIONS,
+  productFormulaKey,
+  reconcileLabelOutcomes,
+} from "../services/labelResolution";
+import { getLabelResolutionConfig } from "../services/runtimeConfig";
 import { useTheme, Colors, Spacing, Shadows } from "../theme";
+import { BRAND_NAME } from "../config/brand";
+import { requestCatalogEvidenceConsent } from "../services/catalogEvidenceConsent";
+import { useAuth } from "../services/auth";
+import { normalizePetProfile } from "../services/petProfile";
 
 const logger = createLogger("PRODUCT_SEARCH");
 const MIN_QUERY_LENGTH = 2;
 const SEARCH_RESULT_LIMIT = 12;
+const SEARCH_UI_TIMEOUT_MS = 8_000;
+const AUTOMATIC_LABEL_RECOVERY_TIMEOUT_MS = 6_500;
 const EMPTY_OCR_LINES = Object.freeze([]);
-const LABEL_RECONCILIATION_GRACE_MS = 250;
 const VERIFIED_INGREDIENT_STATUSES = new Set([
   "gdsn",
   "official",
@@ -216,27 +230,51 @@ function ingredientStatusLabel(product) {
   return catalogVerificationState(product).label;
 }
 
-function productVariantLabel(product) {
-  const packageSizes = Array.isArray(product?.availablePackageSizes)
-    ? product.availablePackageSizes.map((value) => String(value || "").trim()).filter(Boolean)
-    : [];
+function productPackageSizeLabel(product) {
+  const rawPackageSizes = [
+    ...(Array.isArray(product?.availablePackageSizes) ? product.availablePackageSizes : []),
+    product?.packageSize,
+  ].map((value) => String(value || "").trim()).filter(Boolean);
+  const packageSizes = rawPackageSizes.flatMap((value) => {
+    if (!value.includes(",")) return [value];
+    const parts = value.split(",").map((part) => part.trim()).filter(Boolean);
+    return parts.length > 1 && parts.every((part) => (
+      /^\d+(?:\.\d+)?(?:\s*(?:lb|lbs|oz|kg|g|ct|count))?$/i.test(part)
+    )) ? parts : [value];
+  }).filter((value, index, values) => (
+    values.findIndex((candidate) => normalizeText(candidate) === normalizeText(value)) === index
+  ));
   const packageSize = packageSizes.length > 1
-    ? packageSizes.join(" + ")
-    : product?.packageSize;
+    ? "Multiple sizes"
+    : packageSizes[0];
+  return formatVariantValue(packageSize);
+}
+
+function productVariantLabel(product) {
+  const productName = normalizeText(product?.productName);
 
   return [
-    packageSize,
-    product?.flavor,
-    product?.lifeStage,
-    product?.foodForm,
-    product?.productLine,
-  ].map(formatVariantValue).filter(Boolean).join(" • ");
+    { key: "petType", value: product?.petType },
+    { key: "lifeStage", value: product?.lifeStage },
+    { key: "foodForm", value: product?.foodForm },
+    { key: "flavor", value: product?.flavor },
+    { key: "productLine", value: product?.productLine },
+  ]
+    .map((field) => ({ ...field, label: formatVariantValue(field.value) }))
+    .filter((field) => field.label)
+    .filter((field) => {
+      const normalized = normalizeText(field.label);
+      return !normalized || !productName.includes(normalized);
+    })
+    .map((field) => field.label)
+    .join(" • ");
 }
 
 function formatVariantValue(value) {
   const normalized = String(value || "").trim().toLowerCase();
   if (!normalized) return "";
   if (normalized === "freeze_dried" || normalized === "freeze-dried") return "Freeze-dried";
+  if (normalized === "multiple sizes") return "Multiple sizes";
   return String(value)
     .trim()
     .replace(/_/g, " ")
@@ -246,7 +284,8 @@ function formatVariantValue(value) {
 function labelSummaryTitle(identification = {}) {
   const brand = collapseRepeatedIdentityText(identification.brand);
   const productName = collapseRepeatedIdentityText(identification.productName);
-  if (!productName) return brand || "No readable product label";
+  const recognizedQuery = collapseRepeatedIdentityText(identification.searchQuery);
+  if (!productName) return brand || recognizedQuery || "No readable product label";
   if (brand && !normalizeText(productName).includes(normalizeText(brand))) {
     return collapseRepeatedIdentityText(`${brand} ${productName}`);
   }
@@ -270,40 +309,6 @@ function ingredientCaptureProduct(product = {}) {
     sourceQuality: product.sourceQuality || null,
     sourceUrl: product.sourceUrl || null,
   };
-}
-
-function hasUsableLabelResult(result) {
-  return Boolean(
-    result?.selectedProduct
-    || result?.identification?.found
-    || result?.products?.length
-  );
-}
-
-function pickBestLabelOutcome(outcomes = []) {
-  const usable = outcomes.filter((outcome) => hasUsableLabelResult(outcome?.result));
-  const cloud = usable.find((outcome) => outcome.path === "cloud_image");
-  const onDevice = usable.find((outcome) => outcome.path === "on_device_ocr");
-
-  const cloudSelected = cloud?.result?.selectedProduct;
-  const onDeviceSelected = onDevice?.result?.selectedProduct;
-
-  if (cloudSelected && onDeviceSelected) {
-    const cloudMatchesVisibleText = filterProductsForOcr(
-      [cloudSelected],
-      onDevice.result.query
-    ).length === 1;
-    if (!cloudMatchesVisibleText) return onDevice;
-
-    const sameCatalogProduct = String(cloudSelected.cacheKey || cloudSelected.id || "")
-      === String(onDeviceSelected.cacheKey || onDeviceSelected.id || "");
-    return sameCatalogProduct ? cloud : onDevice;
-  }
-  if (onDeviceSelected) return onDevice;
-  if (cloud?.result?.identification?.excluded) return cloud;
-  if (cloudSelected) return cloud;
-  if (cloud) return cloud;
-  return onDevice || usable[0] || null;
 }
 
 async function resolveOnDeviceLabel({
@@ -337,7 +342,13 @@ async function resolveOnDeviceLabel({
   return { result, path: "on_device_ocr", durationMs };
 }
 
-function resolveFastLabelLookup({ visualPromise, ocrPromise, signal }) {
+function collectLabelOutcomes({
+  visualPromise,
+  ocrPromise,
+  signal,
+  timeoutMs = 7_500,
+  onTimeout,
+}) {
   const attempts = [
     visualPromise && { path: "cloud_image", promise: visualPromise },
     ocrPromise && { path: "on_device_ocr", promise: ocrPromise },
@@ -349,23 +360,42 @@ function resolveFastLabelLookup({ visualPromise, ocrPromise, signal }) {
 
   return new Promise((resolve, reject) => {
     const outcomes = [];
-    const errors = [];
     let completed = 0;
     let settled = false;
-    let visualFallbackTimer = null;
 
-    const finish = (outcome) => {
+    const onAbort = () => {
       if (settled) return;
       settled = true;
-      if (visualFallbackTimer) clearTimeout(visualFallbackTimer);
-      if (outcome) resolve(outcome);
-      else reject(errors[0] || new Error("Could not identify that product label."));
+      clearTimeout(timeout);
+      const abortError = new Error("Label resolution aborted");
+      abortError.name = "AbortError";
+      reject(abortError);
     };
 
-    const finishWhenComplete = () => {
-      if (completed !== attempts.length) return;
-      finish(pickBestLabelOutcome(outcomes));
+    const finish = ({ timedOut = false, cancelPending = false } = {}) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      signal?.removeEventListener?.("abort", onAbort);
+      if (timedOut) {
+        for (const attempt of attempts) {
+          if (!outcomes.some((outcome) => outcome.path === attempt.path)) {
+            const timeoutError = new Error(`${attempt.path} timed out`);
+            timeoutError.name = "TimeoutError";
+            outcomes.push({ path: attempt.path, error: timeoutError, latencyMs: timeoutMs });
+          }
+        }
+      }
+      if (timedOut || cancelPending) onTimeout?.();
+      resolve(outcomes);
     };
+
+    const timeout = setTimeout(() => finish({ timedOut: true }), timeoutMs);
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    signal?.addEventListener?.("abort", onAbort, { once: true });
 
     for (const attempt of attempts) {
       attempt.promise
@@ -373,42 +403,64 @@ function resolveFastLabelLookup({ visualPromise, ocrPromise, signal }) {
           if (settled || signal?.aborted) return;
           completed += 1;
           if (payload?.result) {
-            const outcome = { ...payload, path: payload.path || attempt.path };
-            outcomes.push(outcome);
-            if (outcome.result.selectedProduct && outcome.path === "cloud_image") {
-              visualFallbackTimer = setTimeout(() => {
-                finish(pickBestLabelOutcome(outcomes));
-              }, LABEL_RECONCILIATION_GRACE_MS);
+            outcomes.push({ ...payload, path: payload.path || attempt.path });
+            if (
+              (payload.path || attempt.path) === "on_device_ocr"
+              && payload.result.selectedProduct
+            ) {
+              finish({ cancelPending: true });
               return;
-            }
-            if (outcome.result.selectedProduct && outcome.path === "on_device_ocr") {
-              visualFallbackTimer = setTimeout(() => {
-                finish(pickBestLabelOutcome(outcomes));
-              }, LABEL_RECONCILIATION_GRACE_MS);
-              return;
-            }
-            if (outcome.path === "on_device_ocr" && hasUsableLabelResult(outcome.result)) {
-              visualFallbackTimer = setTimeout(() => {
-                finish(pickBestLabelOutcome(outcomes));
-              }, LABEL_RECONCILIATION_GRACE_MS);
-              return;
-            }
-            if (outcome.path === "cloud_image" && hasUsableLabelResult(outcome.result)) {
-              visualFallbackTimer = setTimeout(() => {
-                finish(pickBestLabelOutcome(outcomes));
-              }, LABEL_RECONCILIATION_GRACE_MS);
             }
           }
-          finishWhenComplete();
+          if (completed === attempts.length) finish();
         })
         .catch((error) => {
           if (settled || signal?.aborted) return;
           completed += 1;
-          errors.push(error);
-          finishWhenComplete();
+          outcomes.push({
+            path: attempt.path,
+            error,
+            latencyMs: Number(error?.stageLatencyMs) || null,
+          });
+          if (completed === attempts.length) finish();
         });
     }
   });
+}
+
+function mergeAutomaticLabelRecovery(previousResult, recoveryResult, recognizedQuery) {
+  const recoveredProducts = Array.isArray(recoveryResult?.products)
+    ? recoveryResult.products
+    : [];
+  if (recoveredProducts.length === 0) return previousResult;
+
+  const previousEvidence = previousResult?.resolutionEvidence || {};
+  return {
+    ...previousResult,
+    decision: LABEL_RESOLUTION_DECISIONS.NO_EXACT_VARIANT,
+    status: recoveryResult.status,
+    identification: {
+      ...(previousResult?.identification || {}),
+      found: true,
+      labelRead: true,
+      confidence: 0,
+      searchQuery: recognizedQuery,
+      notes: "The label was read and matching verified formulas were recovered. Choose the exact package variant.",
+    },
+    products: recoveredProducts,
+    confirmedProduct: null,
+    selectedProduct: null,
+    verificationState: recoveryResult.verificationState,
+    resolutionEvidence: {
+      ...previousEvidence,
+      pathsAvailable: [
+        ...new Set([...(previousEvidence.pathsAvailable || []), "recognized_text_recovery"]),
+      ],
+      reasonCodes: [
+        ...new Set([...(previousEvidence.reasonCodes || []), "automatic_recognized_text_recovery"]),
+      ],
+    },
+  };
 }
 
 function ProductImage({ product, theme }) {
@@ -419,7 +471,7 @@ function ProductImage({ product, theme }) {
       <Image
         source={{ uri: product.imageUrl }}
         style={styles.productImage}
-        resizeMode="cover"
+        resizeMode="contain"
         onError={() => setImageFailed(true)}
       />
     );
@@ -432,10 +484,11 @@ function ProductImage({ product, theme }) {
   );
 }
 
-function ProductRow({ product, theme, onPress }) {
+function ProductRow({ product, theme, onPress, exactConfirmed = false }) {
   const ready = productIsReady(product);
   const statusLabel = ingredientStatusLabel(product);
   const variantLabel = productVariantLabel(product);
+  const packageSizeLabel = productPackageSizeLabel(product);
 
   return (
     <Pressable
@@ -454,18 +507,26 @@ function ProductRow({ product, theme, onPress }) {
     >
       <ProductImage product={product} theme={theme} />
       <View style={styles.productCopy}>
-        <Text style={[styles.productName, { color: theme.textPrimary }]} numberOfLines={2}>
+        <Text style={[styles.productName, { color: theme.textPrimary }]} numberOfLines={3}>
           {product.productName}
         </Text>
         {variantLabel ? (
-          <Text style={[styles.productMeta, { color: theme.textSecondary }]} numberOfLines={1}>
+          <Text style={[styles.productMeta, { color: theme.textSecondary }]} numberOfLines={3}>
             {variantLabel}
           </Text>
         ) : null}
-        <Text style={[styles.productMeta, { color: theme.textTertiary }]} numberOfLines={1}>
-          {[product.brand, sourceLabel(product)].filter(Boolean).join(" • ")}
-        </Text>
-        <View style={styles.productBadges}>
+        {packageSizeLabel ? (
+          <View
+            style={[styles.packageSizeChip, { backgroundColor: theme.surface, borderColor: theme.separator }]}
+            accessible
+            accessibilityLabel={`Package size ${packageSizeLabel}`}
+          >
+            <Text style={[styles.packageSizeChipText, { color: theme.textPrimary }]} numberOfLines={1}>
+              {packageSizeLabel}
+            </Text>
+          </View>
+        ) : null}
+        <View style={styles.productEvidenceRow}>
           <View
             style={[
               styles.statusBadge,
@@ -482,17 +543,12 @@ function ProductRow({ product, theme, onPress }) {
               ]}
               numberOfLines={1}
             >
-              {statusLabel}
+              {exactConfirmed ? "Exact label match" : statusLabel}
             </Text>
           </View>
-          {productHasVerifiedImage(product) && (
-            <View style={[styles.statusBadge, { backgroundColor: theme.card, borderColor: theme.textSecondary + "35" }]}>
-              <BadgeCheck size={13} color={theme.textSecondary} strokeWidth={2.1} />
-              <Text style={[styles.statusBadgeText, { color: theme.textSecondary }]}>
-                Image verified
-              </Text>
-            </View>
-          )}
+          <Text style={[styles.productSource, { color: theme.textTertiary }]} numberOfLines={1}>
+            {[sourceLabel(product), productHasVerifiedImage(product) ? "Verified catalog photo" : ""].filter(Boolean).join(" • ")}
+          </Text>
         </View>
       </View>
     </Pressable>
@@ -507,7 +563,12 @@ function LabelSummary({ identification, theme }) {
     : "No readable product label";
 
   return (
-    <View style={[styles.labelSummary, { backgroundColor: theme.surface, borderColor: theme.separator }]}>
+    <View
+      style={[styles.labelSummary, { backgroundColor: theme.surface, borderColor: theme.separator }]}
+      accessible
+      accessibilityLiveRegion="polite"
+      accessibilityLabel={`Label scan. ${title}. ${identification.notes || ""}`}
+    >
       <Text style={[styles.labelSummaryEyebrow, { color: theme.textTertiary }]}>
         Label scan
       </Text>
@@ -529,62 +590,186 @@ function formatCorrectedQuery(value) {
     ["iams", "IAMS"],
     ["nulo", "Nulo"],
     ["purina", "Purina"],
+    ["orijen", "ORIJEN"],
+    ["ziwi", "ZIWI"],
   ]);
 
   return String(value || "")
     .split(" ")
     .filter(Boolean)
-    .map((term) => brandTerms.get(term) || `${term.charAt(0).toUpperCase()}${term.slice(1)}`)
+    .map((term) => brandTerms.get(term.toLowerCase()) || term
+      .split(/([-'])/)
+      .map((part) => /^[-']$/.test(part) ? part : `${part.charAt(0).toUpperCase()}${part.slice(1).toLowerCase()}`)
+      .join(""))
     .join(" ");
 }
 
-function EmptyState({ theme, query, identification, onScanLabel, onScanIngredients }) {
+function productStableKey(product = {}) {
+  return String(
+    product.cacheKey
+    || product.gtin
+    || product.barcode
+    || product.id
+    || [product.brand, product.productName, product.packageSize].filter(Boolean).join(":")
+  ).trim().toLowerCase();
+}
+
+function reconcileSearchProducts(current = [], fresh = []) {
+  const freshByKey = new Map(fresh.map((product) => [productStableKey(product), product]));
+  const reconciled = current
+    .map((product) => {
+      const key = productStableKey(product);
+      const update = freshByKey.get(key);
+      if (!update) return null;
+      freshByKey.delete(key);
+      return update;
+    })
+    .filter(Boolean);
+  return [...reconciled, ...freshByKey.values()].slice(0, SEARCH_RESULT_LIMIT);
+}
+
+function EmptyState({
+  theme,
+  query,
+  identification,
+  resolutionDecision,
+  onSearchRecognized,
+  onSearchByName,
+  onRetrySearch,
+  onRetryLabel,
+  onScanLabel,
+  onScanIngredients,
+  labelAttempt,
+  searchFailureKind,
+  noneOfTheseSelected,
+}) {
   const hasQuery = query.trim().length >= MIN_QUERY_LENGTH;
-  const labelWasRead = identification?.found === true;
+  const labelWasRead = identification?.labelRead === true || identification?.found === true;
   const excludedProduct = identification?.excluded === true;
   const hasAcquisitionGap = hasQuery || labelWasRead;
   const cameFromLabel = identification != null;
+  const labelTimedOut = resolutionDecision === LABEL_RESOLUTION_DECISIONS.TIMED_OUT;
+  const recognizedSearchReady = labelTimedOut && hasQuery;
+  const needsLabelRetry = cameFromLabel && (
+    [
+      LABEL_RESOLUTION_DECISIONS.RECOGNIZERS_DISAGREE,
+      LABEL_RESOLUTION_DECISIONS.NO_EXACT_VARIANT,
+      LABEL_RESOLUTION_DECISIONS.NOT_READABLE,
+    ].includes(resolutionDecision)
+    || (labelTimedOut && !recognizedSearchReady)
+  );
+  const repeatedLabelFailure = needsLabelRetry && labelAttempt >= 2;
   return (
     <View style={styles.emptyState}>
       <Search size={40} color={theme.textTertiary} strokeWidth={1.5} />
       <Text style={[styles.emptyTitle, { color: theme.textPrimary }]}>
-        {excludedProduct ? "Not a complete pet food" : hasAcquisitionGap ? "No verified match yet" : "Find a product"}
+        {excludedProduct
+          ? "Not a complete pet food"
+          : searchFailureKind
+            ? searchFailureKind === "timeout" ? "Search timed out" : "Couldn't search the catalog"
+          : noneOfTheseSelected
+            ? "Scan the ingredients panel"
+          : recognizedSearchReady
+            ? "Label read — search ready"
+            : repeatedLabelFailure
+              ? "Try another way"
+            : needsLabelRetry
+            ? "Exact product not confirmed"
+            : hasAcquisitionGap
+              ? "No verified match yet"
+              : "Find a product"}
       </Text>
       <Text style={[styles.emptyText, { color: theme.textTertiary }]}>
         {excludedProduct
-          ? `${identification.exclusionReason || "This item is not a complete dog or cat food."} Woof scores complete foods only.`
+          ? `${identification.exclusionReason || "This item is not a complete dog or cat food."} ${BRAND_NAME} scores complete foods only.`
+          : searchFailureKind
+            ? "The catalog did not finish this search. Retry the same name before treating it as a catalog gap."
+          : noneOfTheseSelected
+            ? "The photographed package was not in the list. Scan its ingredients for a private score or catalog review, or try a new front-label photo."
+          : recognizedSearchReady
+            ? "The catalog took longer than expected, but the product name was saved above. Search it now or edit the wording first."
+            : repeatedLabelFailure
+              ? "Two front-label photos could not confirm this exact package. Search by name or scan the ingredients panel instead."
+            : needsLabelRetry
+            ? "Try the photo again with one package in frame. Move closer, reduce glare, and keep the brand and recipe readable. You can also edit the search above."
           : labelWasRead
-          ? "Woof found the product name but not a verified catalog match. Scan the ingredients list so it can be reviewed and added."
+          ? `${BRAND_NAME} found the product name but not a verified catalog match. Scan the ingredients list so it can be reviewed and added.`
           : hasQuery
             ? "Check the product name, scan the front label, or scan the ingredients list if this product is not verified yet."
             : "Search by product name or scan the front label from the shelf. Barcode pickup is optional, not required."}
       </Text>
       <Pressable
-        onPress={hasAcquisitionGap && !excludedProduct ? onScanIngredients : onScanLabel}
+        onPress={
+          recognizedSearchReady
+            ? onSearchRecognized
+            : searchFailureKind
+              ? onRetrySearch
+            : noneOfTheseSelected
+              ? onScanIngredients
+            : repeatedLabelFailure
+              ? (hasAcquisitionGap && !excludedProduct ? onScanIngredients : onSearchByName)
+            : needsLabelRetry
+              ? onRetryLabel
+              : hasAcquisitionGap && !excludedProduct
+                ? onScanIngredients
+                : onScanLabel
+        }
         style={({ pressed }) => [
           styles.emptyButton,
           { backgroundColor: theme.buttonPrimary, opacity: pressed ? 0.84 : 1 },
         ]}
         accessibilityRole="button"
-        accessibilityLabel={hasAcquisitionGap && !excludedProduct ? "Scan ingredients list" : "Scan a product label"}
+        accessibilityLabel={
+          recognizedSearchReady
+            ? "Search the recognized product name"
+            : searchFailureKind
+              ? "Retry product search"
+            : noneOfTheseSelected
+              ? "Scan ingredients list"
+            : repeatedLabelFailure
+              ? (hasAcquisitionGap && !excludedProduct ? "Scan ingredients list" : "Search products by name")
+            : needsLabelRetry
+              ? "Retry the captured front label"
+              : hasAcquisitionGap && !excludedProduct
+                ? "Scan ingredients list"
+                : "Scan a product label"
+        }
       >
-        <Camera size={17} color={theme.buttonText} strokeWidth={2} />
+        {recognizedSearchReady || searchFailureKind || (repeatedLabelFailure && !hasAcquisitionGap)
+          ? <Search size={17} color={theme.buttonText} strokeWidth={2} />
+          : <Camera size={17} color={theme.buttonText} strokeWidth={2} />}
         <Text style={[styles.emptyButtonText, { color: theme.buttonText }]}>
-          {hasAcquisitionGap && !excludedProduct ? "Scan Ingredients" : "Scan Front Label"}
+          {recognizedSearchReady
+            ? "Search Recognized Name"
+            : searchFailureKind
+              ? "Retry Search"
+            : noneOfTheseSelected
+              ? "Scan Ingredients"
+            : repeatedLabelFailure
+              ? (hasAcquisitionGap && !excludedProduct ? "Scan Ingredients" : "Search by Name")
+            : needsLabelRetry
+              ? "Try Photo Again"
+              : hasAcquisitionGap && !excludedProduct
+                ? "Scan Ingredients"
+                : "Scan Front Label"}
         </Text>
       </Pressable>
-      {hasAcquisitionGap && !excludedProduct ? (
+      {hasAcquisitionGap && !excludedProduct && (noneOfTheseSelected || !needsLabelRetry || recognizedSearchReady || repeatedLabelFailure) ? (
         <Pressable
-          onPress={onScanLabel}
+          onPress={noneOfTheseSelected ? onRetryLabel : (repeatedLabelFailure ? onSearchByName : (recognizedSearchReady ? onRetryLabel : onScanLabel))}
           style={({ pressed }) => [
             styles.emptySecondaryButton,
             { borderColor: theme.separator, opacity: pressed ? 0.78 : 1 },
           ]}
           accessibilityRole="button"
-          accessibilityLabel={cameFromLabel ? "Try another front label photo" : "Scan a product label"}
+          accessibilityLabel={noneOfTheseSelected ? "Try a new front label photo" : (repeatedLabelFailure ? "Search products by name" : (cameFromLabel ? "Try the front label again" : "Scan a product label"))}
         >
           <Text style={[styles.emptySecondaryButtonText, { color: theme.textPrimary }]}>
-            {cameFromLabel ? "Try Front Label Again" : "Scan Front Label"}
+            {recognizedSearchReady
+              ? "Retry Exact Match"
+              : noneOfTheseSelected ? "Try Front Label Again"
+              : repeatedLabelFailure ? "Search by Name"
+              : cameFromLabel ? "Try Front Label Again" : "Scan Front Label"}
           </Text>
         </Pressable>
       ) : null}
@@ -594,6 +779,8 @@ function EmptyState({ theme, query, identification, onScanLabel, onScanIngredien
 
 export default function ProductSearchScreen({ navigation, route }) {
   const theme = useTheme();
+  const { profile, canScan, remainingScans } = useAuth();
+  const savedPetType = normalizePetProfile(profile?.pet_profile).petType;
   const initialQuery = route.params?.initialQuery || "";
   const labelImageBase64 = route.params?.labelImageBase64 || null;
   const labelImageUri = route.params?.labelImageUri || null;
@@ -602,6 +789,7 @@ export default function ProductSearchScreen({ navigation, route }) {
   const labelOcrDurationMs = Number(route.params?.labelOcrDurationMs) || null;
   const labelCaptureId = route.params?.labelCaptureId || "";
   const labelCaptureStartedAt = Number(route.params?.labelCaptureStartedAt) || null;
+  const labelAttempt = Math.max(1, Number(route.params?.labelAttempt) || 1);
   const hasLabelLookupInput = Boolean(labelImageBase64 || labelOcrText);
   const [query, setQuery] = useState(initialQuery);
   const [products, setProducts] = useState([]);
@@ -611,17 +799,64 @@ export default function ProductSearchScreen({ navigation, route }) {
   const [error, setError] = useState(null);
   const [showingCached, setShowingCached] = useState(false);
   const [searchCorrection, setSearchCorrection] = useState("");
+  const [resolutionDecision, setResolutionDecision] = useState(null);
+  const [confirmedFormulaKey, setConfirmedFormulaKey] = useState("");
+  const [searchFailureKind, setSearchFailureKind] = useState(null);
+  const [noneOfTheseSelected, setNoneOfTheseSelected] = useState(false);
+  const [petTypeFilter, setPetTypeFilter] = useState(
+    savedPetType === "dog" || savedPetType === "cat" ? savedPetType : "all"
+  );
+  const [labelLoadingMessage, setLabelLoadingMessage] = useState(
+    labelOcrText ? "Matching exact product..." : "Reading product label..."
+  );
   const searchRunRef = useRef(0);
+  const searchAbortRef = useRef(null);
   const labelRunRef = useRef(null);
+  const labelAbortRef = useRef(null);
+  const recognizedOcrRef = useRef({
+    text: labelOcrText,
+    lines: labelOcrLines,
+    durationMs: labelOcrDurationMs,
+  });
+  const statusRef = useRef(null);
+  const searchInputRef = useRef(null);
   const lastSubmittedQueryRef = useRef("");
+  const petTypeFilterTouchedRef = useRef(false);
 
   const trimmedQuery = query.trim();
   const title = labelLoading ? "Reading label" : "Find Product";
 
+  useEffect(() => {
+    if (petTypeFilterTouchedRef.current) return;
+    if (savedPetType === "dog" || savedPetType === "cat") {
+      setPetTypeFilter(savedPetType);
+    }
+  }, [savedPetType]);
+
+  useEffect(() => {
+    if (!labelLoading) return undefined;
+    setLabelLoadingMessage(labelOcrText ? "Matching exact product..." : "Reading product label...");
+    const matchingTimer = setTimeout(() => setLabelLoadingMessage("Matching exact product..."), 1_200);
+    const finishingTimer = setTimeout(() => setLabelLoadingMessage("Finishing verification..."), 4_000);
+    const evidenceTimer = setTimeout(() => setLabelLoadingMessage("Checking exact package details..."), 8_000);
+    const longRunningTimer = setTimeout(() => setLabelLoadingMessage("Still working — exact matching can take a little longer..."), 12_000);
+    return () => {
+      clearTimeout(matchingTimer);
+      clearTimeout(finishingTimer);
+      clearTimeout(evidenceTimer);
+      clearTimeout(longRunningTimer);
+    };
+  }, [labelLoading, labelOcrText]);
+
+  useEffect(() => () => {
+    searchRunRef.current += 1;
+    searchAbortRef.current?.abort();
+  }, []);
+
   const labelLookupErrorMessage = useCallback((err) => {
     const message = String(err?.message || "").toLowerCase();
     if (message.includes("timed out") || message.includes("abort")) {
-      return "Could not read that label in time. Search the brand or recipe name instead.";
+      return "Exact catalog matching took too long. Search the brand or recipe name instead.";
     }
     if (message.includes("rate limit")) {
       return "Label lookup is busy right now. Search the brand or recipe name instead.";
@@ -629,7 +864,21 @@ export default function ProductSearchScreen({ navigation, route }) {
     return "Could not read that label. Try a clearer front-of-package photo or search by name.";
   }, []);
 
-  const openProductResult = useCallback((product, {
+  useEffect(() => {
+    if (!error && ![
+      LABEL_RESOLUTION_DECISIONS.RECOGNIZERS_DISAGREE,
+      LABEL_RESOLUTION_DECISIONS.TIMED_OUT,
+      LABEL_RESOLUTION_DECISIONS.NO_EXACT_VARIANT,
+    ].includes(resolutionDecision)) return;
+
+    const timer = setTimeout(() => {
+      const node = findNodeHandle(statusRef.current);
+      if (node) AccessibilityInfo.setAccessibilityFocus(node);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [error, resolutionDecision]);
+
+  const openProductResult = useCallback(async (product, {
     sourceSurface = "product_search",
     autoOpen = false,
     labelConfidence = null,
@@ -639,40 +888,70 @@ export default function ProductSearchScreen({ navigation, route }) {
       Haptics.selectionAsync();
     }
 
+    let resolvedProduct = product;
+    const needsHydration = Boolean(
+      product?.cacheKey
+      && Number(product?.ingredientCount || 0) >= 5
+      && !String(product?.ingredientsText || "").trim()
+      && (!Array.isArray(product?.ingredients) || product.ingredients.length === 0)
+    );
+    if (needsHydration) {
+      const hydrationStartedAt = Date.now();
+      const hydrated = await getCatalogProduct(product.cacheKey);
+      trackEvent("catalog_product_hydration_completed", {
+        source_surface: sourceSurface,
+        success: Boolean(hydrated),
+        latency_ms: Date.now() - hydrationStartedAt,
+      });
+      if (!hydrated) {
+        Alert.alert(
+          "Product details are still loading",
+          "The exact formula was identified, but its verified ingredients could not be loaded. Please try again."
+        );
+        return;
+      }
+      resolvedProduct = hydrated;
+    }
+
     trackEvent(autoOpen ? "catalog_label_auto_opened" : "catalog_product_opened", {
       source_surface: sourceSurface,
-      source: product.source,
-      source_kind: product.sourceKind,
-      source_quality: product.sourceQuality,
-      ingredient_verification_status: product.ingredientVerificationStatus,
-      image_verification_status: product.imageVerificationStatus,
-      has_image: !!product.imageUrl,
-      ready_to_score: productIsReady(product),
-      ingredient_count: product.ingredientCount,
+      source: resolvedProduct.source,
+      source_kind: resolvedProduct.sourceKind,
+      source_quality: resolvedProduct.sourceQuality,
+      ingredient_verification_status: resolvedProduct.ingredientVerificationStatus,
+      image_verification_status: resolvedProduct.imageVerificationStatus,
+      has_image: !!resolvedProduct.imageUrl,
+      ready_to_score: productIsReady(resolvedProduct),
+      ingredient_count: resolvedProduct.ingredientCount,
       label_confidence: labelConfidence,
     });
 
-    if (!productIsReady(product)) {
+    if (!productIsReady(resolvedProduct)) {
       logCatalogVerificationGapEvent({
         source: sourceSurface,
-        query: matchQuery || query || product.productName,
+        query: matchQuery || query || resolvedProduct.productName,
         products,
-        selectedProduct: product,
+        selectedProduct: resolvedProduct,
         trigger: autoOpen ? "auto_open_blocked" : "product_tapped",
       });
       Alert.alert(
         "Ingredient verification needed",
-        "Woof found this product by name, but needs the full ingredients list before it can be reviewed and scored accurately.",
+        `${BRAND_NAME} found this product by name, but needs the full ingredients list before it can be reviewed and scored accurately.`,
         [
           { text: "Cancel", style: "cancel" },
           {
             text: "Scan Ingredients",
-            onPress: () => navigation.navigate("Scanner", {
-              mode: "ingredient_capture",
-              acquisitionQuery: matchQuery || query || product.productName,
-              candidateProduct: ingredientCaptureProduct(product),
-              sourceSurface,
-            }),
+            onPress: async () => {
+              const catalogEvidenceConsent = await requestCatalogEvidenceConsent();
+              if (catalogEvidenceConsent == null) return;
+              navigation.navigate("Scanner", {
+                mode: "ingredient_capture",
+                acquisitionQuery: matchQuery || query || resolvedProduct.productName,
+                candidateProduct: ingredientCaptureProduct(resolvedProduct),
+                sourceSurface,
+                catalogEvidenceConsent,
+              });
+            },
           },
         ],
       );
@@ -681,9 +960,9 @@ export default function ProductSearchScreen({ navigation, route }) {
 
     navigation.navigate("Results", {
       mode: "catalog",
-      cacheKey: product.cacheKey,
-      catalogProduct: product,
-      uri: labelImageUri || product.imageUrl || null,
+      cacheKey: resolvedProduct.cacheKey,
+      catalogProduct: resolvedProduct,
+      uri: labelImageUri || resolvedProduct.imageUrl || null,
     });
   }, [navigation, labelImageUri, products, query]);
   const openProductResultRef = useRef(openProductResult);
@@ -692,27 +971,51 @@ export default function ProductSearchScreen({ navigation, route }) {
     openProductResultRef.current = openProductResult;
   }, [openProductResult]);
 
-  const runSearch = useCallback(async (nextQuery, source = "typed") => {
+  const clearScanContext = useCallback(() => {
+    labelAbortRef.current?.abort();
+    labelAbortRef.current = null;
+    setLabelLoading(false);
+    setIdentification(null);
+    setResolutionDecision(null);
+    setConfirmedFormulaKey("");
+    setNoneOfTheseSelected(false);
+  }, []);
+
+  const runSearch = useCallback(async (nextQuery, source = "typed", filterOverride = petTypeFilter) => {
     const term = nextQuery.trim();
+    const requestedPetType = filterOverride === "dog" || filterOverride === "cat"
+      ? filterOverride
+      : null;
+    if (source === "typed" || source === "submit" || source === "recognized_label") {
+      clearScanContext();
+    }
     if (term.length < MIN_QUERY_LENGTH) {
       setProducts([]);
       setError(null);
       setShowingCached(false);
       setSearchCorrection("");
+      setSearchFailureKind(null);
       return;
     }
 
     const runId = searchRunRef.current + 1;
     searchRunRef.current = runId;
+    searchAbortRef.current?.abort();
     setLoading(true);
     setError(null);
     setSearchCorrection("");
+    setSearchFailureKind(null);
 
     const controller = new AbortController();
+    searchAbortRef.current = controller;
+    const searchTimeout = setTimeout(() => controller.abort(), SEARCH_UI_TIMEOUT_MS);
     const startedAt = Date.now();
     let servedCached = false;
     try {
-      const cached = await getCachedCatalogSearch(term, { limit: SEARCH_RESULT_LIMIT });
+      const cached = await getCachedCatalogSearch(term, {
+        limit: SEARCH_RESULT_LIMIT,
+        petType: requestedPetType,
+      });
       if (searchRunRef.current !== runId) return;
       if (cached?.products?.length > 0) {
         servedCached = true;
@@ -731,12 +1034,13 @@ export default function ProductSearchScreen({ navigation, route }) {
         query: term,
         limit: SEARCH_RESULT_LIMIT,
         signal: controller.signal,
+        petType: requestedPetType,
       });
       if (searchRunRef.current !== runId) return;
-      setProducts(result.products);
+      setProducts((current) => reconcileSearchProducts(current, result.products));
       setShowingCached(false);
       setSearchCorrection(result.queryWasCorrected ? result.searchedQuery : "");
-      saveCachedCatalogSearch(term, result.products).catch(() => {});
+      saveCachedCatalogSearch(term, result.products, { petType: requestedPetType }).catch(() => {});
       logCatalogLookupEvent({
         source,
         query: term,
@@ -764,8 +1068,22 @@ export default function ProductSearchScreen({ navigation, route }) {
       });
     } catch (err) {
       if (searchRunRef.current !== runId) return;
+      if (
+        (err?.name === "AbortError" && controller.signal.aborted)
+        || err?.name === "TimeoutError"
+      ) {
+        setError(servedCached
+          ? "Refresh took too long. Showing the last saved match."
+          : "The catalog is taking longer than expected. Please try again.");
+        setSearchFailureKind("timeout");
+        if (!servedCached) setProducts([]);
+        return;
+      }
       logger.debug("[PRODUCT_SEARCH] Search failed:", err.message);
-      setError(servedCached ? "Could not refresh results. Showing the last saved match." : "Search failed. Please try again.");
+      setError(servedCached
+        ? "Could not refresh results. Showing the last saved match."
+        : "Search failed. Please try again.");
+      setSearchFailureKind("error");
       if (!servedCached) {
         setProducts([]);
         setShowingCached(false);
@@ -784,9 +1102,11 @@ export default function ProductSearchScreen({ navigation, route }) {
         message: err.message,
       });
     } finally {
+      clearTimeout(searchTimeout);
+      if (searchAbortRef.current === controller) searchAbortRef.current = null;
       if (searchRunRef.current === runId) setLoading(false);
     }
-  }, []);
+  }, [clearScanContext, petTypeFilter]);
 
   useEffect(() => {
     if (!hasLabelLookupInput) return;
@@ -794,7 +1114,11 @@ export default function ProductSearchScreen({ navigation, route }) {
       || `${labelImageUri || "camera"}:${labelImageBase64?.length || 0}:${labelOcrText.length}`;
     if (labelRunRef.current === lookupKey) return;
     labelRunRef.current = lookupKey;
-    const controller = new AbortController();
+    const lifecycleController = new AbortController();
+    const requestController = new AbortController();
+    const abortRequests = () => requestController.abort();
+    lifecycleController.signal.addEventListener("abort", abortRequests, { once: true });
+    labelAbortRef.current = lifecycleController;
 
     (async () => {
       setLabelLoading(true);
@@ -803,6 +1127,11 @@ export default function ProductSearchScreen({ navigation, route }) {
       setProducts([]);
       setShowingCached(false);
       setSearchCorrection("");
+      recognizedOcrRef.current = {
+        text: labelOcrText,
+        lines: labelOcrLines,
+        durationMs: labelOcrDurationMs,
+      };
       trackEvent("label_lookup_started", {
         has_photo_uri: !!labelImageUri,
         image_base64_length: labelImageBase64?.length || 0,
@@ -816,23 +1145,44 @@ export default function ProductSearchScreen({ navigation, route }) {
         ? labelCaptureStartedAt
         : resolverStartedAt;
       try {
+        const runtimeConfigPromise = getLabelResolutionConfig();
+        const visualStartedAt = Date.now();
         const visualPromise = labelImageBase64
           ? resolveProduct({
             type: "label",
             imageBase64: labelImageBase64,
-            signal: controller.signal,
+            signal: requestController.signal,
             limit: SEARCH_RESULT_LIMIT,
-          }).then((result) => ({ result, path: "cloud_image" }))
+          })
+            .then((result) => ({
+              result,
+              path: "cloud_image",
+              latencyMs: Date.now() - visualStartedAt,
+            }))
+            .catch((error) => {
+              const stageError = error instanceof Error ? error : new Error(String(error));
+              stageError.stageLatencyMs = Date.now() - visualStartedAt;
+              throw stageError;
+            })
           : null;
         const canRunOcr = Boolean(labelOcrText || (labelImageUri && labelOcrIsAvailable()));
+        const ocrStartedAt = Date.now();
         const ocrPromise = canRunOcr
           ? resolveOnDeviceLabel({
             labelOcrText,
             labelOcrLines,
             labelOcrDurationMs,
             labelImageUri,
-            signal: controller.signal,
+            signal: requestController.signal,
             onOcrCompleted: (ocr) => {
+              if (ocr?.usable) {
+                recognizedOcrRef.current = {
+                  text: ocr.text,
+                  lines: ocr.lines,
+                  durationMs: ocr.durationMs,
+                };
+                setLabelLoadingMessage("Matching exact product...");
+              }
               trackEvent("label_ocr_completed", {
                 usable: ocr?.usable === true,
                 duration_ms: Math.round(ocr?.durationMs || 0),
@@ -842,6 +1192,15 @@ export default function ProductSearchScreen({ navigation, route }) {
               });
             },
           })
+            .then((outcome) => outcome ? {
+              ...outcome,
+              latencyMs: Date.now() - ocrStartedAt,
+            } : outcome)
+            .catch((error) => {
+              const stageError = error instanceof Error ? error : new Error(String(error));
+              stageError.stageLatencyMs = Date.now() - ocrStartedAt;
+              throw stageError;
+            })
           : null;
         trackEvent("label_lookup_parallel_started", {
           visual_started: !!visualPromise,
@@ -849,41 +1208,115 @@ export default function ProductSearchScreen({ navigation, route }) {
           capture_to_resolver_ms: resolverStartedAt - startedAt,
         });
 
-        const outcome = await resolveFastLabelLookup({
+        // The runtime-config read must not delay useful recognition work. Attach
+        // rejection handlers immediately while the config, OCR, and visual paths
+        // run together, then spend only the remainder of the total UI budget.
+        visualPromise?.catch(() => {});
+        ocrPromise?.catch(() => {});
+        const runtimeConfig = await runtimeConfigPromise;
+        if (lifecycleController.signal.aborted) return;
+        const elapsedBeforeReconciliationMs = Date.now() - resolverStartedAt;
+        const remainingReconciliationMs = Math.max(
+          250,
+          runtimeConfig.reconciliationTimeoutMs - elapsedBeforeReconciliationMs
+        );
+
+        const outcomesPromise = collectLabelOutcomes({
           visualPromise,
           ocrPromise,
-          signal: controller.signal,
+          signal: lifecycleController.signal,
+          timeoutMs: remainingReconciliationMs,
+          onTimeout: abortRequests,
         });
-        const result = outcome?.result;
-        const recognitionPath = outcome?.path || "cloud_image";
+        const outcomes = await outcomesPromise;
+        let result = reconcileLabelOutcomes(outcomes, runtimeConfig);
 
         if (!result) {
           throw new Error("No readable label text was found.");
         }
-        setIdentification(result.identification);
+        const recognizedOcr = recognizedOcrRef.current;
+        const recognizedQuery = labelOcrSearchQueries(
+          recognizedOcr.text,
+          recognizedOcr.lines
+        )[0] || collapseRepeatedIdentityText(recognizedOcr.text);
+        let automaticRecoveryAttempted = false;
+        let automaticRecoverySucceeded = false;
+        let automaticRecoveryLatencyMs = null;
+        if (
+          result.decision === LABEL_RESOLUTION_DECISIONS.TIMED_OUT
+          && recognizedQuery
+          && !lifecycleController.signal.aborted
+        ) {
+          automaticRecoveryAttempted = true;
+          setLabelLoadingMessage("Using the recognized product name...");
+          const recoveryStartedAt = Date.now();
+          const recoveryController = new AbortController();
+          const abortRecovery = () => recoveryController.abort();
+          lifecycleController.signal.addEventListener("abort", abortRecovery, { once: true });
+          const recoveryTimeout = setTimeout(
+            () => recoveryController.abort(),
+            AUTOMATIC_LABEL_RECOVERY_TIMEOUT_MS
+          );
+          try {
+            const recoveryResult = await resolveProduct({
+              type: "search",
+              query: recognizedQuery,
+              limit: SEARCH_RESULT_LIMIT,
+              signal: recoveryController.signal,
+            });
+            if (lifecycleController.signal.aborted) return;
+            result = mergeAutomaticLabelRecovery(result, recoveryResult, recognizedQuery);
+            automaticRecoverySucceeded = result.decision
+              !== LABEL_RESOLUTION_DECISIONS.TIMED_OUT;
+          } catch (recoveryError) {
+            logger.debug(
+              "[PRODUCT_SEARCH] Automatic recognized-label recovery failed:",
+              recoveryError?.message || recoveryError
+            );
+          } finally {
+            automaticRecoveryLatencyMs = Date.now() - recoveryStartedAt;
+            clearTimeout(recoveryTimeout);
+            lifecycleController.signal.removeEventListener("abort", abortRecovery);
+          }
+        }
+        const recognitionPath = result.resolutionEvidence.pathsAvailable.join("+") || "none";
+        const resultIdentification = {
+          ...result.identification,
+          found: result.identification?.found === true,
+          labelRead: result.identification?.labelRead === true || Boolean(recognizedQuery),
+          searchQuery: result.identification?.searchQuery || recognizedQuery,
+        };
+        setIdentification(resultIdentification);
         setProducts(result.products);
+        setResolutionDecision(result.decision);
+        setConfirmedFormulaKey(
+          result.confirmedProduct ? productFormulaKey(result.confirmedProduct) : ""
+        );
         setShowingCached(false);
-        if (result.identification?.searchQuery) {
-          setQuery(result.identification.searchQuery);
-          lastSubmittedQueryRef.current = result.identification.searchQuery;
-          saveCachedCatalogSearch(result.identification.searchQuery, result.products).catch(() => {});
-          saveCachedCatalogSearch(result.identification.searchQuery, result.products, {
-            petType: result.identification?.petType,
+        if (resultIdentification.searchQuery) {
+          setQuery(resultIdentification.searchQuery);
+          lastSubmittedQueryRef.current = resultIdentification.searchQuery;
+          saveCachedCatalogSearch(resultIdentification.searchQuery, result.products).catch(() => {});
+          saveCachedCatalogSearch(resultIdentification.searchQuery, result.products, {
+            petType: resultIdentification.petType,
           }).catch(() => {});
         }
         logCatalogLookupEvent({
           source: recognitionPath === "on_device_ocr" ? "label_scan_on_device" : "label_scan",
-          query: result.identification?.searchQuery,
-          identification: result.identification,
+          query: resultIdentification.searchQuery,
+          identification: resultIdentification,
           products: result.products,
           resolverStatus: result.status,
+          resolutionDecision: result.decision,
+          resolutionEvidence: result.resolutionEvidence,
+          recognitionPath,
           verificationState: result.verificationState,
           latencyMs: Date.now() - startedAt,
         });
         logCatalogVerificationGapEvent({
           source: recognitionPath === "on_device_ocr" ? "label_scan_on_device" : "label_scan",
-          query: result.identification?.searchQuery,
-          identification: result.identification,
+          query: resultIdentification.searchQuery,
+          identification: resultIdentification,
           products: result.products,
           resolverStatus: result.status,
           verificationState: result.verificationState,
@@ -891,41 +1324,88 @@ export default function ProductSearchScreen({ navigation, route }) {
           latencyMs: Date.now() - startedAt,
         });
         trackEvent("label_lookup_completed", {
-          found: !!result.identification?.found,
+          found: result.products.length > 0,
+          label_read: !!resultIdentification.labelRead,
+          match_found: result.products.length > 0,
+          timed_out: result.decision === LABEL_RESOLUTION_DECISIONS.TIMED_OUT,
           resolver_status: result.status,
-          confidence: result.identification?.confidence ?? null,
+          confidence: resultIdentification.confidence ?? null,
           result_count: result.products.length,
           image_result_count: result.products.filter((product) => !!product.imageUrl).length,
           auto_opened: !!result.selectedProduct,
           recognition_path: recognitionPath,
+          resolution_decision: result.decision,
+          agreement_fields: result.resolutionEvidence.agreementFields,
+          disagreement_fields: result.resolutionEvidence.disagreementFields,
+          reason_codes: result.resolutionEvidence.reasonCodes,
+          visual_confirmation: result.resolutionEvidence.visualConfirmation,
+          runtime_config_source: runtimeConfig.source,
+          automatic_recovery_attempted: automaticRecoveryAttempted,
+          automatic_recovery_succeeded: automaticRecoverySucceeded,
+          automatic_recovery_latency_ms: automaticRecoveryLatencyMs,
           total_latency_ms: Date.now() - startedAt,
           resolver_latency_ms: Date.now() - resolverStartedAt,
           capture_to_resolver_ms: resolverStartedAt - startedAt,
         });
         if (result.selectedProduct) {
-          openProductResultRef.current(result.selectedProduct, {
+          await openProductResultRef.current(result.selectedProduct, {
             sourceSurface: recognitionPath === "on_device_ocr" ? "label_scan_on_device" : "label_scan",
             autoOpen: true,
-            labelConfidence: result.identification?.confidence ?? null,
-            matchQuery: result.identification?.searchQuery || result.identification?.productName || "",
+            labelConfidence: resultIdentification.confidence ?? null,
+            matchQuery: resultIdentification.searchQuery || resultIdentification.productName || "",
           });
         }
       } catch (err) {
-        if (err.name === "AbortError" && controller.signal.aborted) return;
+        if (lifecycleController.signal.aborted) return;
         logger.debug("[PRODUCT_SEARCH] Label lookup failed:", err.message);
-        setError(labelLookupErrorMessage(err));
+        const recognizedOcr = recognizedOcrRef.current;
+        const recognizedQuery = labelOcrSearchQueries(
+          recognizedOcr.text,
+          recognizedOcr.lines
+        )[0] || collapseRepeatedIdentityText(recognizedOcr.text);
+        if (recognizedQuery) {
+          setQuery(recognizedQuery);
+          lastSubmittedQueryRef.current = recognizedQuery;
+          setIdentification({
+            found: false,
+            labelRead: true,
+            confidence: 0,
+            searchQuery: recognizedQuery,
+            notes: "The label was read, but exact catalog confirmation took too long.",
+          });
+          setResolutionDecision(LABEL_RESOLUTION_DECISIONS.TIMED_OUT);
+          setError(null);
+          setLabelLoadingMessage("Searching by the recognized product name...");
+          await runSearch(recognizedQuery, "label_timeout_recovery", petTypeFilter);
+        } else {
+          setError(labelLookupErrorMessage(err));
+        }
         logCatalogLookupEvent({
           source: "label_scan",
+          query: recognizedQuery,
           latencyMs: Date.now() - startedAt,
           errorMessage: err.message,
         });
-        trackEvent("label_lookup_failed", { message: err.message });
+        trackEvent("label_lookup_failed", {
+          message: err.message,
+          scan_mode: "label_lookup",
+          failure_category: /timed out|abort/i.test(String(err.message))
+            ? "resolver_timeout"
+            : "resolver_error",
+          label_read: Boolean(recognizedQuery),
+          match_found: false,
+        });
       } finally {
-        setLabelLoading(false);
+        lifecycleController.signal.removeEventListener("abort", abortRequests);
+        if (labelAbortRef.current === lifecycleController) labelAbortRef.current = null;
+        if (!lifecycleController.signal.aborted) setLabelLoading(false);
       }
     })();
 
-    return () => controller.abort();
+    return () => {
+      lifecycleController.abort();
+      requestController.abort();
+    };
   }, [
     hasLabelLookupInput,
     labelCaptureId,
@@ -936,6 +1416,8 @@ export default function ProductSearchScreen({ navigation, route }) {
     labelOcrDurationMs,
     labelOcrLines,
     labelOcrText,
+    petTypeFilter,
+    runSearch,
   ]);
 
   useEffect(() => {
@@ -954,6 +1436,18 @@ export default function ProductSearchScreen({ navigation, route }) {
     return () => clearTimeout(timer);
   }, [trimmedQuery, labelLoading, runSearch]);
 
+  const handleQueryChange = (value) => {
+    if (identification || resolutionDecision || labelLoading) {
+      clearScanContext();
+      setProducts([]);
+      setError(null);
+      setShowingCached(false);
+      setSearchCorrection("");
+      lastSubmittedQueryRef.current = "";
+    }
+    setQuery(value);
+  };
+
   const handleSubmit = () => {
     Keyboard.dismiss();
     if (trimmedQuery.length < MIN_QUERY_LENGTH) return;
@@ -962,42 +1456,163 @@ export default function ProductSearchScreen({ navigation, route }) {
     runSearch(trimmedQuery, "submit");
   };
 
+  const handleSearchRecognized = () => {
+    if (trimmedQuery.length < MIN_QUERY_LENGTH) return;
+    Haptics.selectionAsync();
+    lastSubmittedQueryRef.current = trimmedQuery;
+    runSearch(trimmedQuery, "recognized_label");
+  };
+
   const handleClear = () => {
     Haptics.selectionAsync();
     setQuery("");
     setProducts([]);
-    setIdentification(null);
+    clearScanContext();
     setError(null);
     setShowingCached(false);
     setSearchCorrection("");
+    setSearchFailureKind(null);
+    setNoneOfTheseSelected(false);
     lastSubmittedQueryRef.current = "";
     trackEvent("catalog_search_cleared");
+  };
+
+  const handleRetryCapturedLabel = () => {
+    Haptics.selectionAsync();
+    trackEvent("catalog_label_retry_tapped", {
+      source_surface: "product_search",
+      previous_decision: resolutionDecision,
+      reused_capture: false,
+      label_attempt: labelAttempt + 1,
+    });
+    if (!canScan()) {
+      navigation.navigate("Paywall", {
+        source: "scan_limit",
+        sourceSurface: "product_search_photo_retry",
+        remainingScans: remainingScans(),
+      });
+      return;
+    }
+    navigation.navigate("Scanner", {
+      mode: "label_lookup",
+      returnToProductSearch: true,
+      labelAttempt: labelAttempt + 1,
+    });
+  };
+
+  const handleSearchByName = () => {
+    Haptics.selectionAsync();
+    searchInputRef.current?.focus?.();
+  };
+
+  const handleSearchByNameInstead = () => {
+    labelAbortRef.current?.abort();
+    labelAbortRef.current = null;
+    setLabelLoading(false);
+    setResolutionDecision(null);
+    setProducts([]);
+    setError(null);
+    trackEvent("catalog_label_lookup_cancelled", {
+      source_surface: "product_search",
+      action: "search_by_name",
+    });
+    setTimeout(() => searchInputRef.current?.focus?.(), 0);
+  };
+
+  const handleCancelLabelLookup = () => {
+    labelAbortRef.current?.abort();
+    labelAbortRef.current = null;
+    setLabelLoading(false);
+    trackEvent("catalog_label_lookup_cancelled", {
+      source_surface: "product_search",
+      action: "go_back",
+    });
+    navigation.goBack();
+  };
+
+  const handleRetrySearch = () => {
+    if (trimmedQuery.length < MIN_QUERY_LENGTH) {
+      handleSearchByName();
+      return;
+    }
+    Haptics.selectionAsync();
+    runSearch(trimmedQuery, "retry", petTypeFilter);
+  };
+
+  const handlePetTypeFilter = (nextFilter) => {
+    if (nextFilter === petTypeFilter) return;
+    Haptics.selectionAsync();
+    petTypeFilterTouchedRef.current = true;
+    setPetTypeFilter(nextFilter);
+    trackEvent("catalog_species_filter_changed", {
+      pet_type: nextFilter,
+      query_present: trimmedQuery.length >= MIN_QUERY_LENGTH,
+    });
+    if (trimmedQuery.length >= MIN_QUERY_LENGTH) {
+      runSearch(trimmedQuery, "species_filter", nextFilter);
+    }
+  };
+
+  const handleNoneOfThese = () => {
+    Haptics.selectionAsync();
+    setProducts([]);
+    setConfirmedFormulaKey("");
+    setResolutionDecision(LABEL_RESOLUTION_DECISIONS.NO_EXACT_VARIANT);
+    setNoneOfTheseSelected(true);
+    setIdentification((current) => current ? {
+      ...current,
+      notes: "No exact package selected. Search by name or scan a clearer front label.",
+    } : current);
+    trackEvent("catalog_label_none_of_these", {
+      source_surface: "product_search",
+      previous_decision: resolutionDecision,
+    });
   };
 
   const handleScanLabel = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     trackEvent("catalog_label_scan_tapped", { source_surface: "product_search" });
+    if (!canScan()) {
+      navigation.navigate("Paywall", {
+        source: "scan_limit",
+        sourceSurface: "product_search_camera",
+        remainingScans: remainingScans(),
+      });
+      return;
+    }
     navigation.navigate("Scanner", {
       mode: "label_lookup",
       returnToProductSearch: true,
     });
   };
 
-  const handleScanIngredients = () => {
+  const handleScanIngredients = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (!canScan()) {
+      navigation.navigate("Paywall", {
+        source: "scan_limit",
+        sourceSurface: "product_search_ingredient_capture",
+        remainingScans: remainingScans(),
+      });
+      return;
+    }
     const acquisitionQuery = query.trim()
       || identification?.searchQuery
       || [identification?.brand, identification?.productName].filter(Boolean).join(" ");
+    const catalogEvidenceConsent = await requestCatalogEvidenceConsent();
+    if (catalogEvidenceConsent == null) return;
     trackEvent("catalog_ingredient_capture_tapped", {
       source_surface: "product_search",
       query_present: acquisitionQuery.length > 0,
       label_found: identification?.found === true,
+      catalog_evidence_consent: catalogEvidenceConsent,
     });
     navigation.navigate("Scanner", {
       mode: "ingredient_capture",
       acquisitionQuery,
       labelIdentification: identification,
       sourceSurface: "product_search_gap",
+      catalogEvidenceConsent,
     });
   };
 
@@ -1010,9 +1625,19 @@ export default function ProductSearchScreen({ navigation, route }) {
       return "Searching catalog";
     }
     if (products.length === 0) return "";
-    const count = products.length === 1 ? "1 possible match" : `${products.length} possible matches`;
+    if (
+      resolutionDecision
+      && resolutionDecision !== LABEL_RESOLUTION_DECISIONS.EXACT_CONFIRMED
+    ) {
+      const count = products.length === 1 ? "1 similar product" : `${products.length} similar products`;
+      return `${count} — not confirmed`;
+    }
+    if (resolutionDecision === LABEL_RESOLUTION_DECISIONS.EXACT_CONFIRMED) {
+      return "Exact product confirmed";
+    }
+    const count = products.length === 1 ? "1 matching product" : `${products.length} matching products`;
     return showingCached ? `${count} • refreshing` : count;
-  }, [loading, labelLoading, products, showingCached]);
+  }, [loading, labelLoading, products, resolutionDecision, showingCached]);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.bg }]}>
@@ -1047,8 +1672,9 @@ export default function ProductSearchScreen({ navigation, route }) {
         >
           <Search size={18} color={theme.textTertiary} strokeWidth={2} />
           <TextInput
+            ref={searchInputRef}
             value={query}
-            onChangeText={setQuery}
+            onChangeText={handleQueryChange}
             onSubmitEditing={handleSubmit}
             placeholder="Search name, brand, or flavor"
             placeholderTextColor={theme.textTertiary}
@@ -1071,9 +1697,44 @@ export default function ProductSearchScreen({ navigation, route }) {
         </View>
       </View>
 
+      <View
+        style={[styles.speciesFilter, { backgroundColor: theme.surface }]}
+        accessibilityRole="tablist"
+        accessibilityLabel="Filter products by species"
+      >
+        {[
+          { key: "all", label: "All" },
+          { key: "dog", label: "Dog" },
+          { key: "cat", label: "Cat" },
+        ].map((option) => {
+          const selected = petTypeFilter === option.key;
+          return (
+            <Pressable
+              key={option.key}
+              onPress={() => handlePetTypeFilter(option.key)}
+              style={({ pressed }) => [
+                styles.speciesFilterOption,
+                {
+                  backgroundColor: selected ? theme.card : "transparent",
+                  borderColor: selected ? theme.separator : "transparent",
+                  opacity: pressed ? 0.72 : 1,
+                },
+              ]}
+              accessibilityRole="tab"
+              accessibilityLabel={`Show ${option.label.toLowerCase()} products`}
+              accessibilityState={{ selected }}
+            >
+              <Text style={[styles.speciesFilterText, { color: selected ? theme.textPrimary : theme.textSecondary }]}>
+                {option.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
       <FlatList
         data={products}
-        keyExtractor={(item, index) => `${item.sourceKind}:${item.cacheKey || item.barcode || item.id}:${index}`}
+        keyExtractor={(item) => `${item.sourceKind}:${productStableKey(item)}`}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={[
           styles.listContent,
@@ -1083,10 +1744,33 @@ export default function ProductSearchScreen({ navigation, route }) {
           <View style={styles.listHeader}>
             <LabelSummary identification={identification} theme={theme} />
             {resultCopy ? (
-              <Text style={[styles.resultCopy, { color: theme.textTertiary }]}>
+              <Text
+                ref={statusRef}
+                style={[styles.resultCopy, { color: theme.textTertiary }]}
+                accessibilityLiveRegion="polite"
+              >
                 {resultCopy}
               </Text>
             ) : null}
+            {products.length > 0
+              && resolutionDecision
+              && resolutionDecision !== LABEL_RESOLUTION_DECISIONS.EXACT_CONFIRMED ? (
+                <View style={[styles.packageCaveat, { backgroundColor: theme.surface, borderColor: theme.separator }]}>
+                  <Text style={[styles.packageCaveatText, { color: theme.textSecondary }]}>
+                    Exact package not confirmed. Check species, recipe, form, and package size before choosing a result.
+                  </Text>
+                  <Pressable
+                    onPress={handleNoneOfThese}
+                    accessibilityRole="button"
+                    accessibilityLabel="None of these products match"
+                    style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+                  >
+                    <Text style={[styles.packageCaveatAction, { color: theme.textPrimary }]}>
+                      Not your product? None of these
+                    </Text>
+                  </Pressable>
+                </View>
+              ) : null}
             {searchCorrection ? (
               <Text
                 style={[styles.correctionText, { color: theme.textSecondary }]}
@@ -1096,7 +1780,12 @@ export default function ProductSearchScreen({ navigation, route }) {
               </Text>
             ) : null}
             {error ? (
-              <Text style={[styles.errorText, { color: Colors.scoreConcerning }]}>
+              <Text
+                ref={statusRef}
+                style={[styles.errorText, { color: Colors.scoreConcerning }]}
+                accessibilityLiveRegion="assertive"
+                selectable
+              >
                 {error}
               </Text>
             ) : null}
@@ -1107,24 +1796,98 @@ export default function ProductSearchScreen({ navigation, route }) {
             product={item}
             theme={theme}
             onPress={() => handleProductPress(item)}
+            exactConfirmed={Boolean(
+              confirmedFormulaKey
+              && productFormulaKey(item) === confirmedFormulaKey
+            )}
           />
         )}
         ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
+        ListFooterComponent={
+          products.length > 0
+          && resolutionDecision
+          && resolutionDecision !== LABEL_RESOLUTION_DECISIONS.EXACT_CONFIRMED
+            ? (
+              <View style={styles.similarActions}>
+                <Pressable
+                  onPress={handleNoneOfThese}
+                  style={({ pressed }) => [
+                    styles.similarSecondaryButton,
+                    { borderColor: theme.separator, opacity: pressed ? 0.76 : 1 },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="None of these products"
+                >
+                  <Text style={[styles.similarSecondaryButtonText, { color: theme.textPrimary }]}>
+                    None of these
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={handleRetryCapturedLabel}
+                  style={({ pressed }) => [
+                    styles.similarPrimaryButton,
+                    { backgroundColor: theme.buttonPrimary, opacity: pressed ? 0.84 : 1 },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Retry the captured front label"
+                >
+                  <Camera size={16} color={theme.buttonText} strokeWidth={2} />
+                  <Text style={[styles.similarPrimaryButtonText, { color: theme.buttonText }]}>
+                    Try photo again
+                  </Text>
+                </Pressable>
+              </View>
+            )
+            : null
+        }
         ListEmptyComponent={
           loading || labelLoading ? (
             <View style={styles.loadingState}>
               <ActivityIndicator color={theme.textPrimary} />
               <Text style={[styles.loadingText, { color: theme.textTertiary }]}>
-                {labelLoading ? "Reading product label..." : "Searching products..."}
+                {labelLoading ? labelLoadingMessage : "Searching products..."}
               </Text>
+              {labelLoading ? (
+                <View style={styles.labelLoadingActions}>
+                  <Pressable
+                    onPress={handleSearchByNameInstead}
+                    style={({ pressed }) => [
+                      styles.labelLoadingPrimary,
+                      { backgroundColor: theme.buttonPrimary, opacity: pressed ? 0.82 : 1 },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Search by product name instead"
+                  >
+                    <Text style={[styles.labelLoadingPrimaryText, { color: theme.buttonText }]}>
+                      Search by Name Instead
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={handleCancelLabelLookup}
+                    accessibilityRole="button"
+                    accessibilityLabel="Cancel label lookup"
+                    style={({ pressed }) => ({ opacity: pressed ? 0.55 : 1, padding: 10 })}
+                  >
+                    <Text style={[styles.labelLoadingCancelText, { color: theme.textSecondary }]}>Cancel</Text>
+                  </Pressable>
+                </View>
+              ) : null}
             </View>
           ) : (
             <EmptyState
               theme={theme}
               query={query}
               identification={identification}
+              resolutionDecision={resolutionDecision}
+              onSearchRecognized={handleSearchRecognized}
+              onSearchByName={handleSearchByName}
+              onRetrySearch={handleRetrySearch}
+              onRetryLabel={handleRetryCapturedLabel}
               onScanLabel={handleScanLabel}
               onScanIngredients={handleScanIngredients}
+              labelAttempt={labelAttempt}
+              searchFailureKind={searchFailureKind}
+              noneOfTheseSelected={noneOfTheseSelected}
             />
           )
         }
@@ -1139,7 +1902,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    height: 56,
+    height: 60,
     paddingHorizontal: 12,
     flexDirection: "row",
     alignItems: "center",
@@ -1152,7 +1915,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   title: {
-    fontSize: 17,
+    fontSize: 18,
     fontWeight: "700",
     letterSpacing: 0,
   },
@@ -1161,8 +1924,8 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   searchBox: {
-    minHeight: 50,
-    borderRadius: 12,
+    minHeight: 54,
+    borderRadius: 16,
     borderWidth: 1,
     paddingHorizontal: 14,
     flexDirection: "row",
@@ -1176,20 +1939,57 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     paddingVertical: 11,
   },
+  speciesFilter: {
+    flexDirection: "row",
+    marginHorizontal: Spacing.screenPadding,
+    marginBottom: 12,
+    padding: 4,
+    borderRadius: 12,
+    gap: 4,
+  },
+  speciesFilterOption: {
+    minHeight: 38,
+    flex: 1,
+    borderRadius: 9,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  speciesFilterText: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
   listContent: {
     paddingHorizontal: Spacing.screenPadding,
-    paddingBottom: 36,
+    paddingBottom: 60,
   },
   listContentEmpty: {
     flexGrow: 1,
   },
   listHeader: {
-    paddingBottom: 10,
+    paddingBottom: 12,
+  },
+  packageCaveat: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    gap: 8,
+    marginTop: 2,
+  },
+  packageCaveatText: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "500",
+  },
+  packageCaveatAction: {
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: "800",
   },
   labelSummary: {
     borderWidth: 1,
-    borderRadius: 12,
-    padding: 13,
+    borderRadius: 16,
+    padding: 15,
     marginBottom: 12,
   },
   labelSummaryEyebrow: {
@@ -1210,9 +2010,9 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   resultCopy: {
-    fontSize: 12,
-    fontWeight: "600",
-    marginBottom: 2,
+    fontSize: 13,
+    fontWeight: "700",
+    marginBottom: 4,
   },
   correctionText: {
     fontSize: 13,
@@ -1227,24 +2027,26 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   productRow: {
-    minHeight: 112,
-    borderRadius: 12,
+    minHeight: 124,
+    borderRadius: 18,
     borderWidth: 1,
-    padding: 10,
+    padding: 12,
     flexDirection: "row",
-    gap: 12,
+    gap: 14,
     ...Shadows.card,
   },
   productImage: {
-    width: 84,
-    height: 92,
-    borderRadius: 10,
-    backgroundColor: Colors.surface,
+    width: 92,
+    height: 104,
+    borderRadius: 14,
+    borderCurve: "continuous",
+    backgroundColor: "#FFFFFF",
   },
   productImagePlaceholder: {
-    width: 84,
-    height: 92,
-    borderRadius: 10,
+    width: 92,
+    height: 104,
+    borderRadius: 14,
+    borderCurve: "continuous",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1256,24 +2058,39 @@ const styles = StyleSheet.create({
   productName: {
     fontSize: 16,
     fontWeight: "700",
-    lineHeight: 21,
+    lineHeight: 20,
     letterSpacing: 0,
-    marginBottom: 5,
+    marginBottom: 6,
   },
   productMeta: {
     fontSize: 12,
+    lineHeight: 16,
     fontWeight: "500",
-    textTransform: "capitalize",
-    marginBottom: 10,
+    marginBottom: 7,
   },
-  productBadges: {
+  packageSizeChip: {
+    alignSelf: "flex-start",
+    minHeight: 28,
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    justifyContent: "center",
+    marginBottom: 9,
+  },
+  packageSizeChipText: {
+    fontSize: 13,
+    lineHeight: 16,
+    fontWeight: "800",
+  },
+  productEvidenceRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6,
+    alignItems: "center",
+    gap: 8,
   },
   statusBadge: {
-    minHeight: 26,
-    borderRadius: 8,
+    minHeight: 24,
+    borderRadius: 12,
     borderWidth: 1,
     paddingHorizontal: 8,
     flexDirection: "row",
@@ -1286,6 +2103,13 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     letterSpacing: 0,
   },
+  productSource: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 11,
+    fontWeight: "600",
+    textTransform: "capitalize",
+  },
   loadingState: {
     flex: 1,
     alignItems: "center",
@@ -1296,6 +2120,62 @@ const styles = StyleSheet.create({
   loadingText: {
     fontSize: 14,
     fontWeight: "500",
+    textAlign: "center",
+  },
+  labelLoadingActions: {
+    width: "100%",
+    maxWidth: 300,
+    alignItems: "center",
+    gap: 4,
+    marginTop: 10,
+  },
+  labelLoadingPrimary: {
+    minHeight: 46,
+    width: "100%",
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 14,
+  },
+  labelLoadingPrimaryText: {
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  labelLoadingCancelText: {
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  similarActions: {
+    flexDirection: "row",
+    gap: 10,
+    paddingTop: 16,
+  },
+  similarSecondaryButton: {
+    minHeight: 44,
+    flex: 1,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12,
+  },
+  similarSecondaryButtonText: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  similarPrimaryButton: {
+    minHeight: 44,
+    flex: 1,
+    borderRadius: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    paddingHorizontal: 12,
+  },
+  similarPrimaryButtonText: {
+    fontSize: 14,
+    fontWeight: "700",
   },
   emptyState: {
     flex: 1,
@@ -1304,7 +2184,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
   },
   emptyTitle: {
-    fontSize: 20,
+    fontSize: 21,
     fontWeight: "700",
     letterSpacing: 0,
     marginTop: 16,

@@ -87,6 +87,16 @@ function _syncScanUsageFromAnalysis(state, analysis) {
 
 function _userFacingAnalysisError(message, mode) {
   const text = String(message || "").trim();
+  if (mode === "photo" && (
+    /incomplete pet-food analysis/i.test(text) ||
+    /analysis stream ended/i.test(text) ||
+    /connection ended before completion/i.test(text) ||
+    /failed to parse/i.test(text) ||
+    /invalid response format/i.test(text) ||
+    /no response from claude/i.test(text)
+  )) {
+    return "We couldn't read enough product details from that photo. Retake it in good light with the front label centered.";
+  }
   if (mode === "ingredient_capture" && (
     /incomplete pet-food analysis/i.test(text) ||
     /analysis stream ended/i.test(text) ||

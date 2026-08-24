@@ -57,6 +57,22 @@ function customerInfoSummary(customerInfo) {
   };
 }
 
+export function customerInfoHasProEntitlement(customerInfo) {
+  return customerInfo?.entitlements?.active?.pro !== undefined;
+}
+
+export function addCustomerInfoUpdateListener(listener) {
+  if (!sdkConfigured || typeof listener !== "function") return () => {};
+  if (typeof Purchases.addCustomerInfoUpdateListener !== "function") return () => {};
+
+  Purchases.addCustomerInfoUpdateListener(listener);
+  return () => {
+    if (typeof Purchases.removeCustomerInfoUpdateListener === "function") {
+      Purchases.removeCustomerInfoUpdateListener(listener);
+    }
+  };
+}
+
 function revenueCatErrorCode(err) {
   const code = err?.code ?? err?.errorCode ?? err?.underlyingErrorCode ?? null;
   return code == null ? null : String(code).slice(0, 80);

@@ -11,7 +11,13 @@ import {
   migrateLocalHistoryBetweenUsers,
   migrateLocalHistoryToSupabase,
 } from "./history";
-import { initializePurchases, getProStatus, resetPurchases } from "./purchases";
+import {
+  addCustomerInfoUpdateListener,
+  customerInfoHasProEntitlement,
+  initializePurchases,
+  getProStatus,
+  resetPurchases,
+} from "./purchases";
 import {
   reconcileRevenueCatProfile,
   syncRevenueCatProfile,
@@ -35,6 +41,32 @@ logger.debug("[AUTH] Redirect URI:", redirectUri);
 const FREE_SCAN_LIMIT = 3;
 const LEGACY_SCAN_COUNT_KEY = "@woof_scan_count";
 const SCAN_COUNT_KEY_PREFIX = "@woof_scan_count:";
+const ANONYMOUS_SIGN_IN_TIMEOUT_MS = 8_000;
+
+function withTimeout(promise, timeoutMs, code) {
+  let timer = null;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error("Guest sign-in timed out.");
+      error.code = code;
+      reject(error);
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+export function anonymousSignInErrorKind(error) {
+  const code = String(error?.code || "").toLowerCase();
+  const message = String(error?.message || "").toLowerCase();
+  if (
+    code.includes("anonymous_provider_disabled")
+    || code.includes("signup_disabled")
+    || /anonymous.{0,30}(disabled|not enabled)|guest.{0,30}(disabled|not enabled)/i.test(message)
+  ) {
+    return "capability";
+  }
+  return "network";
+}
 
 function isAnonymousUser(user) {
   if (typeof user?.is_anonymous === "boolean") {
@@ -195,6 +227,7 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
   const [anonymousUnavailable, setAnonymousUnavailable] = useState(false);
   const [scanCount, setScanCount] = useState(0);
   const setupUserIdRef = useRef(null);
+  const purchaseListenerCleanupRef = useRef(null);
 
   const fetchProfile = useCallback(async (userId, { updateProState = true } = {}) => {
     try {
@@ -223,29 +256,39 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
 
   const startAnonymousSession = useCallback(async ({ automatic = false } = {}) => {
     trackEvent("anonymous_sign_in_started", { automatic });
-
-    const { data, error } = await supabase.auth.signInAnonymously({
-      options: {
-        data: {
-          source: automatic ? "automatic_start" : "manual_continue",
-        },
-      },
-    });
-
-    if (error) {
-      setAnonymousUnavailable(true);
+    let data = null;
+    try {
+      const response = await withTimeout(
+        supabase.auth.signInAnonymously({
+          options: {
+            data: {
+              source: automatic ? "automatic_start" : "manual_continue",
+            },
+          },
+        }),
+        ANONYMOUS_SIGN_IN_TIMEOUT_MS,
+        "ANONYMOUS_SIGN_IN_TIMEOUT"
+      );
+      if (response?.error) throw response.error;
+      data = response?.data || null;
+    } catch (error) {
+      const failureKind = anonymousSignInErrorKind(error);
+      setAnonymousUnavailable(failureKind === "capability");
       trackEvent("anonymous_sign_in_failed", {
         automatic,
+        failure_kind: failureKind,
         message: error.message,
       });
       throw error;
     }
 
     if (!data?.session) {
-      setAnonymousUnavailable(true);
+      setAnonymousUnavailable(false);
       const missingSessionError = new Error("Guest session could not be created.");
+      missingSessionError.code = "ANONYMOUS_SESSION_MISSING";
       trackEvent("anonymous_sign_in_failed", {
         automatic,
+        failure_kind: "network",
         message: missingSessionError.message,
       });
       throw missingSessionError;
@@ -338,6 +381,21 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
     return profilePro;
   }, [fetchProfile]);
 
+  const installPurchaseListener = useCallback((userId) => {
+    purchaseListenerCleanupRef.current?.();
+    purchaseListenerCleanupRef.current = addCustomerInfoUpdateListener((customerInfo) => {
+      if (!customerInfoHasProEntitlement(customerInfo)) return;
+      setIsPro(true);
+      trackEvent("revenuecat_customer_info_unlocked", {
+        source: "customer_info_listener",
+      });
+      reconcileRevenueCatProfile({ source: "customer_info_listener" }).catch((err) => {
+        logger.debug("[AUTH] Customer info reconciliation failed:", err?.message || "Unknown error");
+      });
+      if (userId) fetchProfile(userId, { updateProState: false }).catch(() => {});
+    });
+  }, [fetchProfile]);
+
   const runSignedInSetup = useCallback(async (authUser, shouldContinue = () => true) => {
     if (!authUser?.id || setupUserIdRef.current === authUser.id) return;
     setupUserIdRef.current = authUser.id;
@@ -356,7 +414,8 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
       await Promise.race([
         Promise.all([
           profilePromise,
-          initializePurchases(authUser.id).then(async () => {
+          initializePurchases(authUser.id).then(async (initialized) => {
+            if (initialized && shouldContinue()) installPurchaseListener(authUser.id);
             const profileData = await profilePromise.catch(() => null);
             const pro = await resolveProStatus({
               source: "auth_init",
@@ -380,7 +439,7 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
     migrateLocalHistoryToSupabase(authUser.id).catch((err) =>
       logger.debug("[AUTH] Migration error:", err.message)
     );
-  }, [fetchProfile, resolveProStatus]);
+  }, [fetchProfile, installPurchaseListener, resolveProStatus]);
 
   const refreshProStatus = useCallback(async ({ source = "manual_refresh", userId = user?.id } = {}) => {
     try {
@@ -532,6 +591,7 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
         setIsAnonymous(isAnonymousUser(s?.user));
 
         if (event === "SIGNED_IN" && s?.user) {
+          setLoading(false);
           flushAnalyticsQueue({ source: "auth_state_signed_in" }).catch(() => {});
           trackEvent("auth_signed_in", {
             provider: isAnonymousUser(s.user) ? "anonymous" : s.user.app_metadata?.provider || "unknown",
@@ -555,6 +615,8 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
           setIsPro(false);
           setIsAnonymous(false);
           setScanCount(0);
+          purchaseListenerCleanupRef.current?.();
+          purchaseListenerCleanupRef.current = null;
           setTimeout(() => {
             resetPurchases().catch((err) => {
               logger.debug("[AUTH] Purchase reset error:", err.message);
@@ -584,13 +646,14 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
         setSession(activeSession);
         setUser(activeSession?.user ?? null);
         setIsAnonymous(isAnonymousUser(activeSession?.user));
+        setLoading(false);
 
         if (activeSession?.user) {
           flushAnalyticsQueue({ source: "auth_boot_existing_session" }).catch(() => {});
-          await runSignedInSetup(activeSession.user, () => mounted);
+          runSignedInSetup(activeSession.user, () => mounted).catch((err) => {
+            logger.debug("[AUTH] Background signed-in setup failed:", err.message);
+          });
         }
-
-        if (mounted) setLoading(false);
       })
       .catch((err) => {
         logger.debug("[AUTH] Initial session error:", err.message);
@@ -600,6 +663,8 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
     return () => {
       mounted = false;
       subscription.unsubscribe();
+      purchaseListenerCleanupRef.current?.();
+      purchaseListenerCleanupRef.current = null;
     };
   }, [runSignedInSetup, skipAutomaticGuestSession, startAnonymousSession]);
 
