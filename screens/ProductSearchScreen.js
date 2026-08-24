@@ -254,10 +254,11 @@ function formatVariantValue(value) {
 function productDisplayTitle(product = {}) {
   const line = formatVariantValue(product.productLine);
   const recipe = formatVariantValue(product.flavor || product.recipe);
+  const productName = collapseRepeatedIdentityText(product.productName);
   if (line && recipe && !normalizeText(line).includes(normalizeText(recipe))) {
     return `${line} · ${recipe}`;
   }
-  return line || recipe || collapseRepeatedIdentityText(product.productName) || "Pet food";
+  return line || productName || recipe || "Pet food";
 }
 
 function productVariantChips(product = {}) {
