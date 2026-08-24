@@ -169,11 +169,9 @@ export function getScoreConfig(score) {
 
 // --- Theme Hook ---
 
-export function useTheme() {
-  const scheme = useColorScheme();
-  const isDark = scheme === "dark";
+function buildTheme(isDark) {
   const palette = isDark ? Colors.dark : Colors.light;
-  return {
+  return Object.freeze({
     ...palette,
     blue: Colors.blue,
     amber: Colors.amber,
@@ -188,7 +186,15 @@ export function useTheme() {
     successSurface: isDark ? "rgba(47,143,91,0.20)" : "rgba(47,143,91,0.10)",
     buttonPrimary: isDark ? "#F5F5F5" : Colors.buttonPrimary,
     buttonText: isDark ? "#1C1C1E" : Colors.buttonText,
-  };
+  });
+}
+
+const LIGHT_THEME = buildTheme(false);
+const DARK_THEME = buildTheme(true);
+
+export function useTheme() {
+  const scheme = useColorScheme();
+  return scheme === "dark" ? DARK_THEME : LIGHT_THEME;
 }
 
 // Legacy compat

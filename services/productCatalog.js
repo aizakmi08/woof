@@ -2133,6 +2133,7 @@ export async function resolveProduct({
   limit = DEFAULT_LIMIT,
   signal,
   petType,
+  onIdentification,
 } = {}) {
   if (type === "label_text") {
     const ocrText = compact(query);
@@ -2246,6 +2247,11 @@ export async function resolveProduct({
     const rawIdentification = normalizeLabelIdentification(
       await identifyProductLabel(imageBase64, { signal })
     );
+    try {
+      onIdentification?.(rawIdentification);
+    } catch (callbackError) {
+      logger.debug("[CATALOG] Label identification callback failed:", callbackError?.message || callbackError);
+    }
     const nonCompleteEvidence = evaluateNonCompleteFoodEvidence({
       identification: rawIdentification,
     });

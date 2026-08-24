@@ -300,6 +300,20 @@ function labelSummaryTitle(identification = {}) {
   return productName;
 }
 
+function recognizedOcrTitle(ocrText, ocrLines = EMPTY_OCR_LINES) {
+  const recognizedQuery = labelOcrSearchQueries(ocrText, ocrLines)[0] || "";
+  return recognizedQuery ? formatCorrectedQuery(recognizedQuery) : "";
+}
+
+function prefetchResolutionImages(result = {}) {
+  const urls = [result.selectedProduct, ...(Array.isArray(result.products) ? result.products : [])]
+    .map((product) => String(product?.imageUrl || "").trim())
+    .filter(Boolean)
+    .filter((url, index, values) => values.indexOf(url) === index)
+    .slice(0, 3);
+  urls.forEach((url) => Image.prefetch(url).catch(() => {}));
+}
+
 function ingredientCaptureProduct(product = {}) {
   if (!product) return null;
   return {
@@ -820,6 +834,9 @@ export default function ProductSearchScreen({ navigation, route }) {
     labelOcrText ? "Matching exact product..." : "Reading product label..."
   );
   const [searchLoadingMessage, setSearchLoadingMessage] = useState("Searching catalog...");
+  const [recognizedIdentityText, setRecognizedIdentityText] = useState(() => (
+    recognizedOcrTitle(labelOcrText, labelOcrLines)
+  ));
   const searchRunRef = useRef(0);
   const searchAbortRef = useRef(null);
   const labelRunRef = useRef({ key: "", runId: 0 });
@@ -854,9 +871,9 @@ export default function ProductSearchScreen({ navigation, route }) {
     const matchingTimer = setTimeout(() => setLabelLoadingMessage("Matching exact product..."), 1_200);
     const variantTimer = setTimeout(() => setLabelLoadingMessage("Checking brand and recipe..."), 3_200);
     const finishingTimer = setTimeout(() => setLabelLoadingMessage("Finishing verification..."), 5_200);
-    const evidenceTimer = setTimeout(() => setLabelLoadingMessage("Checking exact package details..."), 7_200);
-    const recoveryTimer = setTimeout(() => setLabelLoadingMessage("Trying the recognized product name..."), 9_200);
-    const longRunningTimer = setTimeout(() => setLabelLoadingMessage("Still matching — you can search by name instead."), 11_200);
+    const evidenceTimer = setTimeout(() => setLabelLoadingMessage("Checking exact package details..."), 8_000);
+    const recoveryTimer = setTimeout(() => setLabelLoadingMessage("Trying the recognized product name..."), 10_000);
+    const longRunningTimer = setTimeout(() => setLabelLoadingMessage("Still matching — you can search by name instead."), 12_000);
     return () => {
       clearTimeout(matchingTimer);
       clearTimeout(variantTimer);
@@ -1086,6 +1103,7 @@ export default function ProductSearchScreen({ navigation, route }) {
       catalogProduct: resolvedProduct,
       uri: labelImageUri || resolvedProduct.imageUrl || null,
       captureStartedAt: labelCaptureStartedAt,
+      captureTimingMode: labelCaptureStartedAt ? "label_lookup" : null,
     });
   }, [canScan, labelCaptureStartedAt, labelImageUri, navigation, products, query, remainingScans]);
   const openProductResultRef = useRef(openProductResult);
@@ -1102,6 +1120,7 @@ export default function ProductSearchScreen({ navigation, route }) {
     setResolutionDecision(null);
     setConfirmedFormulaKey("");
     setNoneOfTheseSelected(false);
+    setRecognizedIdentityText("");
   }, []);
 
   const runSearch = useCallback(async (nextQuery, source = "typed", filterOverride = petTypeFilter) => {
@@ -1249,6 +1268,7 @@ export default function ProductSearchScreen({ navigation, route }) {
       setLabelLoading(true);
       setError(null);
       setIdentification(null);
+      setRecognizedIdentityText(recognizedOcrTitle(labelOcrText, labelOcrLines));
       setProducts([]);
       setShowingCached(false);
       setSearchCorrection("");
@@ -1278,12 +1298,23 @@ export default function ProductSearchScreen({ navigation, route }) {
             imageBase64: labelImageBase64,
             signal: requestController.signal,
             limit: SEARCH_RESULT_LIMIT,
+            onIdentification: (recognizedIdentification) => {
+              if (lifecycleController.signal.aborted) return;
+              const recognizedTitle = labelSummaryTitle(recognizedIdentification);
+              if (recognizedTitle && recognizedTitle !== "No readable product label") {
+                setRecognizedIdentityText(recognizedTitle);
+                setLabelLoadingMessage("Matching exact product...");
+              }
+            },
           })
-            .then((result) => ({
-              result,
-              path: "cloud_image",
-              latencyMs: Date.now() - visualStartedAt,
-            }))
+            .then((result) => {
+              prefetchResolutionImages(result);
+              return {
+                result,
+                path: "cloud_image",
+                latencyMs: Date.now() - visualStartedAt,
+              };
+            })
             .catch((error) => {
               const stageError = error instanceof Error ? error : new Error(String(error));
               stageError.stageLatencyMs = Date.now() - visualStartedAt;
@@ -1306,6 +1337,8 @@ export default function ProductSearchScreen({ navigation, route }) {
                   lines: ocr.lines,
                   durationMs: ocr.durationMs,
                 };
+                const recognizedTitle = recognizedOcrTitle(ocr.text, ocr.lines);
+                if (recognizedTitle) setRecognizedIdentityText(recognizedTitle);
                 setLabelLoadingMessage("Matching exact product...");
               }
               trackEvent("label_ocr_completed", {
@@ -1317,10 +1350,13 @@ export default function ProductSearchScreen({ navigation, route }) {
               });
             },
           })
-            .then((outcome) => outcome ? {
-              ...outcome,
-              latencyMs: Date.now() - ocrStartedAt,
-            } : outcome)
+            .then((outcome) => {
+              if (outcome?.result) prefetchResolutionImages(outcome.result);
+              return outcome ? {
+                ...outcome,
+                latencyMs: Date.now() - ocrStartedAt,
+              } : outcome;
+            })
             .catch((error) => {
               const stageError = error instanceof Error ? error : new Error(String(error));
               stageError.stageLatencyMs = Date.now() - ocrStartedAt;
@@ -1412,6 +1448,7 @@ export default function ProductSearchScreen({ navigation, route }) {
           searchQuery: result.identification?.searchQuery || recognizedQuery,
         };
         setIdentification(resultIdentification);
+        setRecognizedIdentityText(labelSummaryTitle(resultIdentification));
         setProducts(result.products);
         setResolutionDecision(result.decision);
         setConfirmedFormulaKey(
@@ -1472,11 +1509,13 @@ export default function ProductSearchScreen({ navigation, route }) {
           resolver_latency_ms: Date.now() - resolverStartedAt,
           capture_to_resolver_ms: resolverStartedAt - startedAt,
         });
-        logCaptureToResult({
-          captureStartedAt: labelCaptureStartedAt,
-          mode: "label_lookup",
-          outcome: result.selectedProduct ? "exact_match" : result.decision,
-        });
+        if (!result.selectedProduct) {
+          logCaptureToResult({
+            captureStartedAt: labelCaptureStartedAt,
+            mode: "label_lookup",
+            outcome: result.decision,
+          });
+        }
         if (result.selectedProduct) {
           if (result.selectedProduct.imageUrl) {
             Image.prefetch(result.selectedProduct.imageUrl).catch(() => {});
@@ -1994,7 +2033,17 @@ export default function ProductSearchScreen({ navigation, route }) {
         ListEmptyComponent={
           loading || labelLoading ? (
             <View style={styles.loadingState}>
-              <ActivityIndicator color={theme.textPrimary} />
+              {labelLoading && recognizedIdentityText ? (
+                <View style={styles.recognizedLoading}>
+                  <Text style={[styles.recognizedLoadingTitle, { color: theme.textPrimary }]} numberOfLines={3}>
+                    Found: {recognizedIdentityText}
+                  </Text>
+                  <View style={[styles.recognizedSkeleton, { backgroundColor: theme.surface }]} />
+                  <View style={[styles.recognizedSkeletonShort, { backgroundColor: theme.surface }]} />
+                </View>
+              ) : (
+                <ActivityIndicator color={theme.textPrimary} />
+              )}
               <Text style={[styles.loadingText, { color: theme.textTertiary }]}>
                 {labelLoading ? labelLoadingMessage : "Searching products..."}
               </Text>
@@ -2267,6 +2316,32 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 12,
     paddingHorizontal: 40,
+  },
+  recognizedLoading: {
+    width: "100%",
+    maxWidth: 320,
+    gap: 10,
+    marginBottom: 2,
+  },
+  recognizedLoadingTitle: {
+    fontSize: 17,
+    lineHeight: 23,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  recognizedSkeleton: {
+    alignSelf: "center",
+    width: "88%",
+    height: 14,
+    borderRadius: 7,
+    opacity: 0.72,
+  },
+  recognizedSkeletonShort: {
+    alignSelf: "center",
+    width: "58%",
+    height: 14,
+    borderRadius: 7,
+    opacity: 0.5,
   },
   loadingText: {
     fontSize: 14,

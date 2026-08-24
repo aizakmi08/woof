@@ -303,6 +303,7 @@ export default function ResultsScreen({ route, navigation }) {
     historyProductName,
     historyResultSnapshot,
     captureStartedAt,
+    captureTimingMode,
     devFixtureResult,
     devFixtureError,
     devFixtureLoadingStatus,
@@ -1030,9 +1031,13 @@ export default function ResultsScreen({ route, navigation }) {
     let messageIndex = 0;
     setLoadingStatus(messages[messageIndex]);
     const messageInterval = setInterval(() => {
+      if (messageIndex >= messages.length - 1) {
+        clearInterval(messageInterval);
+        setIsSlowLoading(true);
+        return;
+      }
       messageIndex += 1;
-      setLoadingStatus(messages[messageIndex % messages.length]);
-      if (messageIndex >= 7) setIsSlowLoading(true);
+      setLoadingStatus(messages[messageIndex]);
     }, 1_800);
     const timeout = setTimeout(() => {
       if (!done) {
@@ -1076,10 +1081,10 @@ export default function ResultsScreen({ route, navigation }) {
     if (!done) return;
     logCaptureToResult({
       captureStartedAt,
-      mode: isHumanFood ? "human_food" : mode,
+      mode: captureTimingMode || (isHumanFood ? "human_food" : mode),
       outcome: error ? "error" : "success",
     });
-  }, [captureStartedAt, done, error, isHumanFood, mode]);
+  }, [captureStartedAt, captureTimingMode, done, error, isHumanFood, mode]);
 
   // Increment scan count for free users when a new analysis completes
   useEffect(() => {

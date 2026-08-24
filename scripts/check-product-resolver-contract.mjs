@@ -1819,6 +1819,11 @@ function checkVerifiedNutritionFacts(api) {
 
 function checkResolverWiring() {
   const appSource = fs.readFileSync(path.join(root, "App.js"), "utf8");
+  const themeSource = fs.readFileSync(path.join(root, "theme.js"), "utf8");
+  const performanceTimings = fs.readFileSync(
+    path.join(root, "services", "performanceTimings.js"),
+    "utf8"
+  );
   const productCatalog = fs.readFileSync(path.join(root, "services", "productCatalog.js"), "utf8");
   const productSearchScreen = fs.readFileSync(path.join(root, "screens", "ProductSearchScreen.js"), "utf8");
   const runtimeConfig = fs.readFileSync(path.join(root, "services", "runtimeConfig.js"), "utf8");
@@ -1958,8 +1963,8 @@ function checkResolverWiring() {
     "catalog RPCs must be cancellable and leave cold-network margin"
   );
   assert(
-    /@woof_label_resolution_config_v2/.test(runtimeConfig)
-      && /reconciliationTimeoutMs:\s*9_500/.test(runtimeConfig)
+    /@woof_label_resolution_config_v3/.test(runtimeConfig)
+      && /reconciliationTimeoutMs:\s*8_500/.test(runtimeConfig)
       && /SAFE_DEFAULT_RETRY_MS = 30 \* 1000/.test(runtimeConfig),
     "runtime config must invalidate the old timeout cache and retry transient defaults"
   );
@@ -2001,6 +2006,45 @@ function checkResolverWiring() {
     /const runtimeConfigPromise = getLabelResolutionConfig\(\)[\s\S]*const visualPromise/.test(productSearchScreen)
       && /runtimeConfig\.reconciliationTimeoutMs - elapsedBeforeReconciliationMs/.test(productSearchScreen),
     "runtime configuration, OCR, and visual recognition must share one total resolution budget"
+  );
+  assert(
+    /const LIGHT_THEME = buildTheme\(false\)/.test(themeSource)
+      && /const DARK_THEME = buildTheme\(true\)/.test(themeSource)
+      && /return scheme === "dark" \? DARK_THEME : LIGHT_THEME/.test(themeSource),
+    "useTheme must return one stable object per color scheme so memoized styles do not rebuild while streaming"
+  );
+  assert(
+    /Found: \{recognizedIdentityText\}/.test(productSearchScreen)
+      && /onIdentification: \(recognizedIdentification\)/.test(productSearchScreen)
+      && /prefetchResolutionImages\(result\)/.test(productSearchScreen),
+    "label lookup must show recognized identity and prefetch candidate images before reconciliation finishes"
+  );
+  assert(
+    !/messages\[messageIndex % messages\.length\]/.test(resultsScreen)
+      && /messageIndex >= messages\.length - 1/.test(resultsScreen),
+    "results loading messages must stop at the final honest stage instead of wrapping"
+  );
+  assert(
+    /loggedCaptureStarts\.has\(startedAt\)/.test(performanceTimings)
+      && /if \(!result\.selectedProduct\) \{[\s\S]*logCaptureToResult/.test(productSearchScreen)
+      && /captureTimingMode/.test(resultsScreen),
+    "capture-to-result timing must emit once at the user-visible terminal surface"
+  );
+
+  const reconcileSearchProducts = new Function(`
+    const SEARCH_RESULT_LIMIT = 12;
+    ${extractFunction(productSearchScreen, "productStableKey")}
+    ${extractFunction(productSearchScreen, "reconcileSearchProducts")}
+    return reconcileSearchProducts;
+  `)();
+  const reconciledSearch = reconcileSearchProducts(
+    [{ cacheKey: "a", productName: "Cached A" }, { cacheKey: "b", productName: "Cached B" }],
+    [{ cacheKey: "a", productName: "Fresh A" }, { cacheKey: "b", productName: "Fresh B" }, { cacheKey: "c", productName: "Fresh C" }]
+  );
+  assert(
+    reconciledSearch.map((product) => product.cacheKey).join(",") === "a,b,c"
+      && reconciledSearch[0].productName === "Fresh A",
+    "network refresh must update cached search rows by stable key without replacing list order"
   );
   assert(
     /CATALOG_VERIFICATION_REQUIRED/.test(analysisService),
