@@ -31,6 +31,7 @@ const RESULT_LOADING_STAGES = [
   "Checking your pet profile...",
   "Preparing the verified breakdown...",
 ];
+let devBoundaryErrorArmed = false;
 
 function QaButton({ label, onPress, theme }) {
   return (
@@ -66,7 +67,10 @@ export default function DevQAScreen({ navigation }) {
   const [triggerError, setTriggerError] = useState(false);
   const [timings, setTimings] = useState(() => getPerformanceTimingSnapshot());
   if (!__DEV__) return null;
-  if (triggerError) throw new Error("Development QA ErrorBoundary fixture");
+  if (triggerError && devBoundaryErrorArmed) {
+    devBoundaryErrorArmed = false;
+    throw new Error("Development QA ErrorBoundary fixture");
+  }
 
   const openPetResult = (params = {}) => navigation.push("Results", {
     mode: "catalog",
@@ -186,7 +190,10 @@ export default function DevQAScreen({ navigation }) {
           <QaButton label="Paywall — results gate" theme={theme} onPress={() => navigation.navigate("Paywall", { source: "results_gate", productName: DEV_QA_PET_RESULT.productName, score: 82 })} />
           <QaButton label="Paywall — offerings failure" theme={theme} onPress={() => navigation.navigate("Paywall", { source: "profile", devForceOfferingsError: true })} />
           <QaButton label="Profile" theme={theme} onPress={() => navigation.navigate("Profile")} />
-          <QaButton label="Trigger ErrorBoundary" theme={theme} onPress={() => setTriggerError(true)} />
+          <QaButton label="Trigger ErrorBoundary" theme={theme} onPress={() => {
+            devBoundaryErrorArmed = true;
+            setTriggerError(true);
+          }} />
         </QaSection>
       </ScrollView>
     </SafeAreaView>
