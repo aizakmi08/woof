@@ -16,6 +16,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Camera, Check, ChevronLeft, Search, ScanLine, X } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import {
+  catalogProductToVerifiedProduct,
   collapseRepeatedIdentityText,
   getCatalogProduct,
   labelOcrSearchQueries,
@@ -46,6 +47,7 @@ import { useAuth } from "../services/auth";
 import { normalizePetProfile } from "../services/petProfile";
 import { logCaptureToResult, navigationTimingParams } from "../services/performanceTimings";
 import { DEV_QA_PET_RESULT, DEV_QA_SEARCH_PRODUCTS } from "../services/devQaFixtures";
+import { buildVerifiedPetFoodAnalysis } from "../services/verifiedScoring";
 
 const logger = createLogger("PRODUCT_SEARCH");
 const MIN_QUERY_LENGTH = 2;
@@ -781,6 +783,7 @@ export default function ProductSearchScreen({ navigation, route }) {
   const labelCaptureStartedAt = Number(route.params?.labelCaptureStartedAt) || null;
   const labelAttempt = Math.max(1, Number(route.params?.labelAttempt) || 1);
   const devFixture = __DEV__ ? route.params?.devFixture : null;
+  const devLiveResolver = __DEV__ && route.params?.devLiveResolver === true;
   const devLoadingMessage = __DEV__ ? route.params?.devLoadingMessage : null;
   const hasLabelLookupInput = Boolean(labelImageBase64 || labelOcrText);
   const [query, setQuery] = useState(initialQuery);
@@ -1065,6 +1068,9 @@ export default function ProductSearchScreen({ navigation, route }) {
       return;
     }
 
+    const devFixtureResult = devLiveResolver
+      ? buildVerifiedPetFoodAnalysis(catalogProductToVerifiedProduct(resolvedProduct))
+      : null;
     navigation.navigate("Results", {
       mode: "catalog",
       cacheKey: resolvedProduct.cacheKey,
@@ -1072,8 +1078,9 @@ export default function ProductSearchScreen({ navigation, route }) {
       uri: labelImageUri || resolvedProduct.imageUrl || null,
       captureStartedAt: labelCaptureStartedAt,
       captureTimingMode: labelCaptureStartedAt ? "label_lookup" : null,
+      ...(devFixtureResult ? { devFixtureResult } : {}),
     });
-  }, [canScan, labelCaptureStartedAt, labelImageUri, navigation, products, query, remainingScans]);
+  }, [canScan, devLiveResolver, labelCaptureStartedAt, labelImageUri, navigation, products, query, remainingScans]);
   const openProductResultRef = useRef(openProductResult);
 
   useEffect(() => {

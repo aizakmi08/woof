@@ -32,6 +32,13 @@ const RESULT_LOADING_STAGES = [
   "Checking your pet profile...",
   "Preparing the verified breakdown...",
 ];
+const HILLS_ADULT_7_LABEL_LINES = [
+  "HILL'S SCIENCE DIET",
+  "ADULT 7+ SMALL & MINI",
+  "CHICKEN & BROWN RICE RECIPE",
+  "15.5 LB BAG",
+  "DOG FOOD",
+];
 let devBoundaryErrorArmed = false;
 
 function QaButton({ label, onPress, theme }) {
@@ -138,6 +145,17 @@ export default function DevQAScreen({ navigation }) {
         </QaSection>
 
         <QaSection title="Label & typed search" theme={theme}>
+          <QaButton label="Hill's 7+ 15.5 lb live resolver" theme={theme} onPress={() => {
+            const captureStartedAt = Date.now();
+            navigation.navigate("ProductSearch", {
+              labelOcrText: HILLS_ADULT_7_LABEL_LINES.join("\n"),
+              labelOcrLines: HILLS_ADULT_7_LABEL_LINES,
+              labelOcrDurationMs: 0,
+              labelCaptureId: `dev-hills-adult-7-${captureStartedAt}`,
+              labelCaptureStartedAt: captureStartedAt,
+              devLiveResolver: true,
+            });
+          }} />
           <QaButton label="Exact match auto-open" theme={theme} onPress={() => navigation.navigate("ProductSearch", { devFixture: "exact_auto_open" })} />
           <QaButton label="Multiple package candidates" theme={theme} onPress={() => navigation.navigate("ProductSearch", { devFixture: "multi_candidate" })} />
           <QaButton label="Label not readable" theme={theme} onPress={() => navigation.navigate("ProductSearch", { devFixture: "not_readable" })} />

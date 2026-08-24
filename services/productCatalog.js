@@ -15,6 +15,7 @@ import {
   rankProductsForOcr,
 } from "./labelOcrMatching";
 import {
+  adultAgeBand,
   compareLabelIdentities,
   consumerBrandForIdentity,
   evaluateNonCompleteFoodEvidence,
@@ -973,6 +974,7 @@ function formulaDedupeKey(product = {}) {
       product.petType,
       product.foodForm,
       product.lifeStage,
+      adultAgeBand(product),
       verifiedIngredientSignature,
     ].map(compact).filter(Boolean).join(" ");
     return normalizeText(formulaIdentity);
@@ -1671,12 +1673,16 @@ function filterByRequiredQueryTerms(products = [], queryText = "") {
   return products.filter((product) => hasRequiredQueryTerms(product, queryText));
 }
 
-function filterScorableCatalogResults(products = [], queryText = "") {
+export function filterVerifiedLabelCatalogResults(products = [], queryText = "") {
   return products.filter((product) => (
     product?.sourceKind === "catalog" &&
-    catalogProductIsVerifiedReady(product, { queryText }) &&
-    Number(product.rank || 0) >= MIN_SCORABLE_CATALOG_RANK
+    catalogProductIsVerifiedReady(product, { queryText })
   ));
+}
+
+function filterScorableCatalogResults(products = [], queryText = "") {
+  return filterVerifiedLabelCatalogResults(products, queryText)
+    .filter((product) => Number(product.rank || 0) >= MIN_SCORABLE_CATALOG_RANK);
 }
 
 function hasSpeciesAmbiguousLabelMatches(identification = {}, matches = []) {
@@ -2178,7 +2184,7 @@ export async function resolveProduct({
     const candidates = signal?.aborted
       ? []
       : filterProductsForOcr(
-        filterScorableCatalogResults(
+        filterVerifiedLabelCatalogResults(
           filterByPetType(
             await searchWoofCatalogForLabelOcr(packageOcrText, searchQueries, 48, signal),
             targetPetType
@@ -2294,7 +2300,7 @@ export async function resolveProduct({
     const targetPetType = normalizePetType(identification?.petType);
     const candidates = signal?.aborted
       ? []
-      : filterScorableCatalogResults(
+      : filterVerifiedLabelCatalogResults(
         filterByPetType(
           await searchWoofCatalogForLabelIdentity(searchQueries, 48, signal),
           targetPetType

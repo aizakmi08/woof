@@ -281,6 +281,25 @@ function lifeStageGroup(value, { product = false } = {}) {
   return "";
 }
 
+function adultAgeBand(value, { product = false } = {}) {
+  const visibleText = product && value && typeof value === "object"
+    ? [
+      value.lifeStage,
+      value.life_stage,
+      value.productLine,
+      value.product_line,
+      value.productName,
+      value.product_name,
+      value.flavor,
+    ].map(compact).filter(Boolean).join(" ")
+    : value;
+  const text = normalizeText(visibleText);
+  const adultAge = text.match(/\badult\s+(7|11)(?:\s+plus)?\b/);
+  if (adultAge) return `adult_${adultAge[1]}_plus`;
+  const seniorAge = text.match(/\b(7|11)(?:\s+plus)?\s+(?:senior|adult)\b/);
+  return seniorAge ? `adult_${seniorAge[1]}_plus` : "";
+}
+
 function normalizedTokens(value) {
   return new Set(normalizeText(value).split(" ").filter(Boolean));
 }
@@ -414,6 +433,9 @@ function hasCompatibleOcrIdentity(product = {}, ocrText = "") {
   const ocrLifeStage = lifeStageGroup(ocrText);
   const productLifeStage = lifeStageGroup(product, { product: true });
   if (ocrLifeStage && productLifeStage && ocrLifeStage !== productLifeStage) return false;
+  const ocrAgeBand = adultAgeBand(ocrText);
+  const productAgeBand = adultAgeBand(product, { product: true });
+  if (ocrAgeBand && productAgeBand && ocrAgeBand !== productAgeBand) return false;
 
   const ocrTokens = normalizedTokens(ocrText);
   const productTokens = normalizedTokens(productIdentityText(product));
@@ -701,6 +723,7 @@ function ocrFormulaKey(product = {}) {
     brand,
     petType,
     foodForm,
+    adultAgeBand(product, { product: true }),
     grainProfile,
     ...recipeTerms.sort(),
     ...variantTerms.sort(),

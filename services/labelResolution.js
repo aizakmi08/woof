@@ -211,6 +211,22 @@ function matchingLifeStageGroup(value = {}) {
   ));
 }
 
+export function adultAgeBand(value = {}) {
+  const text = normalizeIdentityText([
+    value.lifeStage,
+    value.life_stage,
+    value.productLine,
+    value.product_line,
+    value.productName,
+    value.product_name,
+    value.flavor,
+  ].map(compact).filter(Boolean).join(" "));
+  const adultAge = text.match(/\badult\s+(7|11)(?:\s+plus)?\b/);
+  if (adultAge) return `adult_${adultAge[1]}_plus`;
+  const seniorAge = text.match(/\b(7|11)(?:\s+plus)?\s+(?:senior|adult)\b/);
+  return seniorAge ? `adult_${seniorAge[1]}_plus` : "";
+}
+
 function presentTerms(value, terms) {
   const text = normalizeIdentityText(labelIdentityText(value));
   return [...terms].filter((term) => phrasePresent(text, term));
@@ -229,6 +245,8 @@ function identityFormulaKey(product = {}) {
   if (lifeStageGroup >= 0 && lifeStageGroup !== LIFE_STAGE_GROUPS.length - 1) {
     protectedParts.push([...LIFE_STAGE_GROUPS[lifeStageGroup]][0]);
   }
+  const ageBand = adultAgeBand(product);
+  if (ageBand) protectedParts.push(`age:${ageBand}`);
   if (foodFormGroup >= 0) {
     protectedParts.push(`form:${foodFormGroup}`);
   }
@@ -284,8 +302,13 @@ export function compareLabelIdentities(left = {}, right = {}, {
 
   const leftLifeStage = matchingLifeStageGroup(left);
   const rightLifeStage = matchingLifeStageGroup(right);
+  const leftAgeBand = adultAgeBand(left);
+  const rightAgeBand = adultAgeBand(right);
   if (leftLifeStage >= 0 && rightLifeStage >= 0) {
-    if (leftLifeStage === rightLifeStage) agreementFields.push("life_stage");
+    if (
+      leftLifeStage === rightLifeStage
+      && (!leftAgeBand || !rightAgeBand || leftAgeBand === rightAgeBand)
+    ) agreementFields.push("life_stage");
     else {
       disagreementFields.push("life_stage");
       reasonCodes.push("life_stage_conflict");

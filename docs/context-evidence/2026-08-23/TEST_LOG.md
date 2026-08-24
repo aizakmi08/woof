@@ -5,7 +5,7 @@
 - **Tested:** 2026-08-23 on iPhone 17 Pro Simulator (`iOS`, Debug development client, bundle `io.woof.app.debug`).
 - **Evidence:** screenshots in [`screenshots/`](./screenshots/). Fixtures and development-only QA routes were used for recognition/result branches that a simulator camera cannot produce reliably.
 - **Status rule:** `PASS` means the simulator-testable acceptance path worked. `BLOCKED` means the requested proof depends on unavailable hardware, deterministic network controls, or StoreKit products. No blocked item is counted as passing.
-- **Production-data rule:** no fixture writes were sent to the live catalog. Each temporary anonymous user was deleted through the in-app two-confirmation deletion flow; the final clean signed-out state after the dark/maximum-text Results pass is [`31-final-guest-deletion-complete.png`](./screenshots/31-final-guest-deletion-complete.png).
+- **Production-data rule:** no fixture writes were sent to the live catalog. Each temporary anonymous user was deleted through the in-app two-confirmation deletion flow; the final clean signed-out state after the dark/maximum-text Results pass is [`31-final-guest-deletion-complete.png`](./screenshots/31-final-guest-deletion-complete.png). The first live-resolver proof consumed one guest scan before the new development-only dry-result guard was added; later resolver fixtures do not mutate scan counts or history.
 
 ## Performance measurements
 
@@ -15,6 +15,7 @@
 | JS boot to first interactive app surface | Not previously instrumented | 83 ms | New direct measurement | App timer from JS module load to first interactive route. |
 | Primary scan tap to camera-ready screen | Not previously instrumented | 24 ms | New direct measurement | Home/QA navigation timestamp to mounted scanner. |
 | Blank simulator label capture to terminal recovery | Not previously instrumented | about 3.4 s wall-clock | New recovery measurement | Blank camera frame reached a truthful no-match recovery screen; not a product-recognition success. |
+| Live Hill's Adult 7+ label resolver: capture start to exact result | Not trustworthy under the previous double-fire path | 4,040 ms | First reliable end-to-end measurement | Real catalog resolver and exact 15.5 lb product; OCR text was injected because Simulator cannot photograph a physical bag. |
 
 The current performance overlay is captured in [`24-measured-performance.png`](./screenshots/24-measured-performance.png). The app now also records `capture_to_result` at the terminal label-lookup outcome so future device runs can compare real-package scans rather than simulator blanks.
 
@@ -52,6 +53,17 @@ The current performance overlay is captured in [`24-measured-performance.png`](.
 8. ErrorBoundary retry immediately threw again. The development trigger is now armed once, so Try Again recovers.
 9. The native development build forced `UIUserInterfaceStyle=Light` despite automatic appearance configuration. Removed the native override and rebuilt; dark Home now renders correctly.
 10. Capture-to-result timing stopped at Results only, so terminal label no-match/candidate screens were unmeasured. Product Search now closes the timing at its terminal outcome.
+11. Typed search used the lightweight identity RPC and lost package-aware ranking. It now uses the full verified catalog search; “science diet small” keeps Small & Mini names and 15.5 lb variants visible.
+12. Label candidates inherited the typed-search rank floor, which discarded exact low-ranked identity-RPC results. Label resolution now applies readiness verification without that unrelated rank cutoff.
+13. Adult 7+ and Adult 11+ collapsed into one generic senior identity. Formula keys and OCR compatibility now preserve the visible adult age band and reject the sibling formula.
+
+## Clean-checkout release proof
+
+- A detached clean worktree installed dependencies, generated the iOS project, completed CocoaPods, built the `woof` Debug app for iPhone 17 Pro Simulator, and launched bundle `io.woof.app`. Sentry source-map upload was disabled for the local build because clean-checkout release secrets are intentionally absent.
+- Clean cold launch reached the interactive app in 1,912 ms with no visible light flash in dark appearance: [`38-clean-dark-cold-launch.jpg`](./screenshots/38-clean-dark-cold-launch.jpg).
+- Exact and ambiguous label behavior is recorded in [`32-clean-exact-match-auto-open.jpg`](./screenshots/32-clean-exact-match-auto-open.jpg), [`33-clean-label-candidates-size-chips.jpg`](./screenshots/33-clean-label-candidates-size-chips.jpg), [`35-clean-hills-adult-7-15-5-live-resolver.jpg`](./screenshots/35-clean-hills-adult-7-15-5-live-resolver.jpg), and [`36-clean-hills-adult-7-exact-label-match.jpg`](./screenshots/36-clean-hills-adult-7-exact-label-match.jpg).
+- Typed package-aware search is recorded in [`34-clean-typed-science-diet-small-sizes.jpg`](./screenshots/34-clean-typed-science-diet-small-sizes.jpg). The reliable capture-to-result measurement is recorded in [`37-clean-measured-performance-after.jpg`](./screenshots/37-clean-measured-performance-after.jpg).
+- Entitlement recovery QA passed for token-refresh network failure, cached Pro with profile fetch failure, and out-of-order RevenueCat webhook delivery: [`39-clean-entitlement-network-failure-pass.jpg`](./screenshots/39-clean-entitlement-network-failure-pass.jpg), [`40-clean-entitlement-cached-pro-pass.jpg`](./screenshots/40-clean-entitlement-cached-pro-pass.jpg), and [`41-clean-entitlement-webhook-order-pass.jpg`](./screenshots/41-clean-entitlement-webhook-order-pass.jpg).
 
 ## Required follow-up outside the simulator
 
