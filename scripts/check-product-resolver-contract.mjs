@@ -63,6 +63,9 @@ function loadCatalogMergeModule() {
       pickExactBarcodeVersion,
       pickVerifiedProductForIdentification,
       productRequiresExactPackageVersionForLabel,
+      filterVerifiedCatalogMatchesForLookup,
+      stripPackageSizeTokens,
+      labelSearchQueries,
       relaxedCatalogSearchQueries,
       sortCatalogSearchProducts,
       mergeProducts,
@@ -508,6 +511,38 @@ function checkLabelOcrMatchingCases(api) {
     "on-device OCR must keep Hill's Small Bites separate from the Small & Mini sibling"
   );
 
+  const hillsSevenOcr = [
+    "Hill's Science Diet",
+    "ADULT 7+",
+    "SMALL & MINI",
+    "CHICKEN & BROWN RICE RECIPE",
+    "15.5 lb bag",
+    "DOG FOOD",
+  ].join("\n");
+  const hillsSevenMatches = api.filterProductsForOcr(
+    [
+      { gtin: "052742909905", brand: "Hill's Science Diet", productName: "Adult 7+ Small & Mini Chicken & Brown Rice Recipe Dog Food", productLine: "Adult 7+ Small & Mini", flavor: "Chicken & Brown Rice Recipe", lifeStage: "senior", petType: "dog", foodForm: "dry", packageSize: "15.5 lb", rank: 8 },
+      { gtin: "052742909806", brand: "Hill's Science Diet", productName: "Adult 7+ Small & Mini Chicken & Brown Rice Recipe Dog Food", productLine: "Adult 7+ Small & Mini", flavor: "Chicken & Brown Rice Recipe", lifeStage: "senior", petType: "dog", foodForm: "dry", packageSize: "4.5 lb", rank: 10 },
+      { gtin: "052742909608", brand: "Hill's Science Diet", productName: "Adult 1-6 Small & Mini Chicken & Brown Rice Recipe Dog Food", productLine: "Adult 1-6 Small & Mini", flavor: "Chicken & Brown Rice Recipe", lifeStage: "adult", petType: "dog", foodForm: "dry", packageSize: "15.5 lb", rank: 12 },
+      { gtin: "052742815909", brand: "Hill's Science Diet", productName: "Adult 7+ Small Bites Chicken Meal, Barley & Rice Recipe Dog Food", productLine: "Adult 7+ Small Bites", flavor: "Chicken Meal, Barley & Rice Recipe", lifeStage: "senior", petType: "dog", foodForm: "dry", packageSize: "5 lb", rank: 12 },
+      { gtin: "fixture-lamb", brand: "Hill's Science Diet", productName: "Adult 7+ Small & Mini Lamb Meal & Brown Rice Recipe Dog Food", productLine: "Adult 7+ Small & Mini", flavor: "Lamb Meal & Brown Rice Recipe", lifeStage: "senior", petType: "dog", foodForm: "dry", packageSize: "15.5 lb", rank: 12 },
+    ],
+    hillsSevenOcr
+  );
+  const hillsSevenRanked = api.rankProductsForOcr(hillsSevenMatches, hillsSevenOcr);
+  assert(
+    hillsSevenMatches.length === 2
+      && hillsSevenRanked[0]?.gtin === "052742909905"
+      && hillsSevenRanked[1]?.gtin === "052742909806",
+    `on-device OCR must gate Adult 7+, Small & Mini, and Chicken identity, then prefer the photographed 15.5 lb package; matches=${JSON.stringify(hillsSevenMatches.map((product) => product.gtin))}; ranked=${JSON.stringify(hillsSevenRanked.map((product) => [product.gtin, product.ocrMatchScore]))}`
+  );
+  assert(
+    api.labelOcrSearchQueries(hillsSevenOcr).every((query) => (
+      !/\b15\.5\b|\blb\b|\bbag\b/i.test(query)
+    )),
+    "on-device OCR package-size tokens must not enter catalog retrieval queries"
+  );
+
   const nutroSmallBreedMatches = api.filterProductsForOcr(
     [
       { brand: "Nutro", productName: "Natural Choice Senior Chicken & Brown Rice Recipe Dry Dog Food", petType: "dog", foodForm: "dry" },
@@ -916,6 +951,151 @@ function checkFormulaVariantMerging(api) {
   assert(
     reusedBarcode === null,
     "a reused barcode with incompatible ingredient versions must abstain"
+  );
+}
+
+function checkHillsAdultSevenLabelResolution(catalogApi, labelResolutionApi) {
+  const identification = {
+    found: true,
+    confidence: 0.96,
+    brand: "Hill's Science Diet",
+    productName: "Adult 7+ Small & Mini Chicken & Brown Rice Recipe Dog Food 15.5 lb bag",
+    productLine: "Adult 7+ Small & Mini",
+    flavor: "Chicken & Brown Rice Recipe",
+    lifeStage: "Adult 7+",
+    foodForm: "dry",
+    packageSize: "15.5 lb",
+    petType: "dog",
+  };
+  const formulaBase = {
+    sourceKind: "catalog",
+    brand: "Hill's Science Diet",
+    productName: "Adult 7+ Small & Mini Chicken & Brown Rice Recipe Dog Food",
+    productLine: "Adult 7+ Small & Mini",
+    flavor: "Chicken & Brown Rice Recipe",
+    lifeStage: "senior",
+    foodForm: "dry",
+    petType: "dog",
+    ingredientCount: 8,
+    ingredientsText: "Chicken Meal, Cracked Pearled Barley, Brown Rice, Brewers Rice",
+    ingredientVerificationStatus: "manufacturer",
+    imageVerificationStatus: "manufacturer",
+    imageUrl: "https://example.com/hills-small-mini-7.jpg",
+    sourceUrl: "https://www.hillspet.com/dog-food/sd-canine-adult-7-plus-small-mini-dry",
+    formulaEvidenceTier: "manufacturer_current_exact",
+    sourceQuality: "manufacturer",
+    rank: 8,
+  };
+  const exactRetailPackage = {
+    ...formulaBase,
+    gtin: "052742909905",
+    cacheKey: "petsmart-retail-catalog:052742909905",
+    packageSize: "15.5 lb",
+    ingredientVerificationStatus: "retailer_verified",
+    imageVerificationStatus: "retailer_verified",
+    sourceQuality: "retailer_verified",
+    formulaEvidenceTier: "retailer_web_version",
+  };
+  const smallerManufacturerPackage = {
+    ...formulaBase,
+    gtin: "052742909806",
+    cacheKey: "hills:052742909806",
+    packageSize: "4.5 lb",
+  };
+  const adultOneToSix = {
+    ...formulaBase,
+    gtin: "052742909608",
+    cacheKey: "hills:052742909608",
+    productName: "Adult 1-6 Small & Mini Chicken & Brown Rice Recipe Dog Food",
+    productLine: "Adult 1-6 Small & Mini",
+    lifeStage: "adult",
+    packageSize: "15.5 lb",
+  };
+  const smallBitesSibling = {
+    ...formulaBase,
+    gtin: "052742815909",
+    cacheKey: "hills:052742815909",
+    productName: "Adult 7+ Small Bites Chicken Meal, Barley & Rice Recipe Dog Food",
+    productLine: "Adult 7+ Small Bites",
+    flavor: "Chicken Meal, Barley & Rice Recipe",
+    packageSize: "5 lb",
+  };
+  const lambSibling = {
+    ...formulaBase,
+    gtin: "052742909905",
+    cacheKey: "opff-sibling:052742909905",
+    productName: "Adult 7+ Small & Mini Lamb Meal & Brown Rice Recipe Dog Food",
+    flavor: "Lamb Meal & Brown Rice Recipe",
+    packageSize: "15.5 lb",
+  };
+
+  const candidates = catalogApi.filterLabelCandidatesForIdentification(
+    identification,
+    [smallBitesSibling, adultOneToSix, lambSibling, smallerManufacturerPackage, exactRetailPackage]
+  );
+  assert(
+    candidates[0]?.gtin === "052742909905"
+      && candidates[0]?.cacheKey === exactRetailPackage.cacheKey,
+    "Hill's Adult 7+ Small & Mini 15.5 lb must rank its exact verified package first"
+  );
+  assert(
+    candidates.length === 2
+      && candidates.every((candidate) => /small & mini/i.test(candidate.productName))
+      && candidates.every((candidate) => candidate.lifeStage === "senior"),
+    "Hill's Adult 7+ labels must exclude Adult 1-6, Small Bites, and sibling-recipe candidates"
+  );
+
+  const collapsed = catalogApi.collapseFrontLabelSourceVersions(candidates);
+  assert(
+    collapsed.length === 1
+      && collapsed[0].gtin === "052742909905"
+      && collapsed[0].availablePackageSizes.includes("4.5 lb")
+      && collapsed[0].availablePackageSizes.includes("15.5 lb"),
+    "an exact photographed size must remain primary while proven same-formula sizes stay available"
+  );
+
+  const searchQueries = catalogApi.labelSearchQueries(identification);
+  assert(
+    searchQueries.length > 0
+      && searchQueries.every((query) => !/\b15\.5\s*(?:lb|lbs)?\b|\blb\b|\bbag\b/i.test(query)),
+    "structured package size must not enter any front-label catalog retrieval query"
+  );
+
+  const lifeStageConflict = labelResolutionApi.compareLabelIdentities(
+    identification,
+    adultOneToSix,
+    { requireVisibleCandidateVariants: true }
+  );
+  assert(
+    !lifeStageConflict.compatible && lifeStageConflict.reasonCodes.includes("life_stage_conflict"),
+    "Adult 7+ must be a senior identity that conflicts with Adult 1-6"
+  );
+  const lineConflict = labelResolutionApi.compareLabelIdentities(
+    identification,
+    smallBitesSibling,
+    { requireVisibleCandidateVariants: true }
+  );
+  assert(
+    !lineConflict.compatible && lineConflict.reasonCodes.includes("product_line_conflict"),
+    "Hill's Small & Mini must conflict with the Small Bites product line"
+  );
+
+  const reconciledLookupMatches = catalogApi.filterVerifiedCatalogMatchesForLookup(
+    {
+      gtin: "052742909905",
+      brand: "Hill's Science Diet",
+      productName: "Adult 7+ Small & Mini Chicken & Brown Rice Recipe Dog Food",
+      productLine: "Adult 7+ Small & Mini",
+      flavor: "Chicken & Brown Rice Recipe",
+      lifeStage: "senior",
+      foodForm: "dry",
+      petType: "dog",
+    },
+    [lambSibling]
+  );
+  assert(
+    reconciledLookupMatches.length === 0,
+    "GTIN reconciliation must abstain instead of substituting a Lamb sibling for a Chicken formula"
   );
 }
 
@@ -1863,6 +2043,7 @@ function checkResolverWiring() {
   const labelSearchQuery = new Function(`
     ${extractFunction(productCatalog, "normalizeText")}
     ${extractFunction(productCatalog, "compact")}
+    ${extractFunction(productCatalog, "stripPackageSizeTokens")}
     ${labelSearchQuerySource}
     return labelSearchQuery;
   `)();
@@ -2013,6 +2194,7 @@ checkFormulaVariantMerging(catalogApi);
 checkRelaxedCatalogQueries(catalogApi);
 checkStrictLabelCandidateMatching(catalogApi);
 const labelResolutionApi = loadLabelResolutionModule();
+checkHillsAdultSevenLabelResolution(catalogApi, labelResolutionApi);
 checkPackageSizeDoesNotChangeLifeStage(labelResolutionApi);
 checkStrictLabelResolution(labelResolutionApi);
 checkVerifiedNutritionFacts(loadVerifiedScoringModule());

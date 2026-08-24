@@ -246,9 +246,15 @@ function productPackageSizeLabel(product) {
   }).filter((value, index, values) => (
     values.findIndex((candidate) => normalizeText(candidate) === normalizeText(value)) === index
   ));
-  const packageSize = packageSizes.length > 1
-    ? "Multiple sizes"
-    : packageSizes[0];
+  const primaryPackageSize = String(product?.packageSize || "").trim();
+  const additionalSizeCount = packageSizes.filter((size) => (
+    normalizeText(size) !== normalizeText(primaryPackageSize)
+  )).length;
+  const packageSize = packageSizes.length > 1 && primaryPackageSize
+    ? `${primaryPackageSize} · +${additionalSizeCount} ${additionalSizeCount === 1 ? "size" : "sizes"}`
+    : packageSizes.length > 1
+      ? "Multiple sizes"
+      : packageSizes[0];
   return formatVariantValue(packageSize);
 }
 
@@ -816,7 +822,7 @@ export default function ProductSearchScreen({ navigation, route }) {
   const [searchLoadingMessage, setSearchLoadingMessage] = useState("Searching catalog...");
   const searchRunRef = useRef(0);
   const searchAbortRef = useRef(null);
-  const labelRunRef = useRef(null);
+  const labelRunRef = useRef({ key: "", runId: 0 });
   const labelAbortRef = useRef(null);
   const recognizedOcrRef = useRef({
     text: labelOcrText,
@@ -1230,8 +1236,9 @@ export default function ProductSearchScreen({ navigation, route }) {
     if (!hasLabelLookupInput) return;
     const lookupKey = labelCaptureId
       || `${labelImageUri || "camera"}:${labelImageBase64?.length || 0}:${labelOcrText.length}`;
-    if (labelRunRef.current === lookupKey) return;
-    labelRunRef.current = lookupKey;
+    if (labelRunRef.current.key === lookupKey) return;
+    const labelRunId = labelRunRef.current.runId + 1;
+    labelRunRef.current = { key: lookupKey, runId: labelRunId };
     const lifecycleController = new AbortController();
     const requestController = new AbortController();
     const abortRequests = () => requestController.abort();
@@ -1529,13 +1536,21 @@ export default function ProductSearchScreen({ navigation, route }) {
       } finally {
         lifecycleController.signal.removeEventListener("abort", abortRequests);
         if (labelAbortRef.current === lifecycleController) labelAbortRef.current = null;
-        if (!lifecycleController.signal.aborted) setLabelLoading(false);
+        if (
+          !lifecycleController.signal.aborted
+          && labelRunRef.current.runId === labelRunId
+        ) {
+          setLabelLoading(false);
+        }
       }
     })();
 
     return () => {
       lifecycleController.abort();
       requestController.abort();
+      if (labelRunRef.current.runId === labelRunId) {
+        labelRunRef.current = { key: "", runId: labelRunId };
+      }
     };
   }, [
     devFixture,

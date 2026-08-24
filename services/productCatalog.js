@@ -51,7 +51,6 @@ const MATCH_STOP_WORDS = new Set([
   "adult",
   "and",
   "cat",
-  "chicken",
   "dog",
   "dry",
   "food",
@@ -825,6 +824,16 @@ function stripLabelMarketingBenefitClaims(value) {
   return compact(identityText);
 }
 
+export function stripPackageSizeTokens(value) {
+  return compact(String(value || "")
+    .replace(
+      /\b\d+(?:\.\d+)?\s*(?:-|–|—)?\s*(?:lb|lbs|pound|pounds|oz|ounce|ounces|kg|kilograms?|g|grams?|ct|count|pack|packs|cans?|pouches?)\b/gi,
+      " "
+    )
+    .replace(/\b(?:bag|box|case)\b/gi, " ")
+    .replace(/\s+/g, " "));
+}
+
 function normalizeLabelIdentification(identification = {}) {
   const normalized = {
     ...identification,
@@ -855,7 +864,7 @@ function normalizeLabelIdentification(identification = {}) {
 }
 
 function labelSearchQuery(identification = {}) {
-  const productName = compact(identification.productName);
+  const productName = stripPackageSizeTokens(identification.productName);
   const brand = compact(identification.brand);
   const identityParts = [];
   if (brand && !normalizeText(productName).includes(normalizeText(brand))) {
@@ -864,7 +873,7 @@ function labelSearchQuery(identification = {}) {
   if (productName) identityParts.push(productName);
 
   for (const value of [identification.productLine, identification.flavor, identification.lifeStage]) {
-    const part = compact(value);
+    const part = stripPackageSizeTokens(value);
     if (!part) continue;
     const currentIdentity = normalizeText(identityParts.join(" "));
     const normalizedPart = normalizeText(part);
@@ -881,7 +890,7 @@ function labelSearchQuery(identification = {}) {
 
 function labelCoreSearchQuery(identification = {}) {
   const brand = compact(identification.brand);
-  const productName = compact(identification.productName);
+  const productName = stripPackageSizeTokens(identification.productName);
   if (!productName) return [brand, compact(identification.productLine)].filter(Boolean).join(" ");
   return brand && !normalizeText(productName).includes(normalizeText(brand))
     ? `${brand} ${productName}`
@@ -938,7 +947,7 @@ function labelSearchQueries(identification = {}) {
     labelCoreSearchQuery(identification),
     labelRecipeSearchQuery(identification),
     labelRelaxedRecipeSearchQuery(identification),
-  ].map(compact).filter((query) => query.length >= 2);
+  ].map(stripPackageSizeTokens).filter((query) => query.length >= 2);
 
   return [...new Map(queries.map((query) => [normalizeText(query), query])).values()];
 }
@@ -1001,6 +1010,30 @@ function packageSizesForProduct(product = {}) {
   ].flatMap(expandPackageSizeValue).filter(Boolean);
 
   return [...new Map(values.map((size) => [normalizeText(size), size])).values()];
+}
+
+function normalizedPackageSizeSignals(value) {
+  const signals = String(value || "").match(
+    /\b\d+(?:\.\d+)?\s*(?:lb|lbs|pound|pounds|oz|ounce|ounces|kg|kilograms?|g|grams?|ct|count|pack|packs|cans?|pouches?)\b/gi
+  ) || [];
+  return new Set(signals.map((signal) => normalizeText(signal)
+    .replace(/\b(?:lbs|pounds)\b/g, "lb")
+    .replace(/\bounces\b/g, "oz")
+    .replace(/\bkilograms?\b/g, "kg")
+    .replace(/\bgrams?\b/g, "g")
+    .replace(/\bcounts?\b/g, "ct")
+    .replace(/\bpacks\b/g, "pack")
+    .replace(/\bcans\b/g, "can")
+    .replace(/\bpouches\b/g, "pouch")));
+}
+
+function packageSizeMatchScore(product = {}, lookupProduct = {}) {
+  const requested = normalizedPackageSizeSignals(lookupProduct.packageSize);
+  if (requested.size === 0) return 0;
+  const available = new Set(packageSizesForProduct(product)
+    .flatMap((size) => [...normalizedPackageSizeSignals(size)]));
+  if (available.size === 0) return 0;
+  return [...requested].some((size) => available.has(size)) ? 1 : -0.15;
 }
 
 function mergeFormulaPackageSizes(primary = {}, duplicate = {}) {
@@ -1093,11 +1126,20 @@ function hasNoConflictingCandidateVariantTerms(catalogProduct = {}, lookupProduc
   const catalogTokens = requiredMatchTokenSet(productIdentityText(catalogProduct));
   const lookupTokens = requiredMatchTokenSet(productIdentityText(lookupProduct));
   const lookupHasPrimaryRecipe = [...PRIMARY_RECIPE_TERMS].some((term) => lookupTokens.has(term));
+  const lookupShowsSeniorIdentity = lookupTokens.has("senior")
+    || lookupTokens.has("mature")
+    || /\badult\s+(?:7|11)\b/.test(normalizeText(productIdentityText(lookupProduct)));
 
   for (const token of catalogTokens) {
     if (!LABEL_VARIANT_CONFLICT_TERMS.has(token)) continue;
     if (tokenHasEquivalent(token, lookupTokens)) continue;
     if (PRIMARY_RECIPE_TERMS.has(token) && !lookupHasPrimaryRecipe) continue;
+    if (
+      (token === "senior" || token === "mature")
+      && lookupShowsSeniorIdentity
+    ) {
+      continue;
+    }
     if (token === "adult" && ![...NON_ADULT_LIFE_STAGE_TERMS].some((term) => lookupTokens.has(term))) {
       continue;
     }
@@ -1223,6 +1265,9 @@ function strongLabelProductMatch(catalogProduct, lookupProduct) {
   if (!hasStrongIdentity) return false;
   if (!hasRequiredLabelTerms(catalogProduct, lookupProduct)) return false;
   if (!hasNoConflictingCandidateVariantTerms(catalogProduct, lookupProduct)) return false;
+  if (!compareLabelIdentities(lookupProduct, catalogProduct, {
+    requireVisibleCandidateVariants: true,
+  }).compatible) return false;
 
   const lookupFoodForm = inferredFoodForm(lookupProduct);
   const catalogFoodForm = inferredFoodForm(catalogProduct);
@@ -1243,13 +1288,15 @@ function labelCandidateMatchScore(product = {}, lookupProduct = {}) {
   const lineScore = overlapScore(product.productLine, lookupProduct.productLine);
   const flavorScore = overlapScore(product.flavor || product.productName, lookupProduct.flavor);
   const identityScore = overlapScore(productIdentityText(product), productIdentityText(lookupProduct));
+  const sizeScore = packageSizeMatchScore(product, lookupProduct);
 
   return (
     brandScore * 0.2 +
     nameScore * 0.38 +
     lineScore * 0.12 +
     flavorScore * 0.15 +
-    identityScore * 0.15
+    identityScore * 0.15 +
+    sizeScore * 0.18
   );
 }
 
@@ -1271,6 +1318,7 @@ export function filterLabelCandidatesForIdentification(identification = {}, prod
     .map((product) => ({
       ...product,
       labelMatchScore: labelCandidateMatchScore(product, lookupProduct),
+      labelPackageSizeMatch: packageSizeMatchScore(product, lookupProduct),
     }))
     .sort((left, right) => (
       Number(right.labelMatchScore || 0) - Number(left.labelMatchScore || 0) ||
@@ -1415,6 +1463,9 @@ function formulaEvidenceSearchBoost(product = {}) {
 
 function sortCatalogSearchProducts(products = []) {
   return [...products].sort((left, right) => (
+    Number(right.labelPackageSizeMatch || 0) - Number(left.labelPackageSizeMatch || 0)
+    || Number(right.labelMatchScore || 0) - Number(left.labelMatchScore || 0)
+    ||
     (
       Number(right.rank || 0)
       + formulaEvidenceSearchBoost(right)
@@ -1491,7 +1542,9 @@ export function collapseFrontLabelSourceVersions(products = []) {
       const candidateKey = dedupeKey(candidate);
       if (consumed.has(candidateKey)) continue;
       if (!sameFrontLabelFormula(current, candidate)) continue;
-      current = mergeFormulaPackageSizes(current, candidate);
+      current = Number(candidate.labelPackageSizeMatch || 0) > Number(current.labelPackageSizeMatch || 0)
+        ? mergeFormulaPackageSizes(candidate, current)
+        : mergeFormulaPackageSizes(current, candidate);
       consumed.add(candidateKey);
     }
     collapsed.push(current);
@@ -2360,12 +2413,7 @@ export async function findVerifiedCatalogProductForLookup(lookupProduct, { signa
 
   if (signal?.aborted) return null;
 
-  const match = catalogResults.find((product) => (
-    product.sourceKind === "catalog" &&
-    productHasVerifiedIngredients(product) &&
-    productHasVerifiedImage(product) &&
-    strongProductMatch(product, lookupProduct)
-  ));
+  const match = filterVerifiedCatalogMatchesForLookup(lookupProduct, catalogResults)[0] || null;
 
   if (!match) return null;
   if (match.imageUrl || !lookupProduct?.imageUrl || !strongImageMatch(match, lookupProduct)) {
@@ -2378,6 +2426,21 @@ export async function findVerifiedCatalogProductForLookup(lookupProduct, { signa
     imageSource: lookupProduct.source || "open_pet_food_facts",
     imageFallback: true,
   };
+}
+
+export function filterVerifiedCatalogMatchesForLookup(lookupProduct, catalogResults = []) {
+  return (Array.isArray(catalogResults) ? catalogResults : []).filter((product) => (
+    product.sourceKind === "catalog" &&
+    productHasVerifiedIngredients(product) &&
+    productHasVerifiedImage(product) &&
+    strongProductMatch(product, lookupProduct) &&
+    labelBrandCompatible(product, lookupProduct) &&
+    hasRequiredLabelTerms(product, lookupProduct) &&
+    hasNoConflictingCandidateVariantTerms(product, lookupProduct) &&
+    compareLabelIdentities(lookupProduct, product, {
+      requireVisibleCandidateVariants: true,
+    }).compatible
+  ));
 }
 
 export function pickVerifiedProductForIdentification(identification, products = []) {

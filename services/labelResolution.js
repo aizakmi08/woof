@@ -38,9 +38,15 @@ const PRODUCT_LINE_TERMS = new Set([
   "proactive health",
   "rawmix",
   "science diet",
+  "small bites",
+  "small breed",
+  "small mini",
   "tide and terrain",
   "wild ocean",
 ]);
+const EXCLUSIVE_PRODUCT_LINE_GROUPS = [
+  new Set(["small bites", "small breed", "small mini"]),
+];
 const LIFE_STAGE_GROUPS = [
   new Set(["puppy"]),
   new Set(["kitten"]),
@@ -139,6 +145,7 @@ export function normalizeIdentityText(value) {
     .replace(/\(r\)|\(tm\)|\(c\)|®|™|©/gi, "")
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
+    .replace(/\bsmall and mini\b/g, "small mini")
     .trim();
 }
 
@@ -305,8 +312,21 @@ export function compareLabelIdentities(left = {}, right = {}, {
 
   const leftLines = presentTerms(left, PRODUCT_LINE_TERMS);
   const rightLines = presentTerms(right, PRODUCT_LINE_TERMS);
+  const exclusiveLineConflict = EXCLUSIVE_PRODUCT_LINE_GROUPS.some((group) => {
+    const leftExclusiveLines = leftLines.filter((term) => group.has(term));
+    const rightExclusiveLines = rightLines.filter((term) => group.has(term));
+    return leftExclusiveLines.length > 0
+      && rightExclusiveLines.length > 0
+      && !leftExclusiveLines.some((term) => rightExclusiveLines.includes(term));
+  });
+  if (exclusiveLineConflict) {
+    disagreementFields.push("product_line");
+    reasonCodes.push("product_line_conflict");
+  }
   if (leftLines.length && rightLines.length) {
-    if (leftLines.some((term) => rightLines.includes(term))) agreementFields.push("product_line");
+    if (!exclusiveLineConflict && leftLines.some((term) => rightLines.includes(term))) {
+      agreementFields.push("product_line");
+    }
     else {
       disagreementFields.push("product_line");
       reasonCodes.push("product_line_conflict");

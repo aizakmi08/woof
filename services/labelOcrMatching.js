@@ -200,6 +200,7 @@ const PROTECTED_VARIANT_PHRASES = [
   "weight management",
   "wild ocean",
 ];
+const EXCLUSIVE_PRODUCT_LINE_PHRASES = ["small bites", "small breed", "small mini"];
 const REQUIRED_OCR_VARIANT_TERMS = new Set([
   "95", "ancient", "coat", "consult", "core", "cravings", "digestive", "digestion", "freshdried", "goodgut",
   "game", "harvest", "healthy", "indoor", "kitten", "large", "mixers", "peakboost",
@@ -240,7 +241,7 @@ function normalizeText(value) {
     .split(" ")
     .map((token) => OCR_TOKEN_ALIASES.get(token) || token)
     .join(" ");
-  return normalized;
+  return normalized.replace(/\bsmall and mini\b/g, "small mini");
 }
 
 export function normalizeLabelOcrText(value) {
@@ -258,6 +259,26 @@ function productIdentityText(product = {}) {
     product.packageSize,
     product.gtin || product.barcode,
   ].map(compact).filter(Boolean).join(" ");
+}
+
+function lifeStageGroup(value, { product = false } = {}) {
+  const visibleText = product && value && typeof value === "object"
+    ? [
+      value.lifeStage,
+      value.life_stage,
+      value.productLine,
+      value.product_line,
+      value.productName,
+      value.product_name,
+      value.flavor,
+    ].map(compact).filter(Boolean).join(" ")
+    : value;
+  const text = normalizeText(visibleText);
+  if (/\bpuppy\b/.test(text)) return "puppy";
+  if (/\bkitten\b/.test(text)) return "kitten";
+  if (/\b(?:senior|mature)\b|\badult\s+(?:7|11)(?:\s+plus)?\b/.test(text)) return "senior";
+  if (/\badult\b/.test(text)) return "adult";
+  return "";
 }
 
 function normalizedTokens(value) {
@@ -390,6 +411,10 @@ function hasCompatibleOcrIdentity(product = {}, ocrText = "") {
     || canonicalFoodForm(product.foodForm);
   if (ocrFoodForm && productFoodForm && ocrFoodForm !== productFoodForm) return false;
 
+  const ocrLifeStage = lifeStageGroup(ocrText);
+  const productLifeStage = lifeStageGroup(product, { product: true });
+  if (ocrLifeStage && productLifeStage && ocrLifeStage !== productLifeStage) return false;
+
   const ocrTokens = normalizedTokens(ocrText);
   const productTokens = normalizedTokens(productIdentityText(product));
   const normalizedOcrText = normalizeText(ocrText);
@@ -420,11 +445,27 @@ function hasCompatibleOcrIdentity(product = {}, ocrText = "") {
   for (const phrase of PROTECTED_VARIANT_PHRASES) {
     if (normalizedOcrText.includes(phrase) && !normalizedProductText.includes(phrase)) return false;
   }
+  const ocrExclusiveLine = EXCLUSIVE_PRODUCT_LINE_PHRASES.find((phrase) => (
+    normalizedOcrText.includes(phrase)
+  ));
+  const productExclusiveLine = EXCLUSIVE_PRODUCT_LINE_PHRASES.find((phrase) => (
+    normalizedProductText.includes(phrase)
+  ));
+  if (ocrExclusiveLine && productExclusiveLine && ocrExclusiveLine !== productExclusiveLine) {
+    return false;
+  }
 
   for (const term of REQUIRED_OCR_VARIANT_TERMS) {
     if (ocrTokens.has(term) && !productTokens.has(term)) return false;
   }
   for (const term of CANDIDATE_ONLY_VARIANT_TERMS) {
+    if (
+      (term === "senior" || term === "mature")
+      && ocrLifeStage === "senior"
+      && productLifeStage === "senior"
+    ) {
+      continue;
+    }
     if (productVisibleIdentityTokens.has(term) && !ocrTokens.has(term)) return false;
   }
   if (ocrTokens.has("wild") && ocrTokens.has("game") && !productTokens.has("wild")) {
@@ -604,13 +645,7 @@ export function labelOcrProductMatchScore(product = {}, ocrText = "") {
   const identityCoverage = tokenCoverage(identity, normalizedOcr);
   const normalizedName = normalizeText(product.productName);
   const exactNameBonus = normalizedName.length >= 8 && normalizedOcr.includes(normalizedName) ? 0.14 : 0;
-  const packageSize = normalizeText(product.packageSize);
-  const packageSizeMatch = packageSize.match(/\b(\d+(?:\.\d+)?)\s*(lb|lbs|oz|kg|g)\b/);
-  const packageSizeBonus = packageSizeMatch && new RegExp(
-    `\\b${packageSizeMatch[1].replace(".", "\\.")}\\s*${packageSizeMatch[2]}s?\\b`
-  ).test(normalizedOcr)
-    ? 0.12
-    : 0;
+  const packageSizeBonus = packageSizeMatchesOcr(product, normalizedOcr) ? 0.12 : 0;
 
   return Math.min(1, (
     brandCoverage * 0.26 +
@@ -621,14 +656,25 @@ export function labelOcrProductMatchScore(product = {}, ocrText = "") {
   ));
 }
 
+function packageSizeMatchesOcr(product = {}, ocrText = "") {
+  const packageSize = String(product.packageSize || "").toLowerCase();
+  const packageSizeMatch = packageSize.match(/\b(\d+(?:\.\d+)?)\s*(lb|lbs|oz|kg|g)\b/);
+  if (!packageSizeMatch) return false;
+  return new RegExp(
+    `\\b${packageSizeMatch[1].replace(".", "\\.")}\\s*${packageSizeMatch[2]}s?\\b`
+  ).test(String(ocrText || "").toLowerCase());
+}
+
 export function rankProductsForOcr(products = [], ocrText = "") {
   return products
     .map((product) => ({
       ...product,
       ocrMatchScore: labelOcrProductMatchScore(product, ocrText),
+      ocrPackageSizeMatch: packageSizeMatchesOcr(product, ocrText) ? 1 : 0,
     }))
     .filter((product) => product.ocrMatchScore >= MIN_CANDIDATE_SCORE)
     .sort((left, right) => (
+      right.ocrPackageSizeMatch - left.ocrPackageSizeMatch ||
       right.ocrMatchScore - left.ocrMatchScore ||
       Number(right.rank || 0) - Number(left.rank || 0)
     ));
