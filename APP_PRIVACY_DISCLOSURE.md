@@ -1,6 +1,6 @@
 # Woof App Privacy Disclosure
 
-Last updated: 2026-06-29.
+Last updated: 2026-08-24.
 
 This is the working App Store Connect privacy-label inventory for Woof. It is based on the current worktree, not legal advice. Before publishing, the Account Holder, Admin, or App Manager should confirm these answers in App Store Connect and with counsel.
 
@@ -16,11 +16,11 @@ Apple says App Store Connect responses must include data collected by the app an
 
 ## Current Data Flow Summary
 
-Woof creates a Supabase user for guest or signed-in use, sends pet-food and human-food scan requests through Supabase Edge Functions, processes images and product data with Anthropic Claude and Open Pet Food Facts where applicable, stores account/history/analytics/subscription state in Supabase, manages purchases through RevenueCat, and requests Apple Search Ads attribution collection through RevenueCat on iOS.
+Woof creates a Supabase user for guest or signed-in use, accepts typed product searches, sends pet-food and human-food scan requests through Supabase Edge Functions, processes images and product data with Anthropic Claude and Open Pet Food Facts where applicable, stores account/pet-profile/history/analytics/subscription state in Supabase, manages purchases through RevenueCat, and requests Apple Search Ads attribution collection through RevenueCat on iOS.
 
 Current first-party data stores and evidence:
 
-- `public.profiles`: Supabase user id, display name, avatar URL, email, provider, Pro state, RevenueCat app user id/product/store/environment/entitlement metadata.
+- `public.profiles`: Supabase user id, display name, avatar URL, email, provider, Pro state, pet profile content (name, species, life stage, and avoided ingredients), RevenueCat app user id/product/store/environment/entitlement metadata.
 - `public.scan_history`: per-user product or food name, score or safety level, pet type, scan date, scan mode, data source, cache key, local `photo_uri` reference.
 - `public.analytics_events`: user id, session id, event name, redacted event properties, app version/build/runtime/platform/execution context from `services/analytics.js`.
 - `public.scan_usage_events` and `public.rate_limits`: scan usage, scan mode, free-scan enforcement, abuse throttling, reversal state.
@@ -56,8 +56,9 @@ Rationale: the current worktree does not use IDFA, retargeting SDKs, data broker
 | User ID | Yes | Yes | No | App Functionality, Analytics | Supabase `auth.users.id`, `analytics_events.user_id`, RevenueCat app user id |
 | Purchase History | Yes | Yes | No | App Functionality, Analytics | RevenueCat SDK, `revenuecat_events`, `profiles.revenuecat_*` |
 | Photos or Videos | Yes, for pet-food label and human-food scans | Yes, conservatively | No | App Functionality | `services/claude.js`, `supabase/functions/analyze/index.ts`; images are transmitted for analysis and not permanently stored by Woof |
-| Other User Content | Yes | Yes | No | App Functionality, Analytics | Scan results/history: product or food name, pet type, scores, safety level, ingredients, analysis |
+| Other User Content | Yes | Yes | No | App Functionality, Analytics | Scan results/history plus pet profile content: pet name, species, life stage, avoided ingredients, product or food name, pet type, scores, safety level, ingredients, analysis |
 | Customer Support Data | Yes, only when the user chooses Contact Support or emails support | Yes | No | App Functionality, Customer Support | Profile support mailto with app/platform/account diagnostics |
+| Search History | Yes, when a user searches the product catalog by name or product terms | Yes | No | App Functionality, Analytics | `ProductSearchScreen`, typed catalog lookup terms, `catalog_lookup_*` analytics and product events |
 | Product Interaction | Yes | Yes | No | Analytics, App Functionality | `analytics_events` funnel, paywall, purchase, share, review, support, scan events |
 | Advertising Data | Yes, for Apple Search Ads attribution on iOS | Yes, through RevenueCat subscriber/customer analytics | No | Analytics | RevenueCat Apple Ads Services integration, Apple AdServices attribution token, campaign/ad group/keyword attribution in RevenueCat |
 | Other Usage Data | Yes | Yes | No | Analytics, App Functionality | scan usage, scan limits, cache-hit/fresh-scan signals, rate-limit usage |
@@ -86,7 +87,6 @@ The shared `analysis_cache` table is intended as product-level cache data and do
 - Sensitive Info: No.
 - Audio Data: No.
 - Emails or Text Messages: No in-app private messaging. User-initiated support email content is Customer Support Data.
-- Search History: No typed/open search feature today. Barcode/name lookup data is covered above as Other Data Types or Other User Content; if App Store review treats product lookups as searches performed in the app, disclose Search History as linked to the user.
 
 ## Privacy Policy Alignment
 
@@ -94,6 +94,7 @@ The hosted privacy policy should continue to say:
 
 - Camera images are sent for analysis and are not stored permanently by Woof.
 - Scan history is associated with the guest profile or signed-in account.
+- Typed catalog search terms and pet profile content are associated with the guest profile or signed-in account when collected.
 - Guest/account identifiers, optional name/email, subscription state, operational logs, and support diagnostics are collected for app functionality, reliability, support, and analytics.
 - The app does not track users across other apps or websites and does not sell/share personal data with advertisers. Apple Search Ads attribution is used for Woof campaign analytics through RevenueCat.
 - Users can delete account data from Profile; server-side cleanup includes `profiles`, `scan_history`, `analytics_events`, `scan_usage_events`, `rate_limits`, and linkable `revenuecat_events`.
@@ -115,7 +116,7 @@ Update this file, App Store Connect, hosted privacy policy, and `npm run check:p
 - Changing Sentry behavior, enabling tracing/session replay/log capture, or adding another crash/performance SDK.
 - Adding ad attribution beyond Apple Search Ads standard attribution, retargeting, IDFA, SKAdNetwork-only ad partners with extra SDK data, or marketing analytics.
 - Adding RevenueCat customer attributes that include email, name, phone, or custom identifiers beyond the Supabase user id.
-- Adding pet profiles, allergies, reminders, favorites, watchlists, recall alerts, or personalization that changes retained user content.
+- Expanding pet profiles beyond name, species, life stage, and avoided ingredients, or adding allergies, reminders, favorites, watchlists, recall alerts, or other retained personalization.
 - Storing original uploaded images in Supabase Storage or another durable store.
 - Adding location, contacts, photo library access, audio, free-form notes, or notifications with user-specific content.
 - Adding new third-party SDKs or changing Supabase/Anthropic/RevenueCat/Open Pet Food Facts data handling.

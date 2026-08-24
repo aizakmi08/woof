@@ -127,7 +127,7 @@ Start with 3 free scans. No account is needed to try Woof, and you can save your
 
 Woof also includes AI-assisted guidance for common human-food questions such as whether a fruit, vegetable, meat, dairy item, or snack may be appropriate for a dog or cat.
 
-Woof Pro unlocks unlimited scans, deeper ingredient details, quality breakdowns, nutrition details, saved history, and shareable result cards.
+Woof Pro unlocks unlimited scans, deeper ingredient details, quality breakdowns, nutrition details, and shareable result cards.
 
 Woof is informational only and is not veterinary advice. Product formulas can change, so confirm the current package label and consult your veterinarian about allergies, medical diets, symptoms, or major diet changes.
 ```

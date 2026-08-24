@@ -78,6 +78,10 @@ const homeScreen = readText("screens/HomeScreen.js");
 const scannerScreen = readText("screens/ScannerScreen.js");
 const resultsScreen = readText("screens/ResultsScreen/index.js");
 const resultsComponents = readText("screens/ResultsScreen/components.js");
+const embeddedLegal = readText("legal.js");
+const hostedTerms = readText("docs/terms.html");
+const hostedPrivacy = readText("docs/privacy.html");
+const storeConfig = JSON.parse(readText("store.config.json"));
 const packageJson = JSON.parse(readText("package.json"));
 const workflow = readText(workflowPath);
 const migrations = listMigrationFiles();
@@ -306,6 +310,25 @@ requireSnippet(scannerScreen, "pointerEvents: \"box-none\"", "Scanner processing
 requireSnippet(resultsComponents, "export function GuestSavePrompt", "Results components must include the guest-save prompt");
 requireSnippet(resultsScreen, "guest_save_prompt_viewed", "Results screen must track guest-save prompt views");
 requireSnippet(resultsScreen, "guest_save_prompt_completed", "Results screen must track guest-save prompt completions");
+
+for (const source of [embeddedLegal, hostedTerms]) {
+  requireSnippet(source, "Free results show the overall score, quick stats, a summary verdict, verification details, and the full ingredient list.", "Terms must describe the complete free result");
+  requireSnippet(source, "Scan history is included with free use and is not a paid feature.", "Terms must keep history in the free tier");
+  requireSnippet(source, "unlimited scans, detailed ingredient explanations, quality breakdown, and nutrition facts", "Terms must describe the actual Pro gates");
+  requireSnippet(source, "Current pricing is shown in the app and App Store.", "Terms must defer subscription pricing to current store pricing");
+}
+for (const source of [embeddedLegal, hostedPrivacy]) {
+  requireSnippet(source, "human food", "Privacy policy must disclose human-food image processing");
+  requireSnippet(source, "Apple Search Ads", "Privacy policy must disclose Apple Search Ads attribution");
+  requireSnippet(source, "AdServices", "Privacy policy must disclose Apple's AdServices framework");
+  requireSnippet(source, "Pet Profile", "Privacy policy must disclose stored pet-profile content");
+}
+if (/\$4\.99\/week|\$7\.99\/month|\$29\.99\/year/i.test(hostedTerms)) {
+  fail("Hosted Terms must not hard-code subscription prices");
+}
+if (/Pro unlocks[^\n.]*saved history/i.test(storeConfig?.apple?.info?.["en-US"]?.description || "")) {
+  fail("Store description must not describe free scan history as a Pro benefit");
+}
 
 checkOrderedMentions(migrationSection, auditMigrations, "Deployment migration order");
 

@@ -56,7 +56,7 @@ requireSnippet(checklist, "Data Used to Track You: No", "Deployment checklist");
 requireSnippet(checklist, "No IDFA", "Deployment checklist");
 
 for (const snippet of [
-  "Last updated: 2026-06-29.",
+  "Last updated: 2026-08-24.",
   "https://developer.apple.com/app-store/app-privacy-details/",
   "https://developer.apple.com/help/app-store-connect/manage-app-information/manage-app-privacy/",
   "https://support.apple.com/en-us/102399",
@@ -97,6 +97,7 @@ for (const dataType of [
   "Photos or Videos",
   "Other User Content",
   "Customer Support Data",
+  "Search History",
   "Product Interaction",
   "Advertising Data",
   "Other Usage Data",
@@ -116,7 +117,6 @@ for (const notCollected of [
   "Health & Fitness: No.",
   "Sensitive Info: No.",
   "Audio Data: No.",
-  "Search History: No",
 ]) {
   requireSnippet(disclosure, notCollected, `${DISCLOSURE_PATH} not-collected list`);
 }
@@ -125,6 +125,7 @@ for (const policySnippet of [
   "Camera Images",
   "Scan History",
   "Guest and Account Information",
+  "Pet Profile",
   "Subscription Information",
   "Apple Search Ads Attribution",
   "We do not use IDFA",

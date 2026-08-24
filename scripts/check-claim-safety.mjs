@@ -12,6 +12,7 @@ const FILES = [
   "app.config.js",
   "app.json",
   "legal.js",
+  "store.config.json",
 ];
 
 const EXTENSIONS = new Set([".html", ".js", ".json", ".ts"]);
@@ -98,6 +99,32 @@ const files = [
 
 for (const file of files) {
   checkFile(file);
+}
+
+const embeddedLegal = fs.readFileSync("legal.js", "utf8");
+const hostedTerms = fs.readFileSync("docs/terms.html", "utf8");
+const embeddedAndHostedTerms = [embeddedLegal, hostedTerms];
+for (const source of embeddedAndHostedTerms) {
+  for (const requiredCopy of [
+    "Free results show the overall score, quick stats, a summary verdict, verification details, and the full ingredient list.",
+    "Scan history is included with free use and is not a paid feature.",
+    "unlimited scans, detailed ingredient explanations, quality breakdown, and nutrition facts",
+    "Current pricing is shown in the app and App Store.",
+  ]) {
+    if (!source.includes(requiredCopy)) {
+      failures.push(`Free/Pro copy contract missing: ${requiredCopy}`);
+    }
+  }
+}
+
+if (/first 3 ingredients|saved scan history require|\$4\.99\/week|\$7\.99\/month|\$29\.99\/year/i.test(hostedTerms)) {
+  failures.push("docs/terms.html: remove obsolete free-result gates or hard-coded subscription prices");
+}
+
+const storeDescription = JSON.parse(fs.readFileSync("store.config.json", "utf8"))
+  ?.apple?.info?.["en-US"]?.description || "";
+if (/Pro unlocks[^\n.]*saved history/i.test(storeDescription)) {
+  failures.push("store.config.json: scan history must not be described as a Pro-only benefit");
 }
 
 if (failures.length > 0) {

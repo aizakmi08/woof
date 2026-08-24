@@ -169,6 +169,14 @@ assertIncludes(description, "exact source-backed ingredient statement", "Descrip
 assertIncludes(description, "instead of guessing the recipe", "Description");
 assertIncludes(description, "3 free scans", "Description");
 assertIncludes(description, "No account", "Description");
+assertIncludes(
+  description,
+  "Woof Pro unlocks unlimited scans, deeper ingredient details, quality breakdowns, nutrition details, and shareable result cards.",
+  "Description Pro benefit contract"
+);
+if (/Pro unlocks[^\n.]*saved history/i.test(description)) {
+  fail("Description: scan history is free and must not appear in the Pro benefits list");
+}
 
 assertIncludes(
   listing,
@@ -277,6 +285,9 @@ if (storeInfo.promotionalText) {
   fail("store.config.json: EAS Metadata uses promoText, not promotionalText");
 }
 assertNoBlockedClaims(storeMetadata, "store.config.json");
+if (/Pro unlocks[^\n.]*saved history/i.test(storeInfo.description || "")) {
+  fail("store.config.json: scan history is free and must not appear in the Pro benefits list");
+}
 
 if (failures.length > 0) {
   console.error("App Store listing check failed:");
