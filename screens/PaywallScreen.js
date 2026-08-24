@@ -71,7 +71,7 @@ const DEFAULT_PITCH = {
     { icon: ShieldCheck, text: "Spot harmful ingredients" },
     { icon: ScanSearch, text: "Unlimited pet & food checks" },
     { icon: ChartColumnIncreasing, text: "Quality & safety scores" },
-    { icon: Star, text: "Saved scan history" },
+    { icon: Star, text: "Detailed ingredient notes" },
   ],
 };
 
@@ -83,7 +83,7 @@ const PITCH_BY_SOURCE = {
       { icon: ShieldCheck, text: "Ingredient concerns explained clearly" },
       { icon: ChartColumnIncreasing, text: "Nutrition and quality breakdowns" },
       { icon: ScanSearch, text: "Unlimited follow-up checks" },
-      { icon: Star, text: "Save results for every shopping trip" },
+      { icon: Star, text: "Detailed nutrition context" },
     ],
   },
   scan_limit: {
@@ -93,7 +93,7 @@ const PITCH_BY_SOURCE = {
       { icon: ScanSearch, text: "Unlimited pet food and human-food checks" },
       { icon: ShieldCheck, text: "Fast safety flags before you buy" },
       { icon: ChartColumnIncreasing, text: "Quality scores on every scan" },
-      { icon: Star, text: "History for products you compare" },
+      { icon: Star, text: "Full ingredient explanations" },
     ],
   },
   post_scan_prompt: {
@@ -103,7 +103,7 @@ const PITCH_BY_SOURCE = {
       { icon: ScanSearch, text: "Unlimited pet food and human-food checks" },
       { icon: ShieldCheck, text: "Ingredient concerns explained clearly" },
       { icon: ChartColumnIncreasing, text: "Compare foods by score" },
-      { icon: Star, text: "Keep a history of better finds" },
+      { icon: Star, text: "Detailed nutrition context" },
     ],
   },
   home_banner: {
@@ -113,7 +113,7 @@ const PITCH_BY_SOURCE = {
       { icon: ScanSearch, text: "Unlimited scans while shopping" },
       { icon: ShieldCheck, text: "Spot ingredient red flags quickly" },
       { icon: ChartColumnIncreasing, text: "Compare foods by score" },
-      { icon: Star, text: "Build a saved history of trusted picks" },
+      { icon: Star, text: "Full ingredient explanations" },
     ],
   },
   profile: {
@@ -121,7 +121,7 @@ const PITCH_BY_SOURCE = {
     positioning: "Upgrade the account you already use",
     features: [
       { icon: ScanSearch, text: "Unlimited checks from this account" },
-      { icon: Star, text: "Keep saved scan history" },
+      { icon: Star, text: "Unlock detailed ingredient notes" },
       { icon: ShieldCheck, text: "Review ingredient warnings anytime" },
       { icon: ChartColumnIncreasing, text: "Use scores when comparing products" },
     ],
@@ -132,7 +132,7 @@ const PAYWALL_CONTEXT_BY_SOURCE = {
   results_gate: {
     key: "result_details",
     label: "For this scan",
-    detail: "Unlock ingredient notes, score reasons, and saved result history.",
+    detail: "Unlock ingredient notes, score reasons, and detailed nutrition.",
   },
   scan_limit: {
     key: "scan_continuity",
@@ -152,12 +152,12 @@ const PAYWALL_CONTEXT_BY_SOURCE = {
   profile: {
     key: "account_upgrade",
     label: "Account upgrade",
-    detail: "Manage Pro access, restore purchases, and keep history in one place.",
+    detail: "Manage Pro access, restore purchases, and unlock full scan details.",
   },
   default: {
     key: "general_upgrade",
     label: BRAND_PRO_NAME,
-    detail: "Unlock unlimited checks and saved product decisions.",
+    detail: "Unlock unlimited checks and detailed product decisions.",
   },
 };
 
