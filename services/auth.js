@@ -626,32 +626,28 @@ export function AuthProvider({ children, skipAutomaticGuestSession = false }) {
       }
     );
 
-    // Get initial session. If none exists, create a guest session so users can scan first.
+    // Resolve the locally persisted session first. A network-backed guest sign-in
+    // must never hold the first interactive frame hostage.
     supabase.auth.getSession()
-      .then(async ({ data: { session: s } }) => {
+      .then(({ data: { session: s } }) => {
         if (!mounted) return;
 
-        let activeSession = s;
-
-        if (!activeSession && !skipAutomaticGuestSession) {
-          try {
-            activeSession = await startAnonymousSession({ automatic: true });
-          } catch (err) {
-            logger.debug("[AUTH] Anonymous session unavailable:", err.message);
-          }
-        }
-
-        if (!mounted) return;
-
-        setSession(activeSession);
-        setUser(activeSession?.user ?? null);
-        setIsAnonymous(isAnonymousUser(activeSession?.user));
+        setSession(s);
+        setUser(s?.user ?? null);
+        setIsAnonymous(isAnonymousUser(s?.user));
         setLoading(false);
 
-        if (activeSession?.user) {
+        if (s?.user) {
           flushAnalyticsQueue({ source: "auth_boot_existing_session" }).catch(() => {});
-          runSignedInSetup(activeSession.user, () => mounted).catch((err) => {
+          runSignedInSetup(s.user, () => mounted).catch((err) => {
             logger.debug("[AUTH] Background signed-in setup failed:", err.message);
+          });
+          return;
+        }
+
+        if (!skipAutomaticGuestSession) {
+          startAnonymousSession({ automatic: true }).catch((err) => {
+            logger.debug("[AUTH] Anonymous session unavailable:", err.message);
           });
         }
       })

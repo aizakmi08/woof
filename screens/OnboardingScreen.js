@@ -12,124 +12,63 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withSpring,
-  withTiming,
   FadeIn,
-  FadeOut,
+  useReducedMotion,
 } from "react-native-reanimated";
 import Svg, { Circle } from "react-native-svg";
-import { ScanLine } from "lucide-react-native";
+import { PawPrint, ScanLine, ShieldCheck } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useTheme, getScoreConfig, Colors, Spacing, Shadows, Typography } from "../theme";
+import { useTheme, Colors, Spacing, Shadows, Typography } from "../theme";
 import { trackEvent } from "../services/analytics";
 import { BRAND_NAME } from "../config/brand";
+import {
+  markColdStartInteractive,
+  navigationTimingParams,
+} from "../services/performanceTimings";
 
 const ONBOARDING_KEY = "@woof_onboarding_complete";
 
-// --- Score Ring Illustration (static, screen 2) ---
+// --- Verified answer illustration (screen 2) ---
 
-function ScoreRingIllustration({ theme }) {
-  const score = 85;
-  const config = getScoreConfig(score);
+function AnswerIllustration({ theme }) {
   const size = 140;
   const strokeWidth = 10;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
-  const fillOffset = circumference * (1 - score / 100);
 
   return (
     <View style={styles.illustrationContainer}>
-      <View style={[styles.ringWrapper, Shadows.scoreGlow(config.color)]}>
+      <View style={[styles.ringWrapper, Shadows.scoreGlow(Colors.scoreExcellent)]}>
         <Svg width={size} height={size}>
           <Circle
             cx={size / 2}
             cy={size / 2}
             r={radius}
-            stroke={theme.separator}
-            strokeWidth={strokeWidth}
-            fill="none"
-          />
-          <Circle
-            cx={size / 2}
-            cy={size / 2}
-            r={radius}
-            stroke={config.color}
+            stroke={Colors.scoreExcellent}
             strokeWidth={strokeWidth}
             fill="none"
             strokeDasharray={circumference}
-            strokeDashoffset={fillOffset}
+            strokeDashoffset={0}
             strokeLinecap="round"
             transform={`rotate(-90 ${size / 2} ${size / 2})`}
           />
         </Svg>
         <View style={StyleSheet.absoluteFill}>
           <View style={styles.ringLabelContainer}>
-            <Text style={[styles.ringScore, { color: config.color }]}>
-              {score}
-            </Text>
-            <Text style={[styles.ringGrade, { color: config.color }]}>
-              {config.label}
-            </Text>
+            <ShieldCheck size={46} color={Colors.scoreExcellent} strokeWidth={1.8} />
           </View>
         </View>
       </View>
-    </View>
-  );
-}
-
-// --- Ingredient List Illustration (static, screen 3) ---
-
-const SAMPLE_INGREDIENTS = [
-  { name: "Deboned Chicken", rating: "good" },
-  { name: "Brown Rice", rating: "good" },
-  { name: "Chicken Meal", rating: "good" },
-  { name: "BHA (Preservative)", rating: "bad" },
-];
-
-const DOT_COLORS = {
-  good: Colors.ingredientGood,
-  neutral: Colors.ingredientNeutral,
-  bad: Colors.ingredientBad,
-};
-
-function IngredientIllustration({ theme }) {
-  return (
-    <View style={styles.illustrationContainer}>
-      <View style={[styles.ingredientCard, { backgroundColor: theme.card }, Shadows.card]}>
-        {SAMPLE_INGREDIENTS.map((ing, i) => (
-          <View key={i}>
-            <View style={styles.ingredientRow}>
-              <View
-                style={[
-                  styles.ingredientDot,
-                  { backgroundColor: DOT_COLORS[ing.rating] },
-                ]}
-              />
-              <Text
-                style={[styles.ingredientName, { color: theme.textPrimary }]}
-                numberOfLines={1}
-              >
-                {ing.name}
-              </Text>
-              <Text
-                style={[
-                  styles.ingredientRating,
-                  { color: DOT_COLORS[ing.rating] },
-                ]}
-              >
-                {ing.rating === "good" ? "Good" : "Concerning"}
-              </Text>
-            </View>
-            {i < SAMPLE_INGREDIENTS.length - 1 && (
-              <View
-                style={[
-                  styles.ingredientDivider,
-                  { backgroundColor: theme.separator },
-                ]}
-              />
-            )}
-          </View>
-        ))}
+      <View style={styles.answerPills}>
+        <View style={[styles.answerPill, { backgroundColor: theme.surface }]}>
+          <ShieldCheck size={14} color={Colors.scoreExcellent} strokeWidth={2} />
+          <Text style={[styles.answerPillText, { color: theme.textSecondary }]}>Verified formula</Text>
+        </View>
+        <View style={[styles.answerPill, { backgroundColor: theme.surface }]}>
+          <PawPrint size={14} color={Colors.scoreExcellent} strokeWidth={2} />
+          <Text style={[styles.answerPillText, { color: theme.textSecondary }]}>Personal pet fit</Text>
+        </View>
       </View>
     </View>
   );
@@ -172,29 +111,20 @@ const PAGES = [
   {
     key: "scan",
     title: "Scan the front label",
-    body: `${BRAND_NAME} reads the product name from the front of the bag or can. Start with a front-label photo or search by name. Scan first, no account required.`,
+    body: `${BRAND_NAME} reads the brand, recipe, and package details from the front. No barcode needed. Search works too, and no account is required.`,
     highlights: [
-      "Product name",
-      "Search works too",
-      "No barcode needed",
+      "Exact formula",
       "3 free scans",
     ],
     Illustration: ScanIllustration,
-    button: "Continue",
+    button: "Scan Front Label",
   },
   {
-    key: "score",
-    title: "Get the verified breakdown",
-    body: "Pet food labels use the verified ingredient list for scores and safety notes. Human-food checks help with everyday foods too.",
-    Illustration: ScoreRingIllustration,
-    button: "Continue",
-  },
-  {
-    key: "ingredients",
-    title: "Help fill missing products",
-    body: "If a product is not verified yet, scan the ingredients panel for review. Save results later by adding an account after your scan.",
-    Illustration: IngredientIllustration,
-    button: "Get Started",
+    key: "answer",
+    title: "Get one clear answer",
+    body: "Scores use the exact verified ingredient list. Add pet details any time to flag ingredients that are not a fit for your pet.",
+    Illustration: AnswerIllustration,
+    button: "Scan Front Label",
   },
 ];
 
@@ -203,6 +133,7 @@ const PAGES = [
 export default function OnboardingScreen({ onComplete }) {
   const theme = useTheme();
   const { width } = useWindowDimensions();
+  const reduceMotion = useReducedMotion();
   const flatListRef = useRef(null);
   const [currentIndex, setCurrentIndex] = useState(0);
 
@@ -223,6 +154,7 @@ export default function OnboardingScreen({ onComplete }) {
   }).current;
 
   useEffect(() => {
+    markColdStartInteractive("onboarding");
     trackEvent("onboarding_started");
   }, []);
 
@@ -235,7 +167,7 @@ export default function OnboardingScreen({ onComplete }) {
     });
   }, [currentIndex]);
 
-  const completeOnboarding = useCallback(async ({ completionMethod, nextRoute = "Home" }) => {
+  const completeOnboarding = useCallback(({ completionMethod, nextRoute = "Home", routeParams = null }) => {
     const page = PAGES[currentIndex];
     trackEvent("onboarding_completed", {
       step_index: currentIndex,
@@ -243,24 +175,25 @@ export default function OnboardingScreen({ onComplete }) {
       completion_method: completionMethod,
       next_route: nextRoute,
     });
-    await AsyncStorage.setItem(ONBOARDING_KEY, "true");
-    onComplete({ nextRoute });
+    AsyncStorage.setItem(ONBOARDING_KEY, "true").catch(() => {});
+    onComplete({ nextRoute, routeParams });
   }, [currentIndex, onComplete]);
 
-  const handleScanNow = useCallback(async () => {
+  const handleScanNow = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const page = PAGES[currentIndex];
     trackEvent("onboarding_scan_now_tapped", {
       step_index: currentIndex,
       step_key: page?.key,
     });
-    await completeOnboarding({
+    completeOnboarding({
       completionMethod: "scan_now",
       nextRoute: "Scanner",
+      routeParams: navigationTimingParams("onboarding"),
     });
   }, [completeOnboarding, currentIndex]);
 
-  const handleNext = useCallback(async () => {
+  const handleNext = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const page = PAGES[currentIndex];
 
@@ -275,7 +208,7 @@ export default function OnboardingScreen({ onComplete }) {
       });
     } else {
       // Final page — mark complete and dismiss
-      await completeOnboarding({
+      completeOnboarding({
         completionMethod: "completed_flow",
         nextRoute: "Home",
       });
@@ -332,7 +265,7 @@ export default function OnboardingScreen({ onComplete }) {
   );
 
   const isFirstPage = currentIndex === 0;
-  const buttonText = isFirstPage ? "Scan Front Label" : PAGES[currentIndex]?.button || "Continue";
+  const buttonText = PAGES[currentIndex]?.button || "Scan Front Label";
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.bg }]}>
@@ -357,16 +290,16 @@ export default function OnboardingScreen({ onComplete }) {
       {/* Bottom: button + dots */}
       <View style={styles.bottomArea}>
         <Pressable
-          onPress={isFirstPage ? handleScanNow : handleNext}
+          onPress={handleScanNow}
           onPressIn={() => {
-            btnScale.value = withSpring(0.97, { damping: 15, stiffness: 150 });
+            btnScale.value = reduceMotion ? 1 : withSpring(0.97, { damping: 15, stiffness: 150 });
           }}
           onPressOut={() => {
-            btnScale.value = withSpring(1, { damping: 15, stiffness: 150 });
+            btnScale.value = reduceMotion ? 1 : withSpring(1, { damping: 15, stiffness: 150 });
           }}
           accessibilityRole="button"
           accessibilityLabel={buttonText}
-          accessibilityHint={isFirstPage ? "Starts a front label scan" : currentIndex === PAGES.length - 1 ? "Finishes onboarding" : "Shows the next onboarding screen"}
+          accessibilityHint="Starts a front label scan"
         >
           <Animated.View
             style={[
@@ -376,13 +309,11 @@ export default function OnboardingScreen({ onComplete }) {
               btnStyle,
             ]}
           >
-            {isFirstPage && (
-              <ScanLine size={18} color={theme.buttonText} strokeWidth={2} />
-            )}
+            <ScanLine size={18} color={theme.buttonText} strokeWidth={2} />
             <Animated.Text
               maxFontSizeMultiplier={MAX_FONT_SIZE_MULTIPLIER}
               key={buttonText}
-              entering={FadeIn.duration(200)}
+              entering={reduceMotion ? undefined : FadeIn.duration(200)}
               style={[styles.ctaText, { color: theme.buttonText }]}
             >
               {buttonText}
@@ -409,17 +340,17 @@ export default function OnboardingScreen({ onComplete }) {
 
         {!isFirstPage && (
           <Pressable
-            onPress={handleScanNow}
+            onPress={handleNext}
             style={({ pressed }) => [
               styles.secondaryButton,
               { opacity: pressed ? 0.55 : 1 },
             ]}
             accessibilityRole="button"
-            accessibilityLabel="Skip onboarding and scan"
-            accessibilityHint="Starts a front label scan"
+            accessibilityLabel="Go to home"
+            accessibilityHint="Finishes onboarding without starting a scan"
           >
             <Text style={[styles.secondaryText, { color: theme.textSecondary }]}>
-              Skip and scan
+              Go to Home
             </Text>
           </Pressable>
         )}
@@ -457,7 +388,7 @@ const styles = StyleSheet.create({
     marginBottom: 40,
   },
 
-  // Score ring (screen 2)
+  // Verified answer (screen 2)
   ringWrapper: {
     justifyContent: "center",
     alignItems: "center",
@@ -467,50 +398,24 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  ringScore: {
-    fontSize: 36,
-    fontWeight: "700",
-    letterSpacing: 0,
-  },
-  ringGrade: {
-    fontSize: 11,
-    fontWeight: "600",
-    letterSpacing: 0,
-    textTransform: "uppercase",
-    marginTop: 2,
-  },
-
-  // Ingredient list (screen 3)
-  ingredientCard: {
-    width: 280,
-    borderRadius: Spacing.cardRadius,
-    paddingVertical: Spacing.cardPadding,
-    paddingHorizontal: Spacing.screenPadding,
-  },
-  ingredientRow: {
+  answerPills: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 12,
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 14,
   },
-  ingredientDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 12,
+  answerPill: {
+    minHeight: 34,
+    borderRadius: 17,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
   },
-  ingredientName: {
-    fontSize: 15,
-    fontWeight: "500",
-    flex: 1,
-  },
-  ingredientRating: {
-    fontSize: 13,
-    fontWeight: "500",
-    marginLeft: 8,
-  },
-  ingredientDivider: {
-    height: StyleSheet.hairlineWidth,
-    marginLeft: Spacing.dividerIndent,
+  answerPillText: {
+    fontSize: 12,
+    fontWeight: "600",
   },
 
   // Text block

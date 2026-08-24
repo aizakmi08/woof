@@ -47,6 +47,8 @@ import { BRAND_NAME } from "../config/brand";
 import { requestCatalogEvidenceConsent } from "../services/catalogEvidenceConsent";
 import { useAuth } from "../services/auth";
 import { normalizePetProfile } from "../services/petProfile";
+import { logCaptureToResult, navigationTimingParams } from "../services/performanceTimings";
+import { DEV_QA_PET_RESULT, DEV_QA_SEARCH_PRODUCTS } from "../services/devQaFixtures";
 
 const logger = createLogger("PRODUCT_SEARCH");
 const MIN_QUERY_LENGTH = 2;
@@ -790,6 +792,8 @@ export default function ProductSearchScreen({ navigation, route }) {
   const labelCaptureId = route.params?.labelCaptureId || "";
   const labelCaptureStartedAt = Number(route.params?.labelCaptureStartedAt) || null;
   const labelAttempt = Math.max(1, Number(route.params?.labelAttempt) || 1);
+  const devFixture = __DEV__ ? route.params?.devFixture : null;
+  const devLoadingMessage = __DEV__ ? route.params?.devLoadingMessage : null;
   const hasLabelLookupInput = Boolean(labelImageBase64 || labelOcrText);
   const [query, setQuery] = useState(initialQuery);
   const [products, setProducts] = useState([]);
@@ -809,6 +813,7 @@ export default function ProductSearchScreen({ navigation, route }) {
   const [labelLoadingMessage, setLabelLoadingMessage] = useState(
     labelOcrText ? "Matching exact product..." : "Reading product label..."
   );
+  const [searchLoadingMessage, setSearchLoadingMessage] = useState("Searching catalog...");
   const searchRunRef = useRef(0);
   const searchAbortRef = useRef(null);
   const labelRunRef = useRef(null);
@@ -835,18 +840,120 @@ export default function ProductSearchScreen({ navigation, route }) {
 
   useEffect(() => {
     if (!labelLoading) return undefined;
+    if (devFixture && devLoadingMessage) {
+      setLabelLoadingMessage(devLoadingMessage);
+      return undefined;
+    }
     setLabelLoadingMessage(labelOcrText ? "Matching exact product..." : "Reading product label...");
     const matchingTimer = setTimeout(() => setLabelLoadingMessage("Matching exact product..."), 1_200);
-    const finishingTimer = setTimeout(() => setLabelLoadingMessage("Finishing verification..."), 4_000);
-    const evidenceTimer = setTimeout(() => setLabelLoadingMessage("Checking exact package details..."), 8_000);
-    const longRunningTimer = setTimeout(() => setLabelLoadingMessage("Still working — exact matching can take a little longer..."), 12_000);
+    const variantTimer = setTimeout(() => setLabelLoadingMessage("Checking brand and recipe..."), 3_200);
+    const finishingTimer = setTimeout(() => setLabelLoadingMessage("Finishing verification..."), 5_200);
+    const evidenceTimer = setTimeout(() => setLabelLoadingMessage("Checking exact package details..."), 7_200);
+    const recoveryTimer = setTimeout(() => setLabelLoadingMessage("Trying the recognized product name..."), 9_200);
+    const longRunningTimer = setTimeout(() => setLabelLoadingMessage("Still matching — you can search by name instead."), 11_200);
     return () => {
       clearTimeout(matchingTimer);
+      clearTimeout(variantTimer);
       clearTimeout(finishingTimer);
       clearTimeout(evidenceTimer);
+      clearTimeout(recoveryTimer);
       clearTimeout(longRunningTimer);
     };
-  }, [labelLoading, labelOcrText]);
+  }, [devFixture, devLoadingMessage, labelLoading, labelOcrText]);
+
+  useEffect(() => {
+    if (!__DEV__ || !devFixture) return;
+    setLabelLoading(false);
+    setLoading(false);
+    setShowingCached(false);
+    setSearchCorrection("");
+    setSearchFailureKind(null);
+    setNoneOfTheseSelected(false);
+    setError(null);
+    setConfirmedFormulaKey("");
+
+    if (devFixture === "label_loading") {
+      setProducts([]);
+      setQuery("QA Fixture");
+      setLabelLoadingMessage(devLoadingMessage || "Reading product label...");
+      setLabelLoading(true);
+      return;
+    }
+
+    if (devFixture === "multi_candidate") {
+      setQuery("QA Small Breed Chicken Recipe");
+      setIdentification({ found: true, labelRead: true, searchQuery: "QA Small Breed Chicken Recipe" });
+      setResolutionDecision(LABEL_RESOLUTION_DECISIONS.RECOGNIZERS_DISAGREE);
+      setProducts(DEV_QA_SEARCH_PRODUCTS);
+      return;
+    }
+
+    if (devFixture === "exact_auto_open") {
+      setQuery("QA Small Breed Chicken Recipe");
+      setIdentification({ found: true, labelRead: true, searchQuery: "QA Small Breed Chicken Recipe" });
+      setResolutionDecision(LABEL_RESOLUTION_DECISIONS.EXACT_CONFIRMED);
+      setProducts([DEV_QA_SEARCH_PRODUCTS[0]]);
+      const timer = setTimeout(() => {
+        trackEvent("dev_qa_exact_match_auto_opened");
+        navigation.replace("Results", {
+          mode: "catalog",
+          devFixtureResult: DEV_QA_PET_RESULT,
+        });
+      }, 450);
+      return () => clearTimeout(timer);
+    }
+
+    if (devFixture === "not_readable") {
+      setQuery("");
+      setIdentification({ found: false, labelRead: false, notes: "No readable product name was found." });
+      setResolutionDecision(LABEL_RESOLUTION_DECISIONS.NO_EXACT_VARIANT);
+      setProducts([]);
+      return;
+    }
+
+    if (devFixture === "label_timeout") {
+      setQuery("QA recognized product");
+      setIdentification({ found: false, labelRead: true, searchQuery: "QA recognized product" });
+      setResolutionDecision(LABEL_RESOLUTION_DECISIONS.TIMED_OUT);
+      setProducts([]);
+      setError("Exact catalog matching took too long. Search the brand or recipe name instead.");
+      return;
+    }
+
+    setQuery("QA Small Breed Chicken");
+    setResolutionDecision(null);
+    if (devFixture === "typed_results" || devFixture === "typed_typo") {
+      setProducts(DEV_QA_SEARCH_PRODUCTS);
+      if (devFixture === "typed_typo") setSearchCorrection("QA Small Breed Chicken");
+      return;
+    }
+    if (devFixture === "typed_timeout") {
+      setProducts([]);
+      setSearchFailureKind("timeout");
+      setError("The catalog is taking longer than expected. Please try again.");
+      return;
+    }
+    setProducts([]);
+  }, [devFixture, devLoadingMessage, navigation]);
+
+  useEffect(() => {
+    if (!loading || (showingCached && products.length > 0)) return undefined;
+    setSearchLoadingMessage("Searching catalog...");
+    const timers = [
+      setTimeout(() => setSearchLoadingMessage("Checking exact product names..."), 1_500),
+      setTimeout(() => setSearchLoadingMessage("Checking recipe and life stage..."), 3_500),
+      setTimeout(() => setSearchLoadingMessage("Checking package variants..."), 5_500),
+      setTimeout(() => setSearchLoadingMessage("Still searching — you can cancel and retry."), 7_500),
+    ];
+    return () => timers.forEach(clearTimeout);
+  }, [loading, products.length, showingCached]);
+
+  useEffect(() => {
+    products.slice(0, 6).forEach((product) => {
+      const imageUrl = String(product?.imageUrl || "").trim();
+      if (imageUrl) Image.prefetch(imageUrl).catch(() => {});
+    });
+  }, [products]);
 
   useEffect(() => () => {
     searchRunRef.current += 1;
@@ -942,6 +1049,14 @@ export default function ProductSearchScreen({ navigation, route }) {
           {
             text: "Scan Ingredients",
             onPress: async () => {
+              if (!canScan()) {
+                navigation.navigate("Paywall", {
+                  source: "scan_limit",
+                  sourceSurface: "product_search_unverified_product",
+                  remainingScans: remainingScans(),
+                });
+                return;
+              }
               const catalogEvidenceConsent = await requestCatalogEvidenceConsent();
               if (catalogEvidenceConsent == null) return;
               navigation.navigate("Scanner", {
@@ -950,6 +1065,7 @@ export default function ProductSearchScreen({ navigation, route }) {
                 candidateProduct: ingredientCaptureProduct(resolvedProduct),
                 sourceSurface,
                 catalogEvidenceConsent,
+                ...navigationTimingParams(sourceSurface),
               });
             },
           },
@@ -963,8 +1079,9 @@ export default function ProductSearchScreen({ navigation, route }) {
       cacheKey: resolvedProduct.cacheKey,
       catalogProduct: resolvedProduct,
       uri: labelImageUri || resolvedProduct.imageUrl || null,
+      captureStartedAt: labelCaptureStartedAt,
     });
-  }, [navigation, labelImageUri, products, query]);
+  }, [canScan, labelCaptureStartedAt, labelImageUri, navigation, products, query, remainingScans]);
   const openProductResultRef = useRef(openProductResult);
 
   useEffect(() => {
@@ -1109,6 +1226,7 @@ export default function ProductSearchScreen({ navigation, route }) {
   }, [clearScanContext, petTypeFilter]);
 
   useEffect(() => {
+    if (devFixture) return;
     if (!hasLabelLookupInput) return;
     const lookupKey = labelCaptureId
       || `${labelImageUri || "camera"}:${labelImageBase64?.length || 0}:${labelOcrText.length}`;
@@ -1347,7 +1465,15 @@ export default function ProductSearchScreen({ navigation, route }) {
           resolver_latency_ms: Date.now() - resolverStartedAt,
           capture_to_resolver_ms: resolverStartedAt - startedAt,
         });
+        logCaptureToResult({
+          captureStartedAt: labelCaptureStartedAt,
+          mode: "label_lookup",
+          outcome: result.selectedProduct ? "exact_match" : result.decision,
+        });
         if (result.selectedProduct) {
+          if (result.selectedProduct.imageUrl) {
+            Image.prefetch(result.selectedProduct.imageUrl).catch(() => {});
+          }
           await openProductResultRef.current(result.selectedProduct, {
             sourceSurface: recognitionPath === "on_device_ocr" ? "label_scan_on_device" : "label_scan",
             autoOpen: true,
@@ -1395,6 +1521,11 @@ export default function ProductSearchScreen({ navigation, route }) {
           label_read: Boolean(recognizedQuery),
           match_found: false,
         });
+        logCaptureToResult({
+          captureStartedAt: labelCaptureStartedAt,
+          mode: "label_lookup",
+          outcome: "error",
+        });
       } finally {
         lifecycleController.signal.removeEventListener("abort", abortRequests);
         if (labelAbortRef.current === lifecycleController) labelAbortRef.current = null;
@@ -1407,6 +1538,7 @@ export default function ProductSearchScreen({ navigation, route }) {
       requestController.abort();
     };
   }, [
+    devFixture,
     hasLabelLookupInput,
     labelCaptureId,
     labelCaptureStartedAt,
@@ -1421,6 +1553,7 @@ export default function ProductSearchScreen({ navigation, route }) {
   ]);
 
   useEffect(() => {
+    if (devFixture) return;
     if (labelLoading) return;
     if (trimmedQuery.length < MIN_QUERY_LENGTH) {
       setProducts([]);
@@ -1434,7 +1567,7 @@ export default function ProductSearchScreen({ navigation, route }) {
     }, 280);
 
     return () => clearTimeout(timer);
-  }, [trimmedQuery, labelLoading, runSearch]);
+  }, [devFixture, trimmedQuery, labelLoading, runSearch]);
 
   const handleQueryChange = (value) => {
     if (identification || resolutionDecision || labelLoading) {
@@ -1497,6 +1630,7 @@ export default function ProductSearchScreen({ navigation, route }) {
       mode: "label_lookup",
       returnToProductSearch: true,
       labelAttempt: labelAttempt + 1,
+      ...navigationTimingParams("product_search_photo_retry"),
     });
   };
 
@@ -1583,6 +1717,7 @@ export default function ProductSearchScreen({ navigation, route }) {
     navigation.navigate("Scanner", {
       mode: "label_lookup",
       returnToProductSearch: true,
+      ...navigationTimingParams("product_search_camera"),
     });
   };
 
@@ -1613,6 +1748,7 @@ export default function ProductSearchScreen({ navigation, route }) {
       labelIdentification: identification,
       sourceSurface: "product_search_gap",
       catalogEvidenceConsent,
+      ...navigationTimingParams("product_search_ingredient_capture"),
     });
   };
 
@@ -1622,7 +1758,7 @@ export default function ProductSearchScreen({ navigation, route }) {
 
   const resultCopy = useMemo(() => {
     if ((loading || labelLoading) && !(showingCached && products.length > 0)) {
-      return "Searching catalog";
+      return labelLoading ? labelLoadingMessage : searchLoadingMessage;
     }
     if (products.length === 0) return "";
     if (
@@ -1637,7 +1773,7 @@ export default function ProductSearchScreen({ navigation, route }) {
     }
     const count = products.length === 1 ? "1 matching product" : `${products.length} matching products`;
     return showingCached ? `${count} • refreshing` : count;
-  }, [loading, labelLoading, products, resolutionDecision, showingCached]);
+  }, [labelLoading, labelLoadingMessage, loading, products, resolutionDecision, searchLoadingMessage, showingCached]);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.bg }]}>

@@ -1739,7 +1739,7 @@ function checkResolverWiring() {
   assert(
     /onBarcodeScanned=\{barcodeEnabled \? handleBarcodeScanned : undefined\}/.test(scannerScreen)
       && /barcodeTypes: \["ean13", "ean8", "upc_a", "upc_e"\]/.test(scannerScreen)
-      && /navigation\.push\("Results", \{ mode: "barcode", barcode: barcodeValue, uri: previewUri \}\)/.test(scannerScreen)
+      && /navigation\.push\("Results",\s*\{[\s\S]*?mode:\s*"barcode",[\s\S]*?barcode:\s*barcodeValue,[\s\S]*?uri:\s*previewUri,[\s\S]*?\}\)/.test(scannerScreen)
       && /failedBarcodesThisSession\.has\(barcodeValue\)/.test(scannerScreen)
       && /barcode_ignored_after_failed_lookup/.test(scannerScreen)
       && /failedBarcode: barcode \|\| event\.barcode \|\| null/.test(resultsScreen)

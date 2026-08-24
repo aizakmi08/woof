@@ -3,12 +3,12 @@ import {
   StyleSheet,
   TouchableOpacity,
   View,
-  Dimensions,
   Alert,
   Pressable,
   Linking,
   Platform,
   ActivityIndicator,
+  useWindowDimensions,
 } from "react-native";
 import { AppText as Text } from "../components/AppText";
 import * as ImageManipulator from "expo-image-manipulator";
@@ -24,6 +24,7 @@ import Animated, {
   interpolate,
   FadeInDown,
   FadeOutUp,
+  useReducedMotion,
 } from "react-native-reanimated";
 import { BlurView } from "expo-blur";
 import { CameraView, useCameraPermissions } from "expo-camera";
@@ -42,11 +43,11 @@ import {
 import { projectScanFrameToPhoto } from "../services/cameraCrop";
 import * as Haptics from "expo-haptics";
 import { BRAND_NAME } from "../config/brand";
+import {
+  logTapToCamera,
+} from "../services/performanceTimings";
 
-const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 const SCAN_SIZE = 260;
-const SCAN_Y = Math.round(SCREEN_H * 0.28);
-const SCAN_X = Math.round((SCREEN_W - SCAN_SIZE) / 2);
 const SCAN_FRAME_INSET = 5;
 
 const CORNER_LEN = 40;
@@ -118,11 +119,18 @@ function scannerTipText({ showFallbackBanner, isHumanFood, isLabelLookup, isIngr
 // --- Streaming Dots (processing indicator) ---
 
 function StreamingDots() {
+  const reduceMotion = useReducedMotion();
   const dot1 = useSharedValue(0.3);
   const dot2 = useSharedValue(0.3);
   const dot3 = useSharedValue(0.3);
 
   useEffect(() => {
+    if (reduceMotion) {
+      dot1.value = 1;
+      dot2.value = 0.65;
+      dot3.value = 0.35;
+      return;
+    }
     const anim = withRepeat(
       withSequence(
         withTiming(1, { duration: 400 }),
@@ -133,7 +141,7 @@ function StreamingDots() {
     dot1.value = anim;
     dot2.value = withSequence(withTiming(0.3, { duration: 150 }), anim);
     dot3.value = withSequence(withTiming(0.3, { duration: 300 }), anim);
-  }, []);
+  }, [reduceMotion]);
 
   const style1 = useAnimatedStyle(() => ({ opacity: dot1.value }));
   const style2 = useAnimatedStyle(() => ({ opacity: dot2.value }));
@@ -210,21 +218,24 @@ export default function ScannerScreen({ navigation, route }) {
   const isHumanFood = scanMode === "human_food";
   const isLabelLookup = scanMode === "label_lookup";
   const isIngredientCapture = scanMode === "ingredient_capture";
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const reduceMotion = useReducedMotion();
   const scannerTitle = isHumanFood
     ? (petName ? `Food Safety for ${petName}` : "Food Safety")
     : (isLabelLookup ? "Find Product" : (isIngredientCapture ? "Add Ingredients" : "Scan"));
 
   const cameraRef = useRef(null);
-  const cameraViewportRef = useRef({ width: SCREEN_W, height: SCREEN_H });
+  const cameraViewportRef = useRef({ width: screenWidth, height: screenHeight });
   const scannedRef = useRef(false);
   const captureRunIdRef = useRef(0);
   const [permission, requestPermission] = useCameraPermissions();
   const [capturing, setCapturing] = useState(false);
+  const [captureProgress, setCaptureProgress] = useState("Capturing photo…");
   const [showFallbackBanner, setShowFallbackBanner] = useState(false);
   const [barcodeEnabled, setBarcodeEnabled] = useState(!isHumanFood && !isLabelLookup && !isIngredientCapture);
   const [sessionReady, setSessionReady] = useState(null);
   const theme = useTheme();
-  const { checkSession, isPro, remainingScans } = useAuth();
+  const { checkSession, session, canScan, isPro, remainingScans } = useAuth();
   const freeScansLeft = remainingScans();
   const isFocused = useIsFocused(); // Only show camera when screen is focused
   const scanModeForAnalytics = isHumanFood
@@ -247,10 +258,10 @@ export default function ScannerScreen({ navigation, route }) {
     : "Opens the system camera permission prompt";
   const scannerInstruction = scannerInstructionText({ showFallbackBanner, isHumanFood, isLabelLookup, isIngredientCapture });
   const scannerTip = scannerTipText({ showFallbackBanner, isHumanFood, isLabelLookup, isIngredientCapture });
-  const scanFrameWidth = SCAN_SIZE;
-  const scanFrameHeight = isLabelLookup ? Math.round(SCAN_SIZE * 4 / 3) : SCAN_SIZE;
-  const scanFrameX = Math.round((SCREEN_W - scanFrameWidth) / 2);
-  const scanFrameY = isLabelLookup ? Math.round(SCREEN_H * 0.20) : SCAN_Y;
+  const scanFrameWidth = Math.min(SCAN_SIZE, Math.max(220, screenWidth - 64));
+  const scanFrameHeight = isLabelLookup ? Math.round(scanFrameWidth * 4 / 3) : scanFrameWidth;
+  const scanFrameX = Math.round((screenWidth - scanFrameWidth) / 2);
+  const scanFrameY = isLabelLookup ? Math.round(screenHeight * 0.20) : Math.round(screenHeight * 0.28);
 
   const handleCameraViewportLayout = useCallback((event) => {
     const { width, height } = event.nativeEvent.layout || {};
@@ -260,6 +271,11 @@ export default function ScannerScreen({ navigation, route }) {
   }, []);
 
   useEffect(() => {
+    logTapToCamera({
+      navigationStartedAt: route.params?.navigationStartedAt,
+      sourceSurface: route.params?.navigationSourceSurface,
+      mode: scanModeForAnalytics,
+    });
     trackEvent("scanner_viewed", {
       scan_mode: scanModeForAnalytics,
       scanner_mode: scanModeForAnalytics,
@@ -267,17 +283,18 @@ export default function ScannerScreen({ navigation, route }) {
       pet_type: petType,
       capture_tip: scannerTipText({ showFallbackBanner: !!fallbackToPhoto, isHumanFood, isLabelLookup, isIngredientCapture }),
     });
-  }, [fallbackToPhoto, isHumanFood, isLabelLookup, isIngredientCapture, petType, scanModeForAnalytics]);
+  }, [fallbackToPhoto, isHumanFood, isLabelLookup, isIngredientCapture, petType, route.params?.navigationSourceSurface, route.params?.navigationStartedAt, scanModeForAnalytics]);
 
   // Proactively refresh auth session when scanner mounts
   useEffect(() => {
+    setSessionReady(null);
     checkSession()
       .then((ready) => setSessionReady(ready === true))
       .catch((err) => {
         setSessionReady(false);
         logger.debug("[SCANNER] Session check failed:", err.message);
       });
-  }, [checkSession]);
+  }, [checkSession, session?.access_token]);
 
   // Keep barcode detection aligned with the active scanner mode.
   useEffect(() => {
@@ -314,6 +331,10 @@ export default function ScannerScreen({ navigation, route }) {
 
   // Corner bracket pulse (0.7 → 1.0)
   useEffect(() => {
+    if (reduceMotion) {
+      pulseAnim.value = 1;
+      return;
+    }
     pulseAnim.value = withRepeat(
       withSequence(
         withTiming(1, { duration: 2000 }),
@@ -321,7 +342,7 @@ export default function ScannerScreen({ navigation, route }) {
       ),
       -1
     );
-  }, []);
+  }, [reduceMotion]);
 
   const cornerAnimStyle = useAnimatedStyle(() => {
     const opacity = interpolate(pulseAnim.value, [0, 1], [0.7, 1.0]);
@@ -393,6 +414,7 @@ export default function ScannerScreen({ navigation, route }) {
         return;
       }
       scannedRef.current = true;
+      const captureStartedAt = Date.now();
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
       flashOpacity.value = withSequence(
@@ -408,7 +430,12 @@ export default function ScannerScreen({ navigation, route }) {
         preview_timeout_ms: BARCODE_PREVIEW_TIMEOUT_MS,
       });
 
-      navigation.push("Results", { mode: "barcode", barcode: barcodeValue, uri: previewUri });
+      navigation.push("Results", {
+        mode: "barcode",
+        barcode: barcodeValue,
+        uri: previewUri,
+        captureStartedAt,
+      });
       setTimeout(() => {
         scannedRef.current = false;
       }, 2000);
@@ -417,6 +444,14 @@ export default function ScannerScreen({ navigation, route }) {
   );
 
   const handleCapture = async () => {
+    if (!canScan()) {
+      navigation.navigate("Paywall", {
+        source: "scan_limit",
+        sourceSurface: "scanner_capture",
+        remainingScans: remainingScans(),
+      });
+      return;
+    }
     if (sessionReady === false) {
       Alert.alert("Session Needs Refresh", "Reconnect or sign in again before taking a scan.");
       return;
@@ -428,6 +463,7 @@ export default function ScannerScreen({ navigation, route }) {
     let captureStage = "camera_capture";
     const captureStartedAt = Date.now();
 
+    setCaptureProgress("Capturing photo…");
     setCapturing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     trackEvent("photo_capture_started", {
@@ -435,10 +471,12 @@ export default function ScannerScreen({ navigation, route }) {
       pet_type: petType,
     });
 
-    captureScale.value = withSequence(
-      withSpring(0.92, { damping: 20, stiffness: 300 }),
-      withSpring(1, { damping: 15, stiffness: 150 })
-    );
+    captureScale.value = reduceMotion
+      ? 1
+      : withSequence(
+        withSpring(0.92, { damping: 20, stiffness: 300 }),
+        withSpring(1, { damping: 15, stiffness: 150 })
+      );
 
     try {
       const photo = await cameraRef.current.takePictureAsync({
@@ -458,6 +496,7 @@ export default function ScannerScreen({ navigation, route }) {
         return;
       }
       captureStage = "scan_frame_crop";
+      setCaptureProgress(isLabelLookup ? "Framing front label…" : "Framing photo…");
       const cameraViewport = cameraViewportRef.current;
       const scanFrameCrop = projectScanFrameToPhoto({
         photoWidth: photo.width,
@@ -501,6 +540,7 @@ export default function ScannerScreen({ navigation, route }) {
       // Start at a label-readable size that usually meets the upload target in
       // one pass, avoiding extra image transformations on the hot scan path.
       captureStage = "image_optimization";
+      setCaptureProgress(isLabelLookup ? "Reading label text…" : "Preparing photo…");
       // OCR and visual recognition must inspect the same pixels inside the
       // highlighted frame. Never allow surrounding shelf or browser text to
       // compete with the product label the user intentionally framed.
@@ -586,6 +626,8 @@ export default function ScannerScreen({ navigation, route }) {
         capture_to_handoff_ms: Date.now() - captureStartedAt,
       });
 
+      setCaptureProgress(isLabelLookup ? "Starting exact-match lookup…" : "Starting secure upload…");
+      await new Promise((resolve) => requestAnimationFrame(resolve));
       setCapturing(false);
 
       if (isLabelLookup) {
@@ -616,6 +658,7 @@ export default function ScannerScreen({ navigation, route }) {
           labelIdentification: route.params?.labelIdentification || null,
           sourceSurface: route.params?.sourceSurface || null,
           catalogEvidenceConsent: route.params?.catalogEvidenceConsent === true,
+          captureStartedAt,
           ...(isHumanFood && { petType, petName }),
         });
       }
@@ -843,7 +886,7 @@ export default function ScannerScreen({ navigation, route }) {
 
         {capturing && (
           <ProcessingCard
-            label={isHumanFood ? "Checking food safety..." : (isLabelLookup ? "Finding product..." : (isIngredientCapture ? "Reading ingredients..." : "Analyzing ingredients..."))}
+            label={captureProgress}
             onCancel={handleCancelCapture}
           />
         )}
@@ -945,10 +988,10 @@ export default function ScannerScreen({ navigation, route }) {
             onPress={handleCapture}
             disabled={capturing || sessionReady === false}
             onPressIn={() => {
-              captureScale.value = withSpring(0.92, { damping: 20, stiffness: 300 });
+              captureScale.value = reduceMotion ? 1 : withSpring(0.92, { damping: 20, stiffness: 300 });
             }}
             onPressOut={() => {
-              captureScale.value = withSpring(1, { damping: 15, stiffness: 150 });
+              captureScale.value = reduceMotion ? 1 : withSpring(1, { damping: 15, stiffness: 150 });
             }}
             accessibilityRole="button"
             accessibilityLabel={capturing ? "Scanning" : "Capture photo"}
@@ -988,10 +1031,6 @@ const styles = StyleSheet.create({
   // Scan frame
   scanFrame: {
     position: "absolute",
-    top: SCAN_Y,
-    left: SCAN_X,
-    width: SCAN_SIZE,
-    height: SCAN_SIZE,
   },
   corner: {
     position: "absolute",
@@ -1039,7 +1078,6 @@ const styles = StyleSheet.create({
   // Instruction pill (frosted glass)
   instructionWrap: {
     position: "absolute",
-    top: SCAN_Y + SCAN_SIZE + Spacing.xl,
     left: 0,
     right: 0,
     alignItems: "center",
