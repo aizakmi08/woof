@@ -1,0 +1,4 @@
+-- Deployment marker: the catalog SKU ingredient-version trigger now uses the
+-- canonical ingredient normalizer, preventing typography-only false conflicts
+-- while continuing to reject real ingredient/order changes. The full trigger
+-- definition lives in 20260726146000_guard_catalog_sku_formula_ingredient_versions.sql.

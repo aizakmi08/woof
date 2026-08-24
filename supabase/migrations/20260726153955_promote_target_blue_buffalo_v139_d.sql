@@ -1,0 +1,4 @@
+-- Superseded before deployment. The original mixed batch was split into
+-- 20260726153962 and 20260726153963 after the exact-SKU equivalence path was
+-- hardened. Keep this migration as a no-op so a clean replay cannot execute
+-- the obsolete promotion attempt.

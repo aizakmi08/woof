@@ -1,0 +1,5 @@
+-- Deployment marker: the reusable reviewed-package promotion function now
+-- classifies ingredient-version conflicts found through active catalog SKU
+-- ownership as well as direct serving-row GTINs. The full function definition
+-- is maintained in 20260726153830_promote_reviewed_retailer_package_batch.sql
+-- and is applied verbatim for this migration.
