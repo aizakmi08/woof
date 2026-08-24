@@ -1163,7 +1163,7 @@ export default function PaywallScreen({ route, navigation }) {
                       { backgroundColor: theme.card },
                     ] : [
                       styles.pricingCardDefault,
-                      { backgroundColor: theme.card },
+                      { backgroundColor: theme.card, borderColor: theme.separator },
                     ],
                     pressed && { transform: [{ scale: 0.97 }] },
                   ]}
@@ -1589,7 +1589,6 @@ const styles = StyleSheet.create({
   },
   pricingCardDefault: {
     borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.08)",
   },
   pricingCardSelected: {
     borderWidth: 1.5,

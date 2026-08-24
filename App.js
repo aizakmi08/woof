@@ -8,7 +8,7 @@ import Constants from "expo-constants";
 import * as Updates from "expo-updates";
 import * as Sentry from "@sentry/react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useTheme, Colors, Spacing } from "./theme";
+import { useTheme, Spacing } from "./theme";
 import { AuthProvider, useAuth } from "./services/auth";
 import { createLogger } from "./services/logger";
 import { installGlobalErrorHandlers, trackAppError } from "./services/errorReporting";
@@ -108,6 +108,40 @@ if (updateGroup) {
   sentryScope?.setTag("expo.update_group_id", updateGroup);
 }
 
+function ErrorFallback({ onRetry }) {
+  const theme = useTheme();
+
+  return (
+    <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: theme.bg, padding: 40 }}>
+      <Text style={{ fontSize: 22, fontWeight: "700", color: theme.textPrimary, marginBottom: 12 }}>
+        Something went wrong
+      </Text>
+      <Text style={{ fontSize: 15, color: theme.textSecondary, textAlign: "center", marginBottom: 32, lineHeight: 22 }}>
+        The app ran into an unexpected error. Try reloading this screen.
+      </Text>
+      <Pressable
+        onPress={onRetry}
+        accessibilityRole="button"
+        accessibilityLabel="Try again"
+        accessibilityHint="Attempts to recover from the error"
+        style={({ pressed }) => ({
+          height: Spacing.buttonHeight,
+          paddingHorizontal: 32,
+          borderRadius: Spacing.buttonRadius,
+          backgroundColor: theme.buttonPrimary,
+          justifyContent: "center",
+          alignItems: "center",
+          opacity: pressed ? 0.85 : 1,
+        })}
+      >
+        <Text style={{ fontSize: 17, fontWeight: "600", color: theme.buttonText }}>
+          Try Again
+        </Text>
+      </Pressable>
+    </View>
+  );
+}
+
 class ErrorBoundary extends Component {
   state = { hasError: false, retryKey: 0 };
 
@@ -127,33 +161,9 @@ class ErrorBoundary extends Component {
   render() {
     if (this.state.hasError) {
       return (
-        <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: Colors.background, padding: 40 }}>
-          <Text style={{ fontSize: 22, fontWeight: "700", color: Colors.textPrimary, marginBottom: 12 }}>
-            Something went wrong
-          </Text>
-          <Text style={{ fontSize: 15, color: Colors.textSecondary, textAlign: "center", marginBottom: 32, lineHeight: 22 }}>
-            The app ran into an unexpected error. Try reloading this screen.
-          </Text>
-          <Pressable
-            onPress={() => this.setState((state) => ({ hasError: false, retryKey: state.retryKey + 1 }))}
-            accessibilityRole="button"
-            accessibilityLabel="Try again"
-            accessibilityHint="Attempts to recover from the error"
-            style={({ pressed }) => ({
-              height: Spacing.buttonHeight,
-              paddingHorizontal: 32,
-              borderRadius: Spacing.buttonRadius,
-              backgroundColor: Colors.textPrimary,
-              justifyContent: "center",
-              alignItems: "center",
-              opacity: pressed ? 0.85 : 1,
-            })}
-          >
-            <Text style={{ fontSize: 17, fontWeight: "600", color: Colors.background }}>
-              Try Again
-            </Text>
-          </Pressable>
-        </View>
+        <ErrorFallback
+          onRetry={() => this.setState((state) => ({ hasError: false, retryKey: state.retryKey + 1 }))}
+        />
       );
     }
     return <View key={this.state.retryKey} style={{ flex: 1 }}>{this.props.children}</View>;

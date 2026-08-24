@@ -1674,7 +1674,7 @@ export default function ResultsScreen({ route, navigation }) {
         ? Colors.scoreDecent
         : Colors.scoreExcellent;
   const showProminentPetSafety = petSafety?.personalized === true
-    && (petSafety.level === "avoid" || petSafety.level === "caution");
+    && petSafety.level !== "safe";
   const verificationSource = isIngredientCapture
     ? "User submission"
     : displayValueLabel(
@@ -2025,6 +2025,47 @@ export default function ResultsScreen({ route, navigation }) {
               </View>
             ) : null}
 
+            {/* A personalized warning must never depend on score availability. */}
+            {showProminentPetSafety ? (
+              <StreamSection visible delay={45}>
+                <View
+                  style={[
+                    styles.personalizedWarning,
+                    {
+                      backgroundColor: petSafety.level === "avoid"
+                        ? theme.dangerSurface
+                        : theme.cautionSurface,
+                      borderColor: petSafetyColor,
+                    },
+                  ]}
+                  accessible
+                  accessibilityRole="alert"
+                  accessibilityLabel={`${petSafety.level === "avoid" ? "Do not feed" : "Check before feeding"}. ${petSafety.label}. ${petSafety.summary}`}
+                >
+                  <View style={[styles.personalizedWarningIcon, { backgroundColor: petSafetyColor + "18" }]}>
+                    {petSafety.level === "avoid" ? (
+                      <AlertCircle size={24} color={petSafetyColor} strokeWidth={2.5} />
+                    ) : (
+                      <AlertTriangle size={24} color={petSafetyColor} strokeWidth={2.5} />
+                    )}
+                  </View>
+                  <View style={styles.personalizedWarningCopy}>
+                    <Text style={[styles.personalizedWarningEyebrow, { color: petSafetyColor }]}>
+                      {petSafety.level === "avoid"
+                        ? `DO NOT FEED TO ${savedPetProfile.name || "THIS PET"}`
+                        : `CHECK BEFORE FEEDING ${savedPetProfile.name || "THIS PET"}`}
+                    </Text>
+                    <Text style={[styles.personalizedWarningTitle, { color: theme.textPrimary }]}>
+                      {petSafety.label}
+                    </Text>
+                    <Text style={[styles.personalizedWarningSummary, { color: theme.textSecondary }]}>
+                      {petSafety.summary}
+                    </Text>
+                  </View>
+                </View>
+              </StreamSection>
+            ) : null}
+
             {/* 2. Score overview */}
             {hasScore ? (
               <StreamSection visible delay={50}>
@@ -2038,7 +2079,7 @@ export default function ResultsScreen({ route, navigation }) {
                     },
                   ]}
                   accessible
-                  accessibilityRole={showProminentPetSafety ? "alert" : "summary"}
+                  accessibilityRole="summary"
                   accessibilityLabel={`Ingredient quality score ${result.overallScore} out of 100, ${scoreConfig.label}. ${petSafety?.label || "General ingredient check"}. ${petSafety?.summary || ""}`}
                 >
                   <CircularScore score={result.overallScore} size={132} strokeWidth={10} />
@@ -2054,7 +2095,7 @@ export default function ResultsScreen({ route, navigation }) {
                         ? "Based on this formula’s exact ingredient list. Open the breakdown below to see what shaped it."
                         : "Based on this formula’s exact ingredient list. Upgrade to unlock the full quality breakdown and nutrition details."}
                     </Text>
-                    {petSafety?.personalized ? (
+                    {petSafety?.personalized && petSafety.level === "safe" ? (
                       <View
                         style={[
                           styles.petVerdictHero,
@@ -2068,14 +2109,10 @@ export default function ResultsScreen({ route, navigation }) {
                           },
                         ]}
                       >
-                        {petSafety.level === "safe" ? (
-                          <CheckCircle2 size={18} color={petSafetyColor} strokeWidth={2.4} />
-                        ) : (
-                          <AlertTriangle size={18} color={petSafetyColor} strokeWidth={2.4} />
-                        )}
+                        <CheckCircle2 size={18} color={petSafetyColor} strokeWidth={2.4} />
                         <View style={styles.petVerdictHeroCopy}>
                           <Text style={[styles.petVerdictHeroEyebrow, { color: petSafetyColor }]}>
-                            {petSafety.level === "avoid" ? "AVOID FOR THIS PET" : petSafety.level === "caution" ? "CHECK FOR THIS PET" : "PET FIT"}
+                            PET FIT
                           </Text>
                           <Text style={[styles.petVerdictHeroTitle, { color: theme.textPrimary }]}>
                             {petSafety.label}
@@ -2085,7 +2122,7 @@ export default function ResultsScreen({ route, navigation }) {
                           </Text>
                         </View>
                       </View>
-                    ) : (
+                    ) : !petSafety?.personalized ? (
                       <Pressable
                         onPress={() => navigation.navigate("Profile", {
                           openPetEditor: true,
@@ -2107,7 +2144,7 @@ export default function ResultsScreen({ route, navigation }) {
                           Add pet details for a personalized fit check
                         </Text>
                       </Pressable>
-                    )}
+                    ) : null}
                   </View>
                 </View>
               </StreamSection>
@@ -2120,7 +2157,10 @@ export default function ResultsScreen({ route, navigation }) {
             {/* Scan limit banner (free users, new scans only) */}
             {!isPro && mode !== "history" ? (
               <View style={{ minHeight: 54 }}>
-                {done && !hasFullResultAccess && hasScore ? (
+                {done
+                  && !hasFullResultAccess
+                  && hasScore
+                  && !(showFirstScanToast || (__DEV__ && devPrompt === "first_scan")) ? (
                   <ScanLimitBanner remaining={remainingScanCount} />
                 ) : null}
               </View>

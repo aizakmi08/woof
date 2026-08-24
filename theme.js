@@ -184,6 +184,7 @@ function buildTheme(isDark) {
     dangerSurface: isDark ? "rgba(199,74,70,0.22)" : "rgba(199,74,70,0.10)",
     cautionSurface: isDark ? "rgba(216,148,28,0.20)" : "rgba(216,148,28,0.10)",
     successSurface: isDark ? "rgba(47,143,91,0.20)" : "rgba(47,143,91,0.10)",
+    skeletonShimmer: isDark ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.58)",
     buttonPrimary: isDark ? "#F5F5F5" : Colors.buttonPrimary,
     buttonText: isDark ? "#1C1C1E" : Colors.buttonText,
   });

@@ -2149,6 +2149,7 @@ const toastStyles = RNStyleSheet.create({
 // --- Shimmer skeleton components (LinearGradient sweep) ---
 
 function ShimmerOverlay() {
+  const theme = useTheme();
   const reduceMotion = useReducedMotion();
   const translateX = useSharedValue(-375);
 
@@ -2170,7 +2171,7 @@ function ShimmerOverlay() {
     <Animated.View style={[RNStyleSheet.absoluteFill, { overflow: "hidden" }]}>
       <Animated.View style={[{ width: 375, height: "100%" }, shimmerStyle]}>
         <LinearGradient
-          colors={["transparent", "rgba(255,255,255,0.6)", "transparent"]}
+          colors={["transparent", theme.skeletonShimmer, "transparent"]}
           start={{ x: 0, y: 0.5 }}
           end={{ x: 1, y: 0.5 }}
           style={{ width: 375, height: "100%" }}

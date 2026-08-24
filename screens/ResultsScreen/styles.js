@@ -344,6 +344,48 @@ export function createStyles(theme) {
       lineHeight: 15,
     },
 
+    personalizedWarning: {
+      width: "100%",
+      minHeight: 104,
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 12,
+      borderRadius: Spacing.cardRadius,
+      borderCurve: "continuous",
+      borderWidth: 2,
+      padding: Spacing.cardPadding,
+      marginTop: 14,
+    },
+    personalizedWarningIcon: {
+      width: 42,
+      height: 42,
+      borderRadius: 21,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    personalizedWarningCopy: {
+      flex: 1,
+      minWidth: 0,
+    },
+    personalizedWarningEyebrow: {
+      fontSize: 11,
+      lineHeight: 15,
+      fontWeight: "800",
+      letterSpacing: 0,
+      marginBottom: 4,
+    },
+    personalizedWarningTitle: {
+      fontSize: 18,
+      lineHeight: 23,
+      fontWeight: "800",
+    },
+    personalizedWarningSummary: {
+      fontSize: 14,
+      lineHeight: 20,
+      fontWeight: "500",
+      marginTop: 5,
+    },
+
     // --- Score overview ---
     scoreOverviewCard: {
       flexDirection: "row",

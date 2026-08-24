@@ -13,7 +13,7 @@ import {
 } from "react-native";
 import { AppText as Text, AppTextInput as TextInput } from "../components/AppText";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Camera, ChevronLeft, Search, ScanLine, X } from "lucide-react-native";
+import { Camera, Check, ChevronLeft, Search, ScanLine, X } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import {
   collapseRepeatedIdentityText,
@@ -22,10 +22,7 @@ import {
   resolveProduct,
 } from "../services/productCatalog";
 import { labelOcrIsAvailable, recognizeLabelText } from "../services/labelOcr";
-import {
-  catalogVerificationState,
-  productIsVerifiedReady,
-} from "../services/catalogQuality";
+import { productIsVerifiedReady } from "../services/catalogQuality";
 import {
   getCachedCatalogSearch,
   saveCachedCatalogSearch,
@@ -56,18 +53,23 @@ const SEARCH_RESULT_LIMIT = 12;
 const SEARCH_UI_TIMEOUT_MS = 8_000;
 const AUTOMATIC_LABEL_RECOVERY_TIMEOUT_MS = 6_500;
 const EMPTY_OCR_LINES = Object.freeze([]);
-const VERIFIED_INGREDIENT_STATUSES = new Set([
-  "gdsn",
-  "official",
-  "manufacturer",
-  "retailer_verified",
-  "label_ocr_verified",
-]);
-const VERIFIED_IMAGE_STATUSES = new Set([
-  "official",
-  "manufacturer",
-  "retailer_verified",
-]);
+const VARIANT_DISPLAY_LABELS = Object.freeze({
+  adult: "Adult",
+  all_life_stages: "All life stages",
+  all_stages: "All life stages",
+  cat: "Cat",
+  dog: "Dog",
+  dry: "Dry",
+  freeze_dried: "Freeze-dried",
+  freeze_dried_raw: "Freeze-dried raw",
+  kitten: "Kitten",
+  mature: "Mature",
+  puppy: "Puppy",
+  raw: "Raw",
+  senior: "Senior",
+  wet: "Wet",
+  young: "Young",
+});
 const PRODUCT_QUERY_REQUIRED_TERMS = new Set([
   "adult",
   "senior",
@@ -185,27 +187,6 @@ function productIdentityText(product = {}) {
   ].map((value) => String(value || "").trim()).filter(Boolean).join(" ");
 }
 
-function sourceLabel(product) {
-  if (product.sourceQuality === "gdsn") return "GDSN";
-  if (product.sourceQuality === "official") return "Official feed";
-  if (product.sourceQuality === "manufacturer") return "Manufacturer";
-  if (product.sourceQuality === "retailer_verified") return "Retailer verified";
-  if (product.sourceKind === "opff") return "Open Pet Food Facts";
-  if (product.source === "amazon") return "Catalog";
-  if (product.source === "web_verified") return "Verified web";
-  if (product.source === "dfa") return "Dog Food Advisor";
-  return product.source ? product.source.replace(/_/g, " ") : "Catalog";
-}
-
-function productHasSourceEvidence(product) {
-  return Boolean(String(product?.sourceUrl || product?.source_url || "").trim());
-}
-
-function productHasVerifiedImage(product) {
-  const status = String(product?.imageVerificationStatus || "").toLowerCase();
-  return Boolean(product?.imageUrl) && VERIFIED_IMAGE_STATUSES.has(status);
-}
-
 function productMatchesQueryTerms(product, queryText = "") {
   const queryTokens = tokenSet(queryText);
   const productTokens = tokenSet(productIdentityText(product));
@@ -226,10 +207,6 @@ function productMatchesQueryTerms(product, queryText = "") {
 
 function productIsReady(product) {
   return productIsVerifiedReady(product);
-}
-
-function ingredientStatusLabel(product) {
-  return catalogVerificationState(product).label;
 }
 
 function productPackageSizeLabel(product) {
@@ -255,38 +232,45 @@ function productPackageSizeLabel(product) {
     : packageSizes.length > 1
       ? "Multiple sizes"
       : packageSizes[0];
-  return formatVariantValue(packageSize);
-}
-
-function productVariantLabel(product) {
-  const productName = normalizeText(product?.productName);
-
-  return [
-    { key: "petType", value: product?.petType },
-    { key: "lifeStage", value: product?.lifeStage },
-    { key: "foodForm", value: product?.foodForm },
-    { key: "flavor", value: product?.flavor },
-    { key: "productLine", value: product?.productLine },
-  ]
-    .map((field) => ({ ...field, label: formatVariantValue(field.value) }))
-    .filter((field) => field.label)
-    .filter((field) => {
-      const normalized = normalizeText(field.label);
-      return !normalized || !productName.includes(normalized);
-    })
-    .map((field) => field.label)
-    .join(" • ");
+  if (!packageSize) return "";
+  if (normalizeText(packageSize) === "multiple sizes") return "Multiple sizes";
+  return String(packageSize)
+    .trim()
+    .replace(/\b(LBS?|OZ|KG|G|CT)\b/gi, (unit) => unit.toLowerCase());
 }
 
 function formatVariantValue(value) {
   const normalized = String(value || "").trim().toLowerCase();
   if (!normalized) return "";
-  if (normalized === "freeze_dried" || normalized === "freeze-dried") return "Freeze-dried";
+  const dictionaryKey = normalized.replace(/[\s-]+/g, "_");
+  if (VARIANT_DISPLAY_LABELS[dictionaryKey]) return VARIANT_DISPLAY_LABELS[dictionaryKey];
   if (normalized === "multiple sizes") return "Multiple sizes";
   return String(value)
     .trim()
     .replace(/_/g, " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function productDisplayTitle(product = {}) {
+  const line = formatVariantValue(product.productLine);
+  const recipe = formatVariantValue(product.flavor || product.recipe);
+  if (line && recipe && !normalizeText(line).includes(normalizeText(recipe))) {
+    return `${line} · ${recipe}`;
+  }
+  return line || recipe || collapseRepeatedIdentityText(product.productName) || "Pet food";
+}
+
+function productVariantChips(product = {}) {
+  const chips = [
+    { key: "size", label: productPackageSizeLabel(product), prominent: true },
+    { key: "lifeStage", label: formatVariantValue(product.lifeStage) },
+    { key: "form", label: formatVariantValue(product.foodForm || product.form) },
+    { key: "species", label: formatVariantValue(product.petType) },
+  ].filter((chip) => chip.label);
+
+  return chips.filter((chip, index) => (
+    chips.findIndex((candidate) => normalizeText(candidate.label) === normalizeText(chip.label)) === index
+  ));
 }
 
 function labelSummaryTitle(identification = {}) {
@@ -508,9 +492,9 @@ function ProductImage({ product, theme }) {
 
 function ProductRow({ product, theme, onPress, exactConfirmed = false }) {
   const ready = productIsReady(product);
-  const statusLabel = ingredientStatusLabel(product);
-  const variantLabel = productVariantLabel(product);
-  const packageSizeLabel = productPackageSizeLabel(product);
+  const displayTitle = productDisplayTitle(product);
+  const variantChips = productVariantChips(product);
+  const chipSummary = variantChips.map((chip) => chip.label).join(", ");
 
   return (
     <Pressable
@@ -524,85 +508,68 @@ function ProductRow({ product, theme, onPress, exactConfirmed = false }) {
         },
       ]}
       accessibilityRole="button"
-      accessibilityLabel={`${product.productName}${variantLabel ? `. ${variantLabel}` : ""}. ${ready ? "Ready to score" : "Needs ingredient data"}`}
+      accessibilityLabel={`${product.brand ? `${product.brand}. ` : ""}${displayTitle}${chipSummary ? `. ${chipSummary}` : ""}. ${exactConfirmed ? "Exact label match" : ready ? "Verified" : "Needs ingredient data"}`}
       accessibilityHint={ready ? "Opens the product score" : "Shows options to scan ingredient data"}
     >
       <ProductImage product={product} theme={theme} />
       <View style={styles.productCopy}>
-        <Text style={[styles.productName, { color: theme.textPrimary }]} numberOfLines={3}>
-          {product.productName}
-        </Text>
-        {variantLabel ? (
-          <Text style={[styles.productMeta, { color: theme.textSecondary }]} numberOfLines={3}>
-            {variantLabel}
+        {product.brand ? (
+          <Text style={[styles.productBrand, { color: theme.textTertiary }]} numberOfLines={1}>
+            {product.brand}
           </Text>
         ) : null}
-        {packageSizeLabel ? (
-          <View
-            style={[styles.packageSizeChip, { backgroundColor: theme.surface, borderColor: theme.separator }]}
-            accessible
-            accessibilityLabel={`Package size ${packageSizeLabel}`}
-          >
-            <Text style={[styles.packageSizeChipText, { color: theme.textPrimary }]} numberOfLines={1}>
-              {packageSizeLabel}
-            </Text>
+        <Text style={[styles.productName, { color: theme.textPrimary }]} numberOfLines={3}>
+          {displayTitle}
+        </Text>
+        {variantChips.length > 0 ? (
+          <View style={styles.variantChipRow}>
+            {variantChips.map((chip) => (
+              <View
+                key={chip.key}
+                style={[
+                  styles.variantChip,
+                  chip.prominent && styles.variantChipProminent,
+                  {
+                    backgroundColor: chip.prominent ? theme.surface : theme.fill,
+                    borderColor: chip.prominent ? theme.separator : "transparent",
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.variantChipText,
+                    chip.prominent && styles.variantChipTextProminent,
+                    { color: chip.prominent ? theme.textPrimary : theme.textSecondary },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {chip.label}
+                </Text>
+              </View>
+            ))}
           </View>
         ) : null}
-        <View style={styles.productEvidenceRow}>
+        <View style={styles.verificationRow}>
           <View
             style={[
-              styles.statusBadge,
-              {
-                backgroundColor: ready ? Colors.scoreExcellent + "12" : theme.surface,
-                borderColor: ready ? Colors.scoreExcellent + "2A" : theme.separator,
-              },
+              styles.verificationBadge,
+              { backgroundColor: ready ? Colors.scoreExcellent + "12" : theme.surface },
             ]}
           >
+            {ready ? <Check size={12} color={Colors.scoreExcellent} strokeWidth={2.8} /> : null}
             <Text
               style={[
-                styles.statusBadgeText,
+                styles.verificationBadgeText,
                 { color: ready ? Colors.scoreExcellent : theme.textTertiary },
               ]}
               numberOfLines={1}
             >
-              {exactConfirmed ? "Exact label match" : statusLabel}
+              {exactConfirmed ? "Exact label match" : ready ? "Verified" : "Needs ingredients"}
             </Text>
           </View>
-          <Text style={[styles.productSource, { color: theme.textTertiary }]} numberOfLines={1}>
-            {[sourceLabel(product), productHasVerifiedImage(product) ? "Verified catalog photo" : ""].filter(Boolean).join(" • ")}
-          </Text>
         </View>
       </View>
     </Pressable>
-  );
-}
-
-function LabelSummary({ identification, theme }) {
-  if (!identification) return null;
-
-  const title = identification.found
-    ? labelSummaryTitle(identification)
-    : "No readable product label";
-
-  return (
-    <View
-      style={[styles.labelSummary, { backgroundColor: theme.surface, borderColor: theme.separator }]}
-      accessible
-      accessibilityLiveRegion="polite"
-      accessibilityLabel={`Label scan. ${title}. ${identification.notes || ""}`}
-    >
-      <Text style={[styles.labelSummaryEyebrow, { color: theme.textTertiary }]}>
-        Label scan
-      </Text>
-      <Text style={[styles.labelSummaryTitle, { color: theme.textPrimary }]} numberOfLines={2}>
-        {title}
-      </Text>
-      {identification.notes ? (
-        <Text style={[styles.labelSummaryNote, { color: theme.textTertiary }]} numberOfLines={2}>
-          {identification.notes}
-        </Text>
-      ) : null}
-    </View>
   );
 }
 
@@ -1810,7 +1777,33 @@ export default function ProductSearchScreen({ navigation, route }) {
     openProductResult(product, { matchQuery: query });
   };
 
+  const labelFlowActive = Boolean(
+    labelLoading
+    || identification
+    || resolutionDecision
+    || recognizedIdentityText
+  );
+  const showPinnedRecovery = products.length > 0
+    && resolutionDecision
+    && resolutionDecision !== LABEL_RESOLUTION_DECISIONS.EXACT_CONFIRMED;
+
+  const labelStatus = useMemo(() => {
+    if (!labelFlowActive) return null;
+    if (resolutionDecision === LABEL_RESOLUTION_DECISIONS.EXACT_CONFIRMED) {
+      return { message: "Exact package confirmed", badge: "Confirmed", confirmed: true };
+    }
+    if (products.length > 0) {
+      return { message: "Label read — choose your exact package", badge: "Not confirmed" };
+    }
+    if (recognizedIdentityText || identification?.found) {
+      return { message: "Label read — checking the catalog", badge: "Checking" };
+    }
+    if (labelLoading) return { message: "Reading product label…", badge: "Checking" };
+    return null;
+  }, [identification?.found, labelFlowActive, labelLoading, products.length, recognizedIdentityText, resolutionDecision]);
+
   const resultCopy = useMemo(() => {
+    if (labelFlowActive) return "";
     if ((loading || labelLoading) && !(showingCached && products.length > 0)) {
       return labelLoading ? labelLoadingMessage : searchLoadingMessage;
     }
@@ -1827,7 +1820,7 @@ export default function ProductSearchScreen({ navigation, route }) {
     }
     const count = products.length === 1 ? "1 matching product" : `${products.length} matching products`;
     return showingCached ? `${count} • refreshing` : count;
-  }, [labelLoading, labelLoadingMessage, loading, products, resolutionDecision, searchLoadingMessage, showingCached]);
+  }, [labelFlowActive, labelLoading, labelLoadingMessage, loading, products, resolutionDecision, searchLoadingMessage, showingCached]);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.bg }]}>
@@ -1885,44 +1878,80 @@ export default function ProductSearchScreen({ navigation, route }) {
             </Pressable>
           )}
         </View>
-      </View>
-
-      <View
-        style={[styles.speciesFilter, { backgroundColor: theme.surface }]}
-        accessibilityRole="tablist"
-        accessibilityLabel="Filter products by species"
-      >
-        {[
-          { key: "all", label: "All" },
-          { key: "dog", label: "Dog" },
-          { key: "cat", label: "Cat" },
-        ].map((option) => {
-          const selected = petTypeFilter === option.key;
-          return (
-            <Pressable
-              key={option.key}
-              onPress={() => handlePetTypeFilter(option.key)}
-              style={({ pressed }) => [
-                styles.speciesFilterOption,
+        {labelStatus ? (
+          <View
+            ref={statusRef}
+            style={styles.labelStatusRow}
+            accessible
+            accessibilityLiveRegion="polite"
+            accessibilityLabel={`${labelStatus.message}. ${labelStatus.badge}`}
+          >
+            <Text style={[styles.labelStatusText, { color: theme.textSecondary }]} numberOfLines={2}>
+              {labelStatus.message}
+            </Text>
+            <View
+              style={[
+                styles.labelStatusBadge,
                 {
-                  backgroundColor: selected ? theme.card : "transparent",
-                  borderColor: selected ? theme.separator : "transparent",
-                  opacity: pressed ? 0.72 : 1,
+                  backgroundColor: labelStatus.confirmed ? Colors.scoreExcellent + "16" : theme.surface,
                 },
               ]}
-              accessibilityRole="tab"
-              accessibilityLabel={`Show ${option.label.toLowerCase()} products`}
-              accessibilityState={{ selected }}
             >
-              <Text style={[styles.speciesFilterText, { color: selected ? theme.textPrimary : theme.textSecondary }]}>
-                {option.label}
+              {labelStatus.confirmed ? (
+                <Check size={11} color={Colors.scoreExcellent} strokeWidth={2.8} />
+              ) : null}
+              <Text
+                style={[
+                  styles.labelStatusBadgeText,
+                  { color: labelStatus.confirmed ? Colors.scoreExcellent : theme.textTertiary },
+                ]}
+              >
+                {labelStatus.badge}
               </Text>
-            </Pressable>
-          );
-        })}
+            </View>
+          </View>
+        ) : null}
       </View>
 
+      {!labelFlowActive ? (
+        <View
+          style={[styles.speciesFilter, { backgroundColor: theme.surface }]}
+          accessibilityRole="tablist"
+          accessibilityLabel="Filter products by species"
+        >
+          {[
+            { key: "all", label: "All" },
+            { key: "dog", label: "Dog" },
+            { key: "cat", label: "Cat" },
+          ].map((option) => {
+            const selected = petTypeFilter === option.key;
+            return (
+              <Pressable
+                key={option.key}
+                onPress={() => handlePetTypeFilter(option.key)}
+                style={({ pressed }) => [
+                  styles.speciesFilterOption,
+                  {
+                    backgroundColor: selected ? theme.card : "transparent",
+                    borderColor: selected ? theme.separator : "transparent",
+                    opacity: pressed ? 0.72 : 1,
+                  },
+                ]}
+                accessibilityRole="tab"
+                accessibilityLabel={`Show ${option.label.toLowerCase()} products`}
+                accessibilityState={{ selected }}
+              >
+                <Text style={[styles.speciesFilterText, { color: selected ? theme.textPrimary : theme.textSecondary }]}>
+                  {option.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
+
       <FlatList
+        style={styles.resultsList}
         data={products}
         keyExtractor={(item) => `${item.sourceKind}:${productStableKey(item)}`}
         keyboardShouldPersistTaps="handled"
@@ -1932,7 +1961,6 @@ export default function ProductSearchScreen({ navigation, route }) {
         ]}
         ListHeaderComponent={(
           <View style={styles.listHeader}>
-            <LabelSummary identification={identification} theme={theme} />
             {resultCopy ? (
               <Text
                 ref={statusRef}
@@ -1942,25 +1970,6 @@ export default function ProductSearchScreen({ navigation, route }) {
                 {resultCopy}
               </Text>
             ) : null}
-            {products.length > 0
-              && resolutionDecision
-              && resolutionDecision !== LABEL_RESOLUTION_DECISIONS.EXACT_CONFIRMED ? (
-                <View style={[styles.packageCaveat, { backgroundColor: theme.surface, borderColor: theme.separator }]}>
-                  <Text style={[styles.packageCaveatText, { color: theme.textSecondary }]}>
-                    Exact package not confirmed. Check species, recipe, form, and package size before choosing a result.
-                  </Text>
-                  <Pressable
-                    onPress={handleNoneOfThese}
-                    accessibilityRole="button"
-                    accessibilityLabel="None of these products match"
-                    style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
-                  >
-                    <Text style={[styles.packageCaveatAction, { color: theme.textPrimary }]}>
-                      Not your product? None of these
-                    </Text>
-                  </Pressable>
-                </View>
-              ) : null}
             {searchCorrection ? (
               <Text
                 style={[styles.correctionText, { color: theme.textSecondary }]}
@@ -1993,43 +2002,6 @@ export default function ProductSearchScreen({ navigation, route }) {
           />
         )}
         ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
-        ListFooterComponent={
-          products.length > 0
-          && resolutionDecision
-          && resolutionDecision !== LABEL_RESOLUTION_DECISIONS.EXACT_CONFIRMED
-            ? (
-              <View style={styles.similarActions}>
-                <Pressable
-                  onPress={handleNoneOfThese}
-                  style={({ pressed }) => [
-                    styles.similarSecondaryButton,
-                    { borderColor: theme.separator, opacity: pressed ? 0.76 : 1 },
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel="None of these products"
-                >
-                  <Text style={[styles.similarSecondaryButtonText, { color: theme.textPrimary }]}>
-                    None of these
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={handleRetryCapturedLabel}
-                  style={({ pressed }) => [
-                    styles.similarPrimaryButton,
-                    { backgroundColor: theme.buttonPrimary, opacity: pressed ? 0.84 : 1 },
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel="Retry the captured front label"
-                >
-                  <Camera size={16} color={theme.buttonText} strokeWidth={2} />
-                  <Text style={[styles.similarPrimaryButtonText, { color: theme.buttonText }]}>
-                    Try photo again
-                  </Text>
-                </Pressable>
-              </View>
-            )
-            : null
-        }
         ListEmptyComponent={
           loading || labelLoading ? (
             <View style={styles.loadingState}>
@@ -2093,6 +2065,35 @@ export default function ProductSearchScreen({ navigation, route }) {
         }
         showsVerticalScrollIndicator={false}
       />
+      {showPinnedRecovery ? (
+        <View
+          style={[
+            styles.pinnedRecovery,
+            { backgroundColor: theme.bg, borderTopColor: theme.separator },
+          ]}
+        >
+          <Pressable
+            onPress={handleNoneOfThese}
+            style={({ pressed }) => [
+              styles.pinnedRecoveryButton,
+              { backgroundColor: theme.card, borderColor: theme.separator, opacity: pressed ? 0.72 : 1 },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="None of these products match"
+          >
+            <Text style={[styles.pinnedRecoveryButtonText, { color: theme.textPrimary }]}>None of these</Text>
+          </Pressable>
+          <Pressable
+            onPress={handleRetryCapturedLabel}
+            style={({ pressed }) => [styles.pinnedRetry, { opacity: pressed ? 0.55 : 1 }]}
+            accessibilityRole="button"
+            accessibilityLabel="Retry the captured front label"
+          >
+            <Camera size={15} color={theme.textSecondary} strokeWidth={2} />
+            <Text style={[styles.pinnedRetryText, { color: theme.textSecondary }]}>Try photo again</Text>
+          </Pressable>
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -2139,6 +2140,32 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     paddingVertical: 11,
   },
+  labelStatusRow: {
+    minHeight: 30,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 8,
+  },
+  labelStatusText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "600",
+  },
+  labelStatusBadge: {
+    minHeight: 24,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+  },
+  labelStatusBadgeText: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
   speciesFilter: {
     flexDirection: "row",
     marginHorizontal: Spacing.screenPadding,
@@ -2159,55 +2186,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
   },
+  resultsList: {
+    flex: 1,
+  },
   listContent: {
     paddingHorizontal: Spacing.screenPadding,
-    paddingBottom: 60,
+    paddingBottom: Spacing.lg,
   },
   listContentEmpty: {
     flexGrow: 1,
   },
   listHeader: {
     paddingBottom: 12,
-  },
-  packageCaveat: {
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 12,
-    gap: 8,
-    marginTop: 2,
-  },
-  packageCaveatText: {
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: "500",
-  },
-  packageCaveatAction: {
-    fontSize: 14,
-    lineHeight: 18,
-    fontWeight: "800",
-  },
-  labelSummary: {
-    borderWidth: 1,
-    borderRadius: 16,
-    padding: 15,
-    marginBottom: 12,
-  },
-  labelSummaryEyebrow: {
-    fontSize: 11,
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 0,
-    marginBottom: 5,
-  },
-  labelSummaryTitle: {
-    fontSize: 15,
-    fontWeight: "700",
-    lineHeight: 20,
-  },
-  labelSummaryNote: {
-    fontSize: 12,
-    lineHeight: 17,
-    marginTop: 6,
   },
   resultCopy: {
     fontSize: 13,
@@ -2227,8 +2217,8 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   productRow: {
-    minHeight: 124,
-    borderRadius: 18,
+    minHeight: 132,
+    borderRadius: Spacing.cardRadius,
     borderWidth: 1,
     padding: 12,
     flexDirection: "row",
@@ -2255,6 +2245,13 @@ const styles = StyleSheet.create({
     minWidth: 0,
     justifyContent: "center",
   },
+  productBrand: {
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    marginBottom: 3,
+  },
   productName: {
     fontSize: 16,
     fontWeight: "700",
@@ -2262,53 +2259,53 @@ const styles = StyleSheet.create({
     letterSpacing: 0,
     marginBottom: 6,
   },
-  productMeta: {
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: "500",
-    marginBottom: 7,
+  variantChipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 5,
+    marginBottom: 8,
   },
-  packageSizeChip: {
-    alignSelf: "flex-start",
-    minHeight: 28,
-    borderRadius: 8,
+  variantChip: {
+    minHeight: 23,
+    borderRadius: 7,
     borderWidth: 1,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
     justifyContent: "center",
-    marginBottom: 9,
   },
-  packageSizeChipText: {
-    fontSize: 13,
+  variantChipProminent: {
+    minHeight: 27,
+    paddingHorizontal: 9,
+  },
+  variantChipText: {
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: "600",
+  },
+  variantChipTextProminent: {
+    fontSize: 12,
     lineHeight: 16,
     fontWeight: "800",
   },
-  productEvidenceRow: {
+  verificationRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
   },
-  statusBadge: {
-    minHeight: 24,
-    borderRadius: 12,
+  verificationBadge: {
+    minHeight: 22,
+    borderRadius: 11,
     borderWidth: 1,
-    paddingHorizontal: 8,
+    borderColor: "transparent",
+    paddingHorizontal: 7,
     flexDirection: "row",
-    gap: 5,
+    gap: 4,
     alignItems: "center",
     justifyContent: "center",
   },
-  statusBadgeText: {
+  verificationBadgeText: {
     fontSize: 11,
     fontWeight: "700",
-    letterSpacing: 0,
-  },
-  productSource: {
-    flex: 1,
-    minWidth: 0,
-    fontSize: 11,
-    fontWeight: "600",
-    textTransform: "capitalize",
   },
   loadingState: {
     flex: 1,
@@ -2371,13 +2368,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
   },
-  similarActions: {
+  pinnedRecovery: {
     flexDirection: "row",
-    gap: 10,
-    paddingTop: 16,
+    alignItems: "center",
+    gap: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: Spacing.screenPadding,
+    paddingTop: 10,
+    paddingBottom: 8,
   },
-  similarSecondaryButton: {
-    minHeight: 44,
+  pinnedRecoveryButton: {
+    minHeight: 46,
     flex: 1,
     borderRadius: 12,
     borderWidth: 1,
@@ -2385,23 +2386,21 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 12,
   },
-  similarSecondaryButtonText: {
-    fontSize: 14,
+  pinnedRecoveryButtonText: {
+    fontSize: 15,
     fontWeight: "700",
   },
-  similarPrimaryButton: {
+  pinnedRetry: {
     minHeight: 44,
-    flex: 1,
-    borderRadius: 12,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 7,
-    paddingHorizontal: 12,
+    gap: 6,
+    paddingHorizontal: 4,
   },
-  similarPrimaryButtonText: {
-    fontSize: 14,
-    fontWeight: "700",
+  pinnedRetryText: {
+    fontSize: 13,
+    fontWeight: "600",
   },
   emptyState: {
     flex: 1,
