@@ -11,8 +11,15 @@ import {
   labelOcrSearchQueries,
   normalizeLabelOcrText,
   pickVerifiedProductForOcr,
+  primaryPackageOcrText,
   rankProductsForOcr,
 } from "./labelOcrMatching";
+import {
+  compareLabelIdentities,
+  consumerBrandForIdentity,
+  evaluateNonCompleteFoodEvidence,
+  productFormulaKey,
+} from "./labelResolution";
 
 export {
   labelOcrProductMatchScore,
@@ -21,9 +28,25 @@ export {
 
 const logger = createLogger("CATALOG");
 const DEFAULT_LIMIT = 16;
+// These are network ceilings, not target latencies. Real iPhones previously
+// abandoned healthy PostgREST work at 2.5-2.8 seconds while the server later
+// returned 200. The label identity RPC below is intentionally lightweight and
+// normally completes far earlier, but retains enough cold-start/network margin.
+const CATALOG_RPC_TIMEOUT_MS = 6_000;
+const LABEL_RPC_TIMEOUT_MS = 4_500;
+const LABEL_IDENTITY_RPC = "search_verified_product_identities_for_label";
+const LEGACY_LABEL_RPC = "search_verified_products_for_label_fast";
 const MIN_SCORABLE_CATALOG_RANK = 3;
 const LABEL_AUTO_OPEN_CONFIDENCE = 0.78;
 const LABEL_AUTO_OPEN_CANDIDATE_COUNT = 5;
+const LABEL_MARKETING_BENEFIT_PATTERNS = [
+  /\bsupports?\s+sensitive\s+skin\s+(?:&|and)\s+stomach(?:\s+guaranteed)?\b/gi,
+  /\bsensitive\s+skin\s+(?:&|and)\s+stomach\s+guaranteed\b/gi,
+  /\bfor\s+digestion\s+immune\s+system\s+(?:&|and)\s+organ\s+health\b/gi,
+  /\bcalcium\s+(?:&|and)\s+phosphorus\s+for\s+strong\s+bones\b/gi,
+  /\bformulated\s+to\s+support\s+whole\s+body\s+health\s+(?:&|and)\s+vitality\b/gi,
+  /\bproactive\s*5[\s\S]{0,120}?\bskin\s*(?:&|and)\s*coat\b/gi,
+];
 const MATCH_STOP_WORDS = new Set([
   "adult",
   "and",
@@ -333,6 +356,7 @@ const CATALOG_SEARCH_CANONICAL_TERMS = new Set([
   "gold",
   "goodbowl",
   "goodgut",
+  "hill",
   "hills",
   "honest",
   "iams",
@@ -343,6 +367,7 @@ const CATALOG_SEARCH_CANONICAL_TERMS = new Set([
   "lotus",
   "meow",
   "merrick",
+  "minichunks",
   "mix",
   "natural",
   "nourish",
@@ -353,6 +378,7 @@ const CATALOG_SEARCH_CANONICAL_TERMS = new Set([
   "pedigree",
   "plan",
   "pro",
+  "proactive",
   "purina",
   "royal",
   "science",
@@ -365,12 +391,13 @@ const CATALOG_SEARCH_CANONICAL_TERMS = new Set([
   "victor",
   "wellness",
   "weruva",
+  "whole",
   "wholehearted",
   "wild",
 ]);
 const CATALOG_SEARCH_PHRASE_ALIASES = new Map([
   ["advanced edge", "advantedge"],
-  ["hill s", "hills"],
+  ["hills", "hill s"],
   ["pro pln", "pro plan"],
   ["whole hearted", "wholehearted"],
 ]);
@@ -649,6 +676,45 @@ function petTypeFromQuery(query) {
   return null;
 }
 
+function catalogIdentitySearchQuery(query) {
+  return compact(
+    String(query || "").replace(/\b(?:dogs?|cats?|canines?|felines?)\b/gi, " ")
+  );
+}
+
+function catalogIdentitySearchQueries(query) {
+  const baseQuery = catalogIdentitySearchQuery(query);
+  if (!baseQuery) return [];
+
+  const tokens = baseQuery.split(/\s+/).filter(Boolean);
+  const morphology = {
+    bite: "bites",
+    bites: "bite",
+    cluster: "clusters",
+    clusters: "cluster",
+    grain: "grains",
+    grains: "grain",
+    stew: "stews",
+    stews: "stew",
+  };
+  const morphologyIndexes = tokens
+    .map((token, index) => (morphology[normalizeText(token)] ? index : -1))
+    .filter((index) => index >= 0);
+  const variants = morphologyIndexes.length > 0
+    ? [tokens.filter((_, index) => !morphologyIndexes.includes(index)).join(" "), baseQuery]
+    : [baseQuery];
+  tokens.forEach((token, index) => {
+    const replacement = morphology[normalizeText(token)];
+    if (!replacement) return;
+    const variant = [...tokens];
+    variant[index] = replacement;
+    variants.push(variant.join(" "));
+  });
+
+  return [...new Map(variants.map((variant) => [normalizeText(variant), variant])).values()]
+    .slice(0, 4);
+}
+
 function ingredientsFromRow(row = {}) {
   if (Array.isArray(row.ingredients)) {
     return row.ingredients.map(compact).filter(Boolean);
@@ -677,12 +743,50 @@ function ingredientTextFromProduct(product = {}) {
 }
 
 function normalizeNutriments(product = {}) {
-  const n = product.nutriments || product.nutritionalInfo || product.nutrient_panel || {};
+  const root = product.nutriments || product.nutritionalInfo || product.nutrient_panel || {};
+  const typical = root.typicalAnalysis || root.typical_analysis || root.actualAnalysis || root.actual_analysis;
+  const dryMatter = root.dryMatter || root.dry_matter;
+  const guaranteed = root.guaranteedAnalysis || root.guaranteed_analysis;
+  const n = typical || dryMatter || guaranteed || root;
+  const hasPublishedNutrients = product.hasPublishedNutrients === true
+    || product.has_published_nutrients === true;
+  const inferredAnalysisType = typical || dryMatter
+    ? "typical"
+    : guaranteed || hasPublishedNutrients
+      ? "guaranteed"
+      : null;
+  const inferredBasis = dryMatter
+    ? "dry_matter"
+    : guaranteed || hasPublishedNutrients
+      ? "as_fed"
+      : null;
   return {
-    protein: n.protein ?? n.proteins_100g ?? n.proteins ?? null,
-    fat: n.fat ?? n.fat_100g ?? null,
-    fiber: n.fiber ?? n.fiber_100g ?? n["crude-fiber_100g"] ?? null,
+    protein: n.protein ?? n.crudeProtein ?? n.crude_protein ?? n.proteins_100g ?? n.proteins ?? null,
+    fat: n.fat ?? n.crudeFat ?? n.crude_fat ?? n.fat_100g ?? null,
+    fiber: n.fiber ?? n.crudeFiber ?? n.crude_fiber ?? n.fiber_100g ?? n["crude-fiber_100g"] ?? null,
+    moisture: n.moisture ?? n.moisture_100g ?? root.moisture ?? null,
+    ash: n.ash ?? n.ash_100g ?? root.ash ?? null,
+    calcium: n.calcium ?? n.calciumPercent ?? n.calcium_percent ?? n.calcium_100g ?? null,
+    phosphorus: n.phosphorus ?? n.phosphorusPercent ?? n.phosphorus_percent ?? n.phosphorus_100g ?? null,
     energy: n.energy ?? n["energy-kcal_100g"] ?? n.energy_100g ?? null,
+    analysisType:
+      n.analysisType
+      || n.analysis_type
+      || root.analysisType
+      || root.analysis_type
+      || inferredAnalysisType,
+    basis:
+      n.basis
+      || n.valueBasis
+      || n.value_basis
+      || n.analysisBasis
+      || n.analysis_basis
+      || root.basis
+      || root.valueBasis
+      || root.value_basis
+      || root.analysisBasis
+      || root.analysis_basis
+      || inferredBasis,
   };
 }
 
@@ -713,8 +817,24 @@ function labelIdentityText(identification = {}) {
   ].map(compact).filter(Boolean).join(" ");
 }
 
+function stripLabelMarketingBenefitClaims(value) {
+  let identityText = String(value || "");
+  for (const pattern of LABEL_MARKETING_BENEFIT_PATTERNS) {
+    identityText = identityText.replace(pattern, " ");
+  }
+  return compact(identityText);
+}
+
 function normalizeLabelIdentification(identification = {}) {
-  const normalized = { ...identification };
+  const normalized = {
+    ...identification,
+    identityEvidence: Array.isArray(identification.identityEvidence)
+      ? identification.identityEvidence.map(compact).filter(Boolean).slice(0, 6)
+      : [],
+    marketingClaims: Array.isArray(identification.marketingClaims)
+      ? identification.marketingClaims.map(compact).filter(Boolean).slice(0, 4)
+      : [],
+  };
   for (const field of [
     "brand",
     "productLine",
@@ -725,7 +845,9 @@ function normalizeLabelIdentification(identification = {}) {
     "packageSize",
     "searchQuery",
   ]) {
-    normalized[field] = collapseRepeatedIdentityText(normalized[field]);
+    normalized[field] = collapseRepeatedIdentityText(
+      stripLabelMarketingBenefitClaims(normalized[field])
+    );
   }
   normalized.searchQuery = labelSearchQuery(normalized)
     || collapseRepeatedIdentityText(identification.searchQuery);
@@ -861,11 +983,22 @@ function formulaDedupeKey(product = {}) {
   return normalizeText(productIdentity) || dedupeKey(product);
 }
 
+function expandPackageSizeValue(value) {
+  const normalized = compact(value);
+  if (!normalized || !normalized.includes(",")) return normalized ? [normalized] : [];
+
+  const parts = normalized.split(",").map(compact).filter(Boolean);
+  const isPackageSizeList = parts.length > 1 && parts.every((part) => (
+    /^\d+(?:\.\d+)?(?:\s*(?:lb|lbs|oz|kg|g|ct|count))?$/i.test(part)
+  ));
+  return isPackageSizeList ? parts : [normalized];
+}
+
 function packageSizesForProduct(product = {}) {
   const values = [
     ...(Array.isArray(product.availablePackageSizes) ? product.availablePackageSizes : []),
     product.packageSize,
-  ].map(compact).filter(Boolean);
+  ].flatMap(expandPackageSizeValue).filter(Boolean);
 
   return [...new Map(values.map((size) => [normalizeText(size), size])).values()];
 }
@@ -936,6 +1069,18 @@ function inferredFoodForm(product = {}) {
 }
 
 function labelBrandCompatible(catalogProduct = {}, lookupProduct = {}) {
+  const lookupConsumerBrand = consumerBrandForIdentity(lookupProduct);
+  const catalogConsumerBrand = consumerBrandForIdentity(catalogProduct);
+  if (lookupConsumerBrand && catalogConsumerBrand) {
+    if (
+      lookupConsumerBrand === "purina_parent"
+      || catalogConsumerBrand === "purina_parent"
+    ) {
+      return false;
+    }
+    return lookupConsumerBrand === catalogConsumerBrand;
+  }
+
   const lookupBrandTokens = [...requiredMatchTokenSet(lookupProduct.brand)]
     .filter((token) => !LABEL_BRAND_NOISE_TERMS.has(token));
   if (lookupBrandTokens.length === 0) return true;
@@ -1152,6 +1297,17 @@ function normalizeCatalogProduct(raw = {}, sourceKind = "catalog") {
   const ingredientsText = sourceKind === "opff"
     ? ingredientTextFromProduct(row)
     : compact(row.ingredientText || row.ingredient_text || ingredients.join(", "));
+  const nutritionalInfo = row.nutritionalInfo || row.nutritional_info || null;
+  const formulaEvidenceTier = firstCompact(
+    row.formulaEvidenceTier,
+    row.formula_evidence_tier,
+    nutritionalInfo?.formula_evidence_tier
+  );
+  const formulaVersionProvenance =
+    row.formulaVersionProvenance
+    || row.formula_version_provenance
+    || nutritionalInfo?.formula_version_provenance
+    || null;
 
   const product = {
     id: row.id || row.cache_key || row.code || row._id || `${sourceKind}:${dedupeKey({ brand, productName })}`,
@@ -1177,7 +1333,7 @@ function normalizeCatalogProduct(raw = {}, sourceKind = "catalog") {
     ingredients,
     ingredientsText,
     nutriments: normalizeNutriments(row),
-    nutritionalInfo: row.nutritionalInfo || row.nutritional_info || null,
+    nutritionalInfo,
     nutrientPanel: row.nutrientPanel || row.nutrient_panel || null,
     hasPublishedNutrients: row.hasPublishedNutrients ?? row.has_published_nutrients ?? false,
     source: compact(row.source) || (sourceKind === "opff" ? "open_pet_food_facts" : "woof_catalog"),
@@ -1190,6 +1346,8 @@ function normalizeCatalogProduct(raw = {}, sourceKind = "catalog") {
     ),
     verifiedAt: compact(row.verifiedAt || row.verified_at),
     sourceUrl: compact(row.sourceUrl || row.source_url || row.url),
+    formulaEvidenceTier,
+    formulaVersionProvenance,
     rank: Number(row.rank) || 0,
     sourceKind,
   };
@@ -1199,6 +1357,233 @@ function normalizeCatalogProduct(raw = {}, sourceKind = "catalog") {
     verificationState: catalogVerificationState(product),
     catalogQualityState: catalogVerificationState(product).state,
   };
+}
+
+function parseFormulaVersionProvenance(product = {}) {
+  const raw = product.formulaVersionProvenance
+    || product.formula_version_provenance
+    || product.nutritionalInfo?.formula_version_provenance
+    || product.nutritional_info?.formula_version_provenance
+    || null;
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) return raw;
+  if (typeof raw !== "string" || !raw.trim()) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export function productRequiresExactPackageVersionForLabel(product = {}) {
+  const provenance = parseFormulaVersionProvenance(product);
+  const gtinPolicy = normalizeText(provenance.gtin_resolution_policy);
+  const frontLabelPolicy = normalizeText(provenance.front_label_resolution_policy);
+  return provenance.manufacturer_version_conflict === true
+    || provenance.front_label_version_collision === true
+    || gtinPolicy === "abstain on version conflict"
+    || frontLabelPolicy === "safe abstain require barcode or ingredient panel";
+}
+
+function formulaEvidencePriority(product = {}) {
+  switch (compact(product.formulaEvidenceTier)) {
+    case "manufacturer_current_exact":
+      return 4;
+    case "retailer_web_version":
+      return 3;
+    case "web_label_version":
+      return 2;
+    case "conflicted":
+      return 0;
+    default:
+      return 1;
+  }
+}
+
+function formulaEvidenceSearchBoost(product = {}) {
+  switch (compact(product.formulaEvidenceTier)) {
+    case "manufacturer_current_exact":
+      return 3;
+    case "retailer_web_version":
+      return 1;
+    case "web_label_version":
+      return 0.5;
+    default:
+      return 0;
+  }
+}
+
+function sortCatalogSearchProducts(products = []) {
+  return [...products].sort((left, right) => (
+    (
+      Number(right.rank || 0)
+      + formulaEvidenceSearchBoost(right)
+    ) - (
+      Number(left.rank || 0)
+      + formulaEvidenceSearchBoost(left)
+    )
+    || formulaEvidencePriority(right) - formulaEvidencePriority(left)
+    || Number(right.ingredientCount || 0) - Number(left.ingredientCount || 0)
+    || Date.parse(right.verifiedAt || 0) - Date.parse(left.verifiedAt || 0)
+  ));
+}
+
+function isManufacturerCurrentFormula(product = {}) {
+  if (compact(product.formulaEvidenceTier) === "manufacturer_current_exact") return true;
+  const sourceQuality = normalizeText(product.sourceQuality || product.source_quality);
+  const ingredientStatus = normalizeText(
+    product.ingredientVerificationStatus || product.ingredient_verification_status
+  );
+  return ["manufacturer", "official"].includes(sourceQuality)
+    && ["manufacturer", "official"].includes(ingredientStatus);
+}
+
+function sameFrontLabelFormula(left = {}, right = {}) {
+  const leftBrand = consumerBrandForIdentity(left);
+  const rightBrand = consumerBrandForIdentity(right);
+  if (!leftBrand || leftBrand === "purina_parent" || leftBrand !== rightBrand) return false;
+
+  const leftPetType = normalizePetType(left.petType);
+  const rightPetType = normalizePetType(right.petType);
+  if (leftPetType && rightPetType && leftPetType !== rightPetType) return false;
+  if (productRequiresExactPackageVersionForLabel(left)) return false;
+  if (productRequiresExactPackageVersionForLabel(right)) return false;
+
+  const leftFormulaKey = productFormulaKey(left);
+  const rightFormulaKey = productFormulaKey(right);
+  if (
+    leftFormulaKey
+    && rightFormulaKey
+    && leftFormulaKey === rightFormulaKey
+    && leftFormulaKey.split("|").length >= 4
+  ) {
+    return true;
+  }
+
+  const forward = compareLabelIdentities(left, right, {
+    requireVisibleCandidateVariants: true,
+  });
+  const reverse = compareLabelIdentities(right, left, {
+    requireVisibleCandidateVariants: true,
+  });
+  if (!forward.compatible || !reverse.compatible) return false;
+
+  const agreements = new Set([...forward.agreementFields, ...reverse.agreementFields]);
+  if (!agreements.has("consumer_brand")) return false;
+  if (!agreements.has("recipe") && !agreements.has("product_line")) return false;
+
+  return overlapScore(productIdentityText(left), productIdentityText(right)) >= 0.5;
+}
+
+export function collapseFrontLabelSourceVersions(products = []) {
+  const sorted = sortCatalogSearchProducts(Array.isArray(products) ? products : []);
+  const currentFormulas = sorted.filter(isManufacturerCurrentFormula);
+  if (currentFormulas.length === 0) return sorted;
+
+  const consumed = new Set();
+  const collapsed = [];
+  for (const product of currentFormulas) {
+    const currentKey = dedupeKey(product);
+    if (consumed.has(currentKey)) continue;
+    let current = product;
+    consumed.add(currentKey);
+    for (const candidate of sorted) {
+      const candidateKey = dedupeKey(candidate);
+      if (consumed.has(candidateKey)) continue;
+      if (!sameFrontLabelFormula(current, candidate)) continue;
+      current = mergeFormulaPackageSizes(current, candidate);
+      consumed.add(candidateKey);
+    }
+    collapsed.push(current);
+  }
+
+  for (const product of sorted) {
+    const key = dedupeKey(product);
+    if (consumed.has(key)) continue;
+    collapsed.push(product);
+    consumed.add(key);
+  }
+
+  return sortCatalogSearchProducts(collapsed);
+}
+
+export function collapseCatalogSearchSourceVersions(products = []) {
+  const sorted = sortCatalogSearchProducts(Array.isArray(products) ? products : []);
+  const grouped = new Map();
+
+  for (const product of sorted) {
+    const formulaKey = productFormulaKey(product);
+    const canGroup = formulaKey && formulaKey.split("|").length >= 4;
+    const groupKey = canGroup ? formulaKey : `row:${dedupeKey(product)}`;
+    const group = grouped.get(groupKey) || [];
+    group.push(product);
+    grouped.set(groupKey, group);
+  }
+
+  const collapsed = [];
+  for (const group of grouped.values()) {
+    const currentVersions = group.filter(isManufacturerCurrentFormula);
+    const currentIngredientSignatures = new Set(
+      currentVersions
+        .map((product) => normalizeText(product.ingredientsText || product.ingredientText))
+        .filter(Boolean)
+    );
+
+    // Two competing manufacturer-current statements are a real formula
+    // conflict. Preserve both until evidence reconciles them.
+    if (currentVersions.length === 0 || currentIngredientSignatures.size > 1) {
+      collapsed.push(...group);
+      continue;
+    }
+
+    let primary = sortCatalogSearchProducts(currentVersions)[0];
+    const retained = [];
+    for (const candidate of group) {
+      if (candidate === primary) continue;
+      if (productRequiresExactPackageVersionForLabel(candidate)) {
+        retained.push(candidate);
+        continue;
+      }
+      primary = mergeFormulaPackageSizes(primary, candidate);
+    }
+    collapsed.push(primary, ...retained);
+  }
+
+  return sortCatalogSearchProducts(collapsed);
+}
+
+function exactBarcodeVersionKey(product = {}) {
+  return normalizeText([
+    product.brand,
+    product.petType,
+    product.productLine,
+    product.flavor,
+    product.lifeStage,
+    product.foodForm,
+    product.ingredientsText,
+  ].map(compact).filter(Boolean).join(" "));
+}
+
+function pickExactBarcodeVersion(products = []) {
+  const scorable = filterScorableCatalogResults(products);
+  if (scorable.length === 0) return null;
+
+  const uniqueProducts = [
+    ...new Map(
+      scorable.map((product) => [
+        compact(product.cacheKey || product.gtin || product.barcode),
+        product,
+      ])
+    ).values(),
+  ];
+  const versionKeys = new Set(uniqueProducts.map(exactBarcodeVersionKey).filter(Boolean));
+
+  // GTINs can be reused after a recipe change. A barcode alone cannot choose
+  // between incompatible ingredient versions, so require package-photo
+  // confirmation instead of silently preferring one version.
+  if (versionKeys.size !== 1) return null;
+
+  return sortCatalogSearchProducts(uniqueProducts)[0] || null;
 }
 
 function matchesPetType(product, petType, { allowUnknown = true } = {}) {
@@ -1217,10 +1602,7 @@ function hasRequiredQueryTerms(product = {}, queryText = "") {
 
   for (const token of queryTokens) {
     if (!LABEL_REQUIRED_MATCH_TERMS.has(token)) continue;
-    if (productTokens.has(token)) continue;
-    if ((SEARCH_TEXTURE_EQUIVALENTS[token] || []).some((term) => productTokens.has(term))) {
-      continue;
-    }
+    if (tokenHasEquivalent(token, productTokens)) continue;
     if (token === "adult") {
       const hasNonAdultLifeStage = [...NON_ADULT_LIFE_STAGE_TERMS].some((term) => productTokens.has(term));
       if (!hasNonAdultLifeStage) continue;
@@ -1372,97 +1754,233 @@ function mergeProducts(primary = [], secondary = [], limit = DEFAULT_LIMIT, petT
   return merged;
 }
 
-async function searchWoofCatalog(query, limit) {
+function rpcFunctionUnavailable(error) {
+  const code = String(error?.code || "");
+  const message = String(error?.message || "");
+  return code === "PGRST202"
+    || code === "42883"
+    || /function .* does not exist|could not find the function/i.test(message);
+}
+
+function catalogRequestError(message, name = "Error") {
+  const error = new Error(message);
+  error.name = name;
+  return error;
+}
+
+async function runCatalogRpc(functionName, args, {
+  signal,
+  timeoutMs = CATALOG_RPC_TIMEOUT_MS,
+} = {}) {
+  if (signal?.aborted) throw catalogRequestError("Catalog request aborted", "AbortError");
+
+  const controller = new AbortController();
+  let timedOut = false;
+  const onAbort = () => controller.abort();
+  signal?.addEventListener?.("abort", onAbort, { once: true });
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  try {
+    const response = await supabase
+      .rpc(functionName, args)
+      .abortSignal(controller.signal);
+
+    if (timedOut) {
+      throw catalogRequestError(`${functionName} timed out after ${timeoutMs}ms`, "TimeoutError");
+    }
+    if (signal?.aborted) {
+      throw catalogRequestError("Catalog request aborted", "AbortError");
+    }
+    return response;
+  } catch (error) {
+    if (timedOut) {
+      throw catalogRequestError(`${functionName} timed out after ${timeoutMs}ms`, "TimeoutError");
+    }
+    if (signal?.aborted || controller.signal.aborted) {
+      throw catalogRequestError("Catalog request aborted", "AbortError");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    signal?.removeEventListener?.("abort", onAbort);
+  }
+}
+
+async function searchWoofCatalog(query, limit, {
+  signal,
+  allowLegacyFallback = true,
+  timeoutMs = CATALOG_RPC_TIMEOUT_MS,
+} = {}) {
+  const normalizedQuery = compact(query);
+  if (/^[0-9]{8,14}$/.test(normalizedQuery)) {
+    const { data: skuData, error: skuError } = await runCatalogRpc(
+      "resolve_verified_product_by_gtin",
+      {
+        q: normalizedQuery,
+        max_results: limit,
+      },
+      { signal, timeoutMs }
+    );
+    if (!skuError && (skuData || []).length > 0) {
+      return (skuData || []).map((row) => normalizeCatalogProduct(row, "catalog"));
+    }
+    if (skuError) {
+      if (!rpcFunctionUnavailable(skuError)) throw skuError;
+      logger.debug(
+        "[CATALOG] Barcode RPC unavailable; falling back to verified search:",
+        skuError.message
+      );
+    }
+  }
+
   const params = {
-    q: query,
+    q: normalizedQuery,
     max_results: limit,
   };
 
-  const { data, error } = await supabase.rpc("search_verified_products", params);
+  const { data, error } = await runCatalogRpc(
+    "search_verified_products",
+    params,
+    { signal, timeoutMs }
+  );
 
   if (!error) {
-    return (data || []).map((row) => normalizeCatalogProduct(row, "catalog"));
+    return sortCatalogSearchProducts(
+      (data || []).map((row) => normalizeCatalogProduct(row, "catalog"))
+    );
   }
 
-  logger.debug("[CATALOG] search_verified_products error; falling back:", error.message);
-  const { data: fallbackData, error: fallbackError } = await supabase.rpc("search_products", params);
+  if (!allowLegacyFallback || !rpcFunctionUnavailable(error)) throw error;
+
+  logger.debug("[CATALOG] Verified search RPC unavailable; using legacy search:", error.message);
+  const { data: fallbackData, error: fallbackError } = await runCatalogRpc(
+    "search_products",
+    params,
+    { signal, timeoutMs }
+  );
 
   if (fallbackError) {
-    logger.debug("[CATALOG] search_products error:", fallbackError.message);
-    return [];
+    throw fallbackError;
   }
 
-  return (fallbackData || []).map((row) => normalizeCatalogProduct(row, "catalog"));
+  return sortCatalogSearchProducts(
+    (fallbackData || []).map((row) => normalizeCatalogProduct(row, "catalog"))
+  );
 }
 
-async function searchWoofCatalogForLabelOcr(ocrText, queries, limit) {
+async function searchWoofCatalogFuzzy(query, limit, { signal } = {}) {
+  const { data, error } = await runCatalogRpc(
+    "search_products",
+    { q: compact(query), max_results: limit },
+    { signal, timeoutMs: CATALOG_RPC_TIMEOUT_MS }
+  );
+  if (error) {
+    logger.debug("[CATALOG] Fuzzy fallback unavailable:", error.message);
+    return [];
+  }
+  return sortCatalogSearchProducts(
+    (data || []).map((row) => normalizeCatalogProduct(row, "catalog"))
+  );
+}
+
+async function searchWoofCatalogForLabelOcr(ocrText, queries, limit, signal) {
   const boundedQueries = (Array.isArray(queries) ? queries : [])
     .map(compact)
     .filter((query) => query.length >= 2)
-    .slice(0, 12);
+    .slice(0, 4);
   if (boundedQueries.length === 0) return [];
 
   const canonicalOcrText = normalizeLabelOcrText(ocrText);
-  const focusedBatches = await Promise.all(
-    boundedQueries
-      .slice(0, 4)
-      .map((query) => searchWoofCatalog(query, 25))
+  const { data, error } = await searchWoofCatalogLabelIdentities(
+    boundedQueries,
+    limit,
+    signal
   );
-  const focusedCandidates = rankProductsForOcr(
-    filterProductsForOcr(focusedBatches.flat(), canonicalOcrText),
-    canonicalOcrText
-  );
-  if (focusedCandidates.length > 0) {
-    return focusedCandidates;
-  }
-
-  const { data: textData, error: textError } = await supabase.rpc(
-    "search_verified_products_for_label_ocr_text",
-    {
-      ocr_text: canonicalOcrText,
-      max_results: Math.min(Math.max(limit, 1), 96),
-    }
-  );
-  if (!textError && (textData || []).length > 0) {
-    return (textData || []).map((row) => normalizeCatalogProduct(row, "catalog"));
-  }
-
-  const { data, error } = await supabase.rpc("search_verified_products_for_label_ocr", {
-    queries: boundedQueries,
-    max_results: Math.min(Math.max(limit, 1), 96),
-  });
-
   if (!error) {
-    return (data || []).map((row) => normalizeCatalogProduct(row, "catalog"));
+    const fastCandidates = rankProductsForOcr(
+      filterProductsForOcr(
+        (data || []).map((row) => normalizeCatalogProduct(row, "catalog")),
+        canonicalOcrText
+      ),
+      canonicalOcrText
+    );
+    if (fastCandidates.length > 0) return fastCandidates;
+  } else if (!rpcFunctionUnavailable(error)) {
+    throw error;
   }
 
-  logger.debug(
-    "[CATALOG] Label OCR text and batch search unavailable; falling back:",
-    textError?.message || error.message
-  );
-  const batches = await Promise.all(
-    boundedQueries.map((query) => searchWoofCatalog(query, Math.min(Math.max(Math.ceil(limit / 8), 8), 25)))
-  );
-  return batches.flat();
+  // Backward-compatible rollout path: at most two sequential indexed lookups.
+  // Never revive the previous 4 + 1 + 1 + 12 concurrent request fan-out.
+  const fallbackCandidates = [];
+  for (const query of boundedQueries.slice(0, 2)) {
+    if (signal?.aborted) break;
+    const matches = await searchWoofCatalog(query, 16, {
+      signal,
+      allowLegacyFallback: false,
+      timeoutMs: LABEL_RPC_TIMEOUT_MS,
+    });
+    fallbackCandidates.push(...matches);
+    const ranked = rankProductsForOcr(
+      filterProductsForOcr(fallbackCandidates, canonicalOcrText),
+      canonicalOcrText
+    );
+    if (ranked.length > 0) return ranked;
+  }
+  return fallbackCandidates;
 }
 
-async function searchWoofCatalogForLabelIdentity(queries, limit) {
+async function searchWoofCatalogForLabelIdentity(queries, limit, signal) {
   const boundedQueries = (Array.isArray(queries) ? queries : [])
     .map(compact)
     .filter((query) => query.length >= 2)
-    .slice(0, 12);
+    .slice(0, 4);
   if (boundedQueries.length === 0) return [];
 
-  const { data, error } = await supabase.rpc("search_verified_products_for_label_ocr", {
-    queries: boundedQueries,
-    max_results: Math.min(Math.max(limit, 1), 96),
-  });
+  const { data, error } = await searchWoofCatalogLabelIdentities(
+    boundedQueries,
+    limit,
+    signal
+  );
   if (!error) {
     return (data || []).map((row) => normalizeCatalogProduct(row, "catalog"));
   }
+  if (!rpcFunctionUnavailable(error)) throw error;
 
-  logger.debug("[CATALOG] Structured label batch search unavailable; using one direct lookup:", error.message);
-  return searchWoofCatalog(boundedQueries[0], Math.min(Math.max(limit, 1), 25));
+  logger.debug("[CATALOG] Fast label search unavailable; using one direct lookup:", error.message);
+  return searchWoofCatalog(boundedQueries[0], Math.min(Math.max(limit, 1), 16), {
+    signal,
+    allowLegacyFallback: false,
+    timeoutMs: LABEL_RPC_TIMEOUT_MS,
+  });
+}
+
+async function searchWoofCatalogLabelIdentities(queries, limit, signal) {
+  const args = {
+    queries,
+    max_results: Math.min(Math.max(limit, 1), 32),
+  };
+  const identityResponse = await runCatalogRpc(
+    LABEL_IDENTITY_RPC,
+    args,
+    { signal, timeoutMs: LABEL_RPC_TIMEOUT_MS }
+  );
+  if (!identityResponse.error) return identityResponse;
+  if (!rpcFunctionUnavailable(identityResponse.error)) return identityResponse;
+
+  // Backward-compatible only while the new migration propagates. This remains
+  // one request, never the previous multi-query fan-out.
+  logger.debug(
+    "[CATALOG] Lightweight label identity RPC unavailable; using legacy label RPC:",
+    identityResponse.error.message
+  );
+  return runCatalogRpc(
+    LEGACY_LABEL_RPC,
+    args,
+    { signal, timeoutMs: LABEL_RPC_TIMEOUT_MS }
+  );
 }
 
 export async function searchCatalogProducts(query, {
@@ -1483,7 +2001,11 @@ export async function searchCatalogProducts(query, {
     const results = filterScorableCatalogResults(
       filterByRequiredQueryTerms(
         filterByPetType(
-          await searchWoofCatalog(searchQuery, catalogLimit),
+          await searchWoofCatalogForLabelIdentity(
+            catalogIdentitySearchQueries(searchQuery),
+            catalogLimit,
+            signal
+          ),
           targetPetType
         ),
         validationQuery
@@ -1522,8 +2044,31 @@ export async function searchCatalogProducts(query, {
       catalogResults = relaxedResults.flat();
     }
   }
+  if (
+    catalogResults.length === 0
+    && normalizeText(correctedQuery) !== normalizeText(term)
+    && !signal?.aborted
+  ) {
+    const fuzzyResults = await searchWoofCatalogFuzzy(term, catalogLimit, { signal });
+    catalogResults = filterScorableCatalogResults(
+      filterByRequiredQueryTerms(
+        filterByPetType(fuzzyResults, targetPetType),
+        correctedQuery
+      ),
+      correctedQuery
+    );
+  }
 
-  return mergeProducts(catalogResults, [], catalogLimit, targetPetType);
+  // A typed formula name should show one shelf formula, not one card per
+  // retailer/package record. Keep exact source versions in the catalog for
+  // barcode resolution, but prefer the current manufacturer version when the
+  // visible identity is compatible and no version-collision flag is present.
+  return mergeProducts(
+    collapseCatalogSearchSourceVersions(catalogResults),
+    [],
+    catalogLimit,
+    targetPetType
+  );
 }
 
 export async function resolveProduct({
@@ -1538,9 +2083,16 @@ export async function resolveProduct({
 } = {}) {
   if (type === "label_text") {
     const ocrText = compact(query);
+    const packageOcrText = primaryPackageOcrText(ocrText, ocrLines);
     const searchQueries = labelOcrSearchQueries(ocrText, ocrLines);
-    const targetPetType = normalizePetType(petType) || petTypeFromQuery(ocrText);
-    const exclusionReason = nonCompleteFoodReason(ocrText);
+    const targetPetType = normalizePetType(petType) || petTypeFromQuery(packageOcrText);
+    const nonCompleteEvidence = evaluateNonCompleteFoodEvidence({
+      text: ocrText,
+      lines: ocrLines,
+    });
+    const exclusionReason = nonCompleteEvidence.confirmed
+      ? nonCompleteEvidence.reason
+      : "";
 
     if (exclusionReason) {
       return buildResolveProductResult({
@@ -1555,6 +2107,8 @@ export async function resolveProduct({
           confidence: 1,
           searchQuery: "",
           notes: exclusionReason,
+          exclusionEvidence: nonCompleteEvidence.evidence,
+          productCategory: nonCompleteEvidence.category,
         },
         products: [],
         confidence: 1,
@@ -1576,21 +2130,21 @@ export async function resolveProduct({
       : filterProductsForOcr(
         filterScorableCatalogResults(
           filterByPetType(
-            await searchWoofCatalogForLabelOcr(ocrText, searchQueries, 96),
+            await searchWoofCatalogForLabelOcr(packageOcrText, searchQueries, 48, signal),
             targetPetType
           )
         ),
-        ocrText
+        packageOcrText
       );
-    const rankedCandidates = rankProductsForOcr(candidates, ocrText);
+    const rankedCandidates = rankProductsForOcr(candidates, packageOcrText);
     const merged = mergeProducts(
-      rankedCandidates,
+      collapseFrontLabelSourceVersions(rankedCandidates),
       [],
       Math.min(Math.max(limit * 3, 20), 25),
       targetPetType
     );
     const ranked = merged.slice(0, limit);
-    const selectedProduct = pickVerifiedProductForOcr(ranked, ocrText);
+    const selectedProduct = pickVerifiedProductForOcr(ranked, packageOcrText);
     const bestProduct = selectedProduct || ranked[0] || null;
     const searchedQuery = bestProduct
       ? [bestProduct.brand, bestProduct.productName].map(compact).filter(Boolean).join(" ")
@@ -1609,7 +2163,14 @@ export async function resolveProduct({
       petType: bestProduct.petType || targetPetType || "unknown",
       petTypeFromText: Boolean(targetPetType),
       searchQuery: searchedQuery,
-      notes: selectedProduct ? "Matched from the front label on this device." : "Choose the matching package variant.",
+      notes: selectedProduct
+        ? "Matched from the front label on this device."
+        : nonCompleteEvidence.status === "possible"
+          ? "Woof saw non-complete-food wording but could not confirm it belongs to the centered product."
+          : "Choose the matching package variant.",
+      classificationStatus: nonCompleteEvidence.status,
+      productCategory: nonCompleteEvidence.category,
+      categoryEvidence: nonCompleteEvidence.evidence,
     } : {
       found: false,
       confidence: 0,
@@ -1632,15 +2193,25 @@ export async function resolveProduct({
     const rawIdentification = normalizeLabelIdentification(
       await identifyProductLabel(imageBase64, { signal })
     );
-    const exclusionReason = nonCompleteFoodReason(rawIdentification);
+    const nonCompleteEvidence = evaluateNonCompleteFoodEvidence({
+      identification: rawIdentification,
+    });
+    const exclusionReason = nonCompleteEvidence.confirmed
+      ? nonCompleteEvidence.reason
+      : "";
     const identification = exclusionReason
       ? {
         ...rawIdentification,
         excluded: true,
         exclusionReason,
+        exclusionEvidence: nonCompleteEvidence.evidence,
         notes: exclusionReason,
       }
-      : rawIdentification;
+      : {
+        ...rawIdentification,
+        excluded: false,
+        classificationStatus: nonCompleteEvidence.status,
+      };
     const searchQueries = labelSearchQueries(identification);
     const searchQuery = searchQueries[0] || "";
 
@@ -1670,12 +2241,17 @@ export async function resolveProduct({
       ? []
       : filterScorableCatalogResults(
         filterByPetType(
-          await searchWoofCatalogForLabelIdentity(searchQueries, 96),
+          await searchWoofCatalogForLabelIdentity(searchQueries, 48, signal),
           targetPetType
         )
       );
     const strictCandidates = filterLabelCandidatesForIdentification(identification, candidates);
-    const products = mergeProducts(strictCandidates, [], limit, targetPetType);
+    const products = mergeProducts(
+      collapseFrontLabelSourceVersions(strictCandidates),
+      [],
+      limit,
+      targetPetType
+    );
     const selectedProduct = pickVerifiedProductForIdentification(identification, products);
 
     return buildResolveProductResult({
@@ -1717,15 +2293,31 @@ export async function resolveProduct({
   });
 }
 
-export async function getCatalogProduct(cacheKey) {
+export async function getCatalogProduct(cacheKey, { signal } = {}) {
   const key = compact(cacheKey);
   if (!key) return null;
+  if (signal?.aborted) return null;
 
-  const { data, error } = await supabase
-    .from("product_data")
-    .select("cache_key, product_name, brand, gtin, product_line, flavor, life_stage, food_form, package_size, pet_type, ingredients, ingredient_text, ingredient_count, nutritional_info, nutrient_panel, has_published_nutrients, source, source_quality, ingredient_verification_status, image_verification_status, verified_at, source_url, image_url")
-    .eq("cache_key", key)
-    .maybeSingle();
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  signal?.addEventListener?.("abort", onAbort, { once: true });
+  const timeout = setTimeout(() => controller.abort(), CATALOG_RPC_TIMEOUT_MS);
+  let data;
+  let error;
+  try {
+    ({ data, error } = await supabase
+      .from("product_data")
+      .select("cache_key, product_name, brand, gtin, product_line, flavor, life_stage, food_form, package_size, pet_type, ingredients, ingredient_text, ingredient_count, nutritional_info, nutrient_panel, has_published_nutrients, source, source_quality, ingredient_verification_status, image_verification_status, verified_at, source_url, image_url, formula_evidence_tier, formula_version_provenance")
+      .eq("cache_key", key)
+      .abortSignal(controller.signal)
+      .maybeSingle());
+  } catch (requestError) {
+    logger.debug("[CATALOG] getCatalogProduct request failed:", requestError?.message || requestError);
+    return null;
+  } finally {
+    clearTimeout(timeout);
+    signal?.removeEventListener?.("abort", onAbort);
+  }
 
   if (error) {
     logger.debug("[CATALOG] getCatalogProduct error:", error.message);
@@ -1743,7 +2335,7 @@ export async function findVerifiedCatalogProductByBarcode(barcode, { signal } = 
   const products = [];
   for (const variant of variants) {
     if (signal?.aborted) return null;
-    const matches = await searchWoofCatalog(variant, 8);
+    const matches = await searchWoofCatalog(variant, 8, { signal });
     for (const product of matches) {
       const productBarcodes = barcodeVariants(product.gtin || product.barcode);
       if (!productBarcodes.some((candidate) => variants.includes(candidate))) continue;
@@ -1751,8 +2343,7 @@ export async function findVerifiedCatalogProductByBarcode(barcode, { signal } = 
     }
   }
 
-  return filterScorableCatalogResults(products)
-    .sort((left, right) => Number(right.ingredientCount || 0) - Number(left.ingredientCount || 0))[0] || null;
+  return pickExactBarcodeVersion(products);
 }
 
 export async function findVerifiedCatalogProductForLookup(lookupProduct, { signal, limit = 8 } = {}) {
@@ -1763,7 +2354,7 @@ export async function findVerifiedCatalogProductForLookup(lookupProduct, { signa
 
   const targetPetType = normalizePetType(lookupProduct?.petType) || petTypeFromQuery(searchQuery);
   const catalogResults = filterByPetType(
-    await searchWoofCatalog(searchQuery, Math.min(Math.max(limit, 1), 12)),
+    await searchWoofCatalog(searchQuery, Math.min(Math.max(limit, 1), 12), { signal }),
     targetPetType
   );
 
@@ -1813,10 +2404,14 @@ export function pickVerifiedProductForIdentification(identification, products = 
     product?.sourceKind === "catalog" &&
     productHasVerifiedIngredients(product) &&
     productHasVerifiedImage(product) &&
-    strongLabelProductMatch(product, lookupProduct)
+    strongLabelProductMatch(product, lookupProduct) &&
+    compareLabelIdentities(lookupProduct, product, {
+      requireVisibleCandidateVariants: true,
+    }).compatible
   ));
 
   if (hasSpeciesAmbiguousLabelMatches(identification, matches)) return null;
+  if (matches.some(productRequiresExactPackageVersionForLabel)) return null;
   if (matches.length > 1) return null;
 
   return matches[0] || null;

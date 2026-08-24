@@ -8,6 +8,7 @@ import {
 } from "../services/petProfile.js";
 
 const verifiedAdultDogFood = {
+  dataSource: "verified",
   petType: "dog",
   lifeStage: "adult",
   productName: "Verified Adult Dog Food",

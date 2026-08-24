@@ -249,8 +249,8 @@ function checkScannerPermissionFlow() {
     "camera_permission_settings_opened",
     "camera_permission_request_failed",
     "permission?.canAskAgain === false",
-    "Woof needs camera access to check food items for your pet.",
-    "Woof needs camera access to scan pet food labels and packaging.",
+    "${BRAND_NAME} needs camera access to check food items for your pet.",
+    "${BRAND_NAME} needs camera access to scan pet food labels and packaging.",
     "scannerInstructionText",
     "scannerTipText",
     "scanner_help_opened",
@@ -518,12 +518,12 @@ function checkProfileRestorePurchases() {
     [
       "screens/PaywallScreen.js",
       paywallSource,
-      "Checks App Store or Google Play purchases for an active Woof Pro subscription",
+      "Checks App Store or Google Play purchases for an active ${BRAND_PRO_NAME} subscription",
     ],
     [
       "screens/PaywallScreen.js",
       paywallSource,
-      "App Store Connect or Google Play Console subscription setup",
+      "We couldn't load subscription plans. Check your connection and try again.",
     ],
     [
       "services/purchases.js",
@@ -755,8 +755,9 @@ function checkGuestAuthEntry() {
     "auth_viewed",
     "guest_option_available",
     "Continue as Guest",
-    "Guest mode temporarily unavailable",
-    'accessibilityRole="alert"',
+    "Retry Guest Mode",
+    "Couldn't Start Guest Mode",
+    "Check your connection and try again",
     "providerErrorCopy",
     "Apple Sign-In Unavailable",
     "guest_continue_started",
@@ -819,7 +820,7 @@ function checkShareAcquisitionLoop() {
     "WOOF_SHARE_URL",
     "share_url_attached",
     "share_url_host",
-    "Scan your pet food with Woof:",
+    "Check pet food and everyday foods with ${BRAND_NAME}:",
     "shareUrlDisplay(WOOF_SHARE_URL)",
     "function shareWasDismissed",
     "share_dismissed",
@@ -835,7 +836,7 @@ function checkShareAcquisitionLoop() {
 
   for (const needle of [
     "shareUrl",
-    "Get Woof:",
+    "Get {BRAND_NAME}:",
     "shareLinkText",
   ]) {
     if (!componentsSource.includes(needle)) {
@@ -861,6 +862,8 @@ function checkShareAcquisitionLoop() {
 
 function checkAppReviewLoop() {
   const reviewSource = readFileSync("services/reviewPrompt.js", "utf8");
+  const reviewPolicySource = readFileSync("services/reviewPromptPolicy.js", "utf8");
+  const reviewImplementationSource = `${reviewSource}\n${reviewPolicySource}`;
   const resultsSource = readFileSync("screens/ResultsScreen/index.js", "utf8");
   const componentsSource = readFileSync("screens/ResultsScreen/components.js", "utf8");
   const profileSource = readFileSync("screens/ProfileScreen.js", "utf8");
@@ -873,19 +876,25 @@ function checkAppReviewLoop() {
     "fallback: __DEV__ ? null : APP_STORE_WEB_URL",
     "PLAY_STORE_REVIEW_URL",
     "MIN_GOOD_SCORE",
+    "MIN_SUCCESSFUL_RESULTS",
+    "MIN_SUCCESSES_BETWEEN_PROMPTS",
     "PROMPT_COOLDOWN_MS",
+    "PROMPT_COOLDOWN_SCHEDULE_MS",
     'reason: "development_build"',
     'error_name: "development_build"',
     "function reviewStorageKey",
     "function reviewStorageKeys",
     "review_state_scoped",
     "clearReviewPromptStorage",
+    "acknowledgeReviewComplete",
+    'reason: "review_already_completed"',
+    'reason: "not_enough_new_successes"',
     "app_review_prompt_viewed",
     "app_review_requested",
     "app_review_opened",
     "app_review_open_failed",
   ]) {
-    if (!reviewSource.includes(needle)) {
+    if (!reviewImplementationSource.includes(needle)) {
       failures.push({
         file: "services/reviewPrompt.js",
         output: `Missing app review loop marker: ${needle}`,
@@ -900,7 +909,11 @@ function checkAppReviewLoop() {
     "showFirstScanToast",
     "ReviewPrompt",
     "openStoreReview(reviewContext())",
+    "acknowledgeReviewComplete(reviewContext())",
     "Could Not Open App Store",
+    "if (scansUsed < 3) return",
+    "hasMeaningfulAnalysisResult(event.result)",
+    'errorCode: "EMPTY_ANALYSIS_RESULT"',
   ]) {
     if (!resultsSource.includes(needle)) {
       failures.push({
@@ -912,8 +925,9 @@ function checkAppReviewLoop() {
 
   for (const needle of [
     "ReviewPrompt",
-    "Rate Woof",
-    "Help more pet parents find Woof",
+    "Rate {BRAND_NAME}",
+    "Help more pet parents find {BRAND_NAME}",
+    "I already reviewed {BRAND_NAME}",
   ]) {
     if (!componentsSource.includes(needle)) {
       failures.push({
@@ -924,9 +938,9 @@ function checkAppReviewLoop() {
   }
 
   for (const needle of [
-    "handleRateWoof",
+    "handleRateApp",
     "openStoreReview",
-    "Rate Woof",
+    "Rate {BRAND_NAME}",
     "Could Not Open App Store",
     "Support the app with a quick rating",
   ]) {
@@ -1057,7 +1071,7 @@ function checkSupportContactLoop() {
     "support_contact_tapped",
     "support_contact_opened",
     "support_contact_failed",
-    "woofapp.help@gmail.com",
+    "SUPPORT_EMAIL",
     "Contact Support",
     "Get help with scans, account, or Pro",
     "Mail",
@@ -1263,11 +1277,11 @@ function checkScanFirstOnboarding() {
     "completion_method: completionMethod",
     "nextRoute: \"Scanner\"",
     "Scan the front label",
-    "No barcode required",
+    "No barcode needed",
     "Search works too",
     "verified ingredient list",
     "Scan Front Label",
-    "How Woof works",
+    "How {BRAND_NAME} works",
   ]) {
     if (!onboardingSource.includes(needle)) {
       failures.push({
@@ -1324,7 +1338,7 @@ function checkVerifiedIngredientsStayVisible() {
   for (const needle of [
     "Exact source-backed ingredients stay available to every user.",
     "ingredients={result.ingredients}",
-    "!hasFullResultAccess && done && hasScore && !showPostScanPrompt",
+    "!hasFullResultAccess && done && hasScore",
   ]) {
     if (!resultsSource.includes(needle)) {
       failures.push({
@@ -1336,7 +1350,7 @@ function checkVerifiedIngredientsStayVisible() {
 
   for (const needle of [
     "const canExpand = total > COLLAPSED_COUNT;",
-    "Go deeper with Woof Pro",
+    "Go deeper with {BRAND_PRO_NAME}",
     "Unlimited scans, ingredient explanations",
     "Get unlimited scans and detailed ingredient explanations",
   ]) {
