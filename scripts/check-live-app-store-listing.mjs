@@ -84,7 +84,7 @@ if (!response.ok) {
       fail(`Expected bundle id io.woof.app, got ${app.bundleId || "unknown"}`);
     }
 
-    if (app.trackName !== "Woof - Pet Food Scanner" && app.trackName !== "Woof: Pet Food Scanner") {
+    if (app.trackName !== "Woof Pet Food Scanner") {
       fail(`Unexpected live app name: ${app.trackName || "unknown"}`);
     }
 
