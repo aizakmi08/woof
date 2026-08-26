@@ -1311,7 +1311,7 @@ export function NutritionFacts({ nutrition }) {
   return (
     <View style={styles.nutritionSection}>
       <Text style={styles.nutritionTitle}>
-        {nutrition.analysisTypeLabel || "Nutrient Analysis"} · {nutrition.analysisBasisLabel || "Basis not stated"}
+        {[nutrition.analysisTypeLabel || "Nutrient analysis", nutrition.analysisBasisLabel !== "Basis not stated" ? nutrition.analysisBasisLabel : null].filter(Boolean).join(" · ")}
       </Text>
       {facts.map((fact, index) => (
         <View key={fact.label}>

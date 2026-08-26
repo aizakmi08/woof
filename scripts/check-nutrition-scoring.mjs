@@ -1,0 +1,33 @@
+import fs from "node:fs";
+import path from "node:path";
+import url from "node:url";
+const root = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), "..");
+const assert = (condition, message) => { if (!condition) throw new Error(message); };
+const qualitySource = fs.readFileSync(path.join(root, "services/catalogQuality.js"), "utf8").replace(/\bexport const\b/g, "const").replace(/\bexport function\b/g, "function");
+const quality = new Function(`${qualitySource}\nreturn { CATALOG_QUALITY_STATES, catalogVerificationState, productIsVerifiedReady };`)();
+const catalogSource = fs.readFileSync(path.join(root, "services/productCatalog.js"), "utf8").replace(/^import[\s\S]*?;\n/gm, "").replace(/^export\s*\{[\s\S]*?\}\s*from\s*[^;]+;\n/gm, "").replace(/\bexport\s+/g, "");
+const catalog = new Function("catalogVerificationState", "catalogProductIsVerifiedReady", "CATALOG_QUALITY_STATES", `const createLogger=()=>({debug(){}});${catalogSource};return {normalizeCatalogProduct,catalogProductToVerifiedProduct};`)(quality.catalogVerificationState, quality.productIsVerifiedReady, quality.CATALOG_QUALITY_STATES);
+const scoringSource = fs.readFileSync(path.join(root, "services/verifiedScoring.js"), "utf8").replace(/^import[^\n]+\n/gm, "").replace(/\bexport const\b/g, "const").replace(/\bexport function\b/g, "function");
+const scoring = new Function("catalogVerificationState", `const splitIngredientStatement=v=>String(v||"").split(/[,;\\n]/).map(x=>x.trim()).filter(Boolean);${scoringSource};return {buildVerifiedPetFoodAnalysis};`)(quality.catalogVerificationState);
+const ingredients = ["Pork Meal","Millet","Pork Fat","Pumpkin Seed","Dried Yeast","Alfalfa Meal","Dried Kelp","Spinach","Broccoli","Mixed Tocopherols"];
+const row = (overrides={}) => ({ cache_key:"regression:base", product_name:"Regression Food", brand:"Regression Brand", life_stage:"all life stages", food_form:"dry", pet_type:"dog", ingredients, ingredient_text:ingredients.join(", "), ingredient_count:ingredients.length, image_url:"https://manufacturer.example/front.png", source:"manufacturer", source_quality:"manufacturer", source_url:"https://manufacturer.example/product", ingredient_verification_status:"manufacturer", image_verification_status:"manufacturer", has_published_nutrients:true, is_complete_food:true, ...overrides });
+const typical = values => ({ typical_analysis:{...values,analysis_type:"typical",basis:"dry_matter",publisher_label:"Typical Analysis",source_url:"https://manufacturer.example/product"}, published_analysis_source:{status:"extracted",analysis_type:"typical",basis:"dry_matter",publisher_label:"Typical Analysis",source_url:"https://manufacturer.example/product"} });
+const score = raw => { const mapped=catalog.normalizeCatalogProduct(raw,"catalog"); const verified=catalog.catalogProductToVerifiedProduct(mapped); return {verified,result:scoring.buildVerifiedPetFoodAnalysis(verified)}; };
+const balance = result => result.categories.find(c=>c.name==="Nutritional Balance")?.score;
+for (const [name,calcium,phosphorus] of [["Nature's Logic Canine Pork Meal Feast",5.34,2.84],["Nature's Logic Distinction Canine Pork Recipe",3.52,1.96]]) {
+  const x=score(row({product_name:name,brand:"Nature's Logic",nutritional_info:typical({protein:32,fat:17,fiber:3.5,calcium,phosphorus})}));
+  assert(x.verified.hasPublishedNutrients===true,`${name}: publication flag dropped`); assert(x.result.overallScore<=35,`${name}: overall cap missing`); assert(balance(x.result)<=25,`${name}: balance cap missing`); assert(x.result.nutritionAnalysis.nutrientConcern?.code==="calcium_above_profile_maximum",`${name}: concern missing`); assert(x.result.petSafety.level==="avoid",`${name}: avoid safety missing`);
+}
+const values={protein:30,fat:15,fiber:3,moisture:8,calcium:1.4,phosphorus:1.1};
+const full=score(row({nutritional_info:typical(values)})).result;
+const ga=score(row({nutritional_info:{guaranteed_analysis:{...values,analysis_type:"guaranteed",basis:"dry_matter"}}})).result;
+assert(balance(full)>=85,"typical analysis balance too low"); assert(full.nutritionAnalysis.transparencyLevel==="fuller","typical transparency missing"); assert(ga.nutritionAnalysis.transparencyLevel==="limited","GA transparency wrong"); assert(balance(full)-balance(ga)===19,"Eric 19-point delta changed");
+const absent=score(row({nutritional_info:{adequacy_statement:"AAFCO"},nutrient_panel:"Guaranteed Analysis"})).result;
+assert(balance(absent)===52,"no-data balance changed"); assert(absent.nutritionAnalysis.nutrientConcern==null,"no-data concern fabricated"); for(const key of ["proteinPercent","fatPercent","fiberPercent","moisturePercent","calciumDryMatterPercent"]) assert(absent.nutritionAnalysis[key]==="N/A",`${key} fabricated`);
+const converted=score(row({nutritional_info:{guaranteed_analysis:{protein:28,fat:14,fiber:4,moisture:10,calcium:1.7,phosphorus:1.1,analysis_type:"guaranteed",basis:"as_fed"}}})).result;
+assert(converted.overallScore<=35&&converted.nutritionAnalysis.nutrientConcern?.code==="calcium_above_profile_maximum","as-fed conversion cap missing");
+const unknown=score(row({nutritional_info:{guaranteed_analysis:{protein:28,fat:14,fiber:4,moisture:10,calcium:4.5,phosphorus:2,analysis_type:"guaranteed",basis:"not stated"}}})).result;
+assert(unknown.overallScore>35&&unknown.nutritionAnalysis.nutrientConcern==null,"unknown basis must abstain");
+const bare=score(row({nutritional_info:{dry_matter:{protein:30,fat:15,fiber:3,calcium:1.4,phosphorus:1.1}}})).result;
+assert(bare.nutritionAnalysis.analysisType==="unknown"&&bare.nutritionAnalysis.transparencyLevel==="unknown","bare dry_matter promoted to typical");
+console.log("Nutrition scoring production-path checks passed (9 cases).");

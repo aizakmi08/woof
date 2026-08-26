@@ -3,8 +3,8 @@ import { productIsVerifiedReady } from "./catalogQuality";
 import { createLogger } from "./logger";
 
 const logger = createLogger("CATALOG_SEARCH_CACHE");
-const CACHE_PREFIX = "@woof_catalog_search_cache_v7:";
-const CACHE_INDEX_KEY = "@woof_catalog_search_cache_index_v7";
+const CACHE_PREFIX = "@woof_catalog_search_cache_v8:";
+const CACHE_INDEX_KEY = "@woof_catalog_search_cache_index_v8";
 const MAX_CACHE_ENTRIES = 50;
 const MAX_PRODUCTS_PER_ENTRY = 25;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -233,6 +233,8 @@ function serializeProduct(product = {}) {
     nutritionalInfo: product.nutritionalInfo || null,
     nutrientPanel: product.nutrientPanel || null,
     hasPublishedNutrients: !!product.hasPublishedNutrients,
+    analysisType: product.analysisType || product.nutriments?.analysisType || null,
+    basis: product.basis || product.nutriments?.basis || null,
     source: product.source || null,
     sourceQuality: product.sourceQuality || null,
     sourceUrl: product.sourceUrl || null,
@@ -241,6 +243,9 @@ function serializeProduct(product = {}) {
     verifiedAt: product.verifiedAt || null,
     formulaEvidenceTier: product.formulaEvidenceTier || null,
     formulaVersionProvenance: product.formulaVersionProvenance || null,
+    isCompleteFood: product.isCompleteFood ?? true,
+    catalogExclusionReason: product.catalogExclusionReason || "",
+    expiresAt: product.expiresAt || null,
     rank: Number(product.rank || 0),
     sourceKind: product.sourceKind || "catalog",
   };

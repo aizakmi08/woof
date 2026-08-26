@@ -21,7 +21,8 @@ const CORS_HEADERS = {
 };
 
 const FUNCTION_NAME = "analyze";
-const FUNCTION_AUDIT_VERSION = "2026-08-23-edge-eric-nutrient-balance-v1";
+const FUNCTION_AUDIT_VERSION = "2026-08-26-edge-eric-nutrient-balance-v2";
+const NUTRITION_SCORING_VERSION = "2026-08-26-eric-v2";
 const DEPLOYMENT_HEADERS = {
   "X-Woof-Function-Name": FUNCTION_NAME,
   "X-Woof-Function-Audit-Version": FUNCTION_AUDIT_VERSION,
@@ -40,10 +41,11 @@ const CLAUDE_TIMEOUT_MS = 45_000;
 const STREAM_CACHE_TIMEOUT_MS = 50_000;
 
 const OPFF_ALLOWED_FIELDS = new Set([
-  "productName", "brand", "petType", "ingredientsText",
+  "productName", "brand", "petType", "lifeStage", "foodForm", "ingredientsText",
   "nutriments", "nutriscoreGrade", "novaGroup", "barcode",
   "ingredients", "imageUrl", "source", "sourceUrl", "sourceQuality",
   "ingredientVerificationStatus", "imageVerificationStatus", "verifiedAt",
+  "hasPublishedNutrients", "nutritionalInfo", "nutrientPanel", "analysisType", "basis",
 ]);
 const VERIFIED_INGREDIENT_STATUSES = new Set([
   "gdsn",
@@ -380,16 +382,25 @@ function sanitizeOpffProduct(raw: Record<string, any>): Record<string, any> {
 function buildVerifiedDataText(opffProduct: Record<string, any>): string {
   const safe = sanitizeOpffProduct(opffProduct);
   const n = safe.nutriments || {};
+  const analysisType = n.analysisType || n.analysis_type || safe.analysisType;
+  const basis = n.basis || n.valueBasis || n.value_basis || n.analysisBasis || n.analysis_basis || safe.basis;
   return [
     `Product: ${safe.productName || "Unknown"}`,
     safe.brand ? `Brand: ${safe.brand}` : null,
     safe.petType ? `Pet Type: ${safe.petType}` : null,
+    safe.lifeStage ? `Life Stage: ${safe.lifeStage}` : null,
     safe.ingredientsText
       ? `\nIngredients List:\n${safe.ingredientsText}`
       : null,
-    n.protein != null ? `Protein: ${n.protein}g per 100g` : null,
-    n.fat != null ? `Fat: ${n.fat}g per 100g` : null,
-    n.fiber != null ? `Fiber: ${n.fiber}g per 100g` : null,
+    safe.hasPublishedNutrients === true ? "Nutrient provenance: published source data" : null,
+    analysisType ? `Analysis type: ${analysisType}` : null,
+    basis ? `Analysis basis: ${basis}` : null,
+    n.protein != null ? `Protein: ${n.protein}%` : null,
+    n.fat != null ? `Fat: ${n.fat}%` : null,
+    n.fiber != null ? `Fiber: ${n.fiber}%` : null,
+    n.moisture != null ? `Moisture: ${n.moisture}%` : null,
+    n.calcium != null ? `Calcium: ${n.calcium}%` : null,
+    n.phosphorus != null ? `Phosphorus: ${n.phosphorus}%` : null,
     n.energy != null ? `Energy: ${n.energy} kcal per 100g` : null,
     safe.nutriscoreGrade
       ? `Nutriscore Grade: ${String(safe.nutriscoreGrade).toUpperCase()}`
@@ -572,40 +583,107 @@ function normalizeCategories(value: any): Record<string, any>[] {
     .filter((item) => item.name);
 }
 
-function normalizeNutritionAnalysis(value: any): Record<string, any> {
+function nutritionNumber(value: any): number | null {
+  if (value == null || typeof value === "boolean" || (typeof value === "string" && !value.trim())) return null;
+  const parsed = typeof value === "string" ? Number.parseFloat(value.replace(/[% ,]/g, "")) : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+function nutrientPercent(value: any): string {
+  const n = nutritionNumber(value); if (n == null) return "N/A";
+  return `${Number.isInteger(n) ? n : n.toFixed(2).replace(/0+$/, "").replace(/\.$/, "")}%`;
+}
+function sourceNutritionEvidence(product: Record<string, any> | null): Record<string, any> {
+  const p = isPlainObject(product) ? product : {};
+  const n = isPlainObject(p.nutriments) ? p.nutriments : {};
+  const sourceUrl = optionalString(p.sourceUrl || p.source_url || p.nutritionalInfo?.published_analysis_source?.source_url);
+  const published = (p.hasPublishedNutrients === true || p.has_published_nutrients === true)
+    && [n.protein, n.fat, n.fiber, n.moisture, n.calcium, n.phosphorus].some((v) => nutritionNumber(v) != null)
+    && Boolean(sourceUrl);
+  const typeText = optionalString(n.analysisType || n.analysis_type || p.analysisType).toLowerCase().replace(/[_-]+/g, " ");
+  const basisText = optionalString(n.basis || n.valueBasis || n.value_basis || n.analysisBasis || n.analysis_basis || p.basis).toLowerCase().replace(/[_-]+/g, " ");
+  const analysisType = /typical|actual|average nutrient|laboratory/.test(typeText) ? "typical" : /guaranteed|^ga$/.test(typeText) ? "guaranteed" : "unknown";
+  const analysisBasis = /dry matter|^dm$|^dmb$/.test(basisText) ? "dry_matter" : /as fed|as is|^af$/.test(basisText) ? "as_fed" : "unknown";
+  const moisture = nutritionNumber(n.moisture);
+  const dm = (value: any) => { const amount = nutritionNumber(value); if (amount == null) return null; if (analysisBasis === "dry_matter") return amount; if (analysisBasis === "as_fed" && moisture != null && moisture < 100) return amount / ((100 - moisture) / 100); return null; };
+  const calciumDm = published ? dm(n.calcium) : null;
+  const phosphorusDm = published ? dm(n.phosphorus) : null;
+  const ratio = calciumDm != null && phosphorusDm != null && phosphorusDm > 0 ? calciumDm / phosphorusDm : null;
+  const lifeStage = optionalString(p.lifeStage || p.life_stage);
+  let concern = null;
+  if (published && optionalString(p.petType || p.pet_type).toLowerCase() === "dog" && calciumDm != null) {
+    const maximum = /puppy|growth|reproduction|all life stages/i.test(lifeStage) ? 1.8 : 2.5;
+    if (calciumDm > maximum) concern = { level: "avoid", code: "calcium_above_profile_maximum", summary: `Published calcium is ${nutrientPercent(calciumDm)} on a dry-matter basis, above the ${maximum}% AAFCO profile maximum used for this life-stage screen.`, calciumDryMatterPercent: calciumDm, profileMaximumPercent: maximum, lifeStage };
+  }
+  if (!concern && published && ratio != null && (ratio < 1 || ratio > 2)) concern = { level: "caution", code: "calcium_phosphorus_ratio_outside_profile", summary: `The published calcium-to-phosphorus ratio is ${ratio.toFixed(2)}:1, outside the 1:1 to 2:1 profile range used by this screen.` };
+  const comparable = analysisBasis === "dry_matter" || (analysisBasis === "as_fed" && moisture != null);
+  const transparencyLevel = published && analysisType === "typical" && comparable ? "fuller" : published && analysisType === "guaranteed" ? "limited" : "unknown";
+  return { published, n, analysisType, analysisBasis, calciumDm, phosphorusDm, ratio, lifeStage, concern, transparencyLevel };
+}
+
+function normalizeNutritionAnalysis(value: any, sourceProduct: Record<string, any> | null = null): Record<string, any> {
   if (!isPlainObject(value)) {
     throw new Error("missing nutrition analysis");
   }
-
+  const e = sourceNutritionEvidence(sourceProduct);
   return {
-    proteinLevel: optionalString(value.proteinLevel),
-    proteinPercent: optionalString(value.proteinPercent),
-    fatLevel: optionalString(value.fatLevel),
-    fatPercent: optionalString(value.fatPercent),
-    fiberPercent: optionalString(value.fiberPercent),
+    proteinLevel: e.published ? optionalString(value.proteinLevel, "unknown") : "unknown",
+    proteinPercent: e.published ? nutrientPercent(e.n.protein) : "N/A",
+    fatLevel: e.published ? optionalString(value.fatLevel, "unknown") : "unknown",
+    fatPercent: e.published ? nutrientPercent(e.n.fat) : "N/A",
+    fiberPercent: e.published ? nutrientPercent(e.n.fiber) : "N/A",
+    moisturePercent: e.published ? nutrientPercent(e.n.moisture) : "N/A",
+    calciumDryMatterPercent: nutrientPercent(e.calciumDm),
+    phosphorusDryMatterPercent: nutrientPercent(e.phosphorusDm),
+    calciumPhosphorusRatio: e.ratio == null ? "N/A" : `${e.ratio.toFixed(2)}:1`,
+    analysisType: e.analysisType,
+    analysisTypeLabel: e.analysisType === "typical" ? "Typical analysis" : e.analysisType === "guaranteed" ? "Guaranteed analysis" : "Nutrient analysis",
+    analysisBasis: e.analysisBasis,
+    analysisBasisLabel: e.analysisBasis === "dry_matter" ? "Dry matter" : e.analysisBasis === "as_fed" ? "As fed" : "Basis not stated",
+    hasPublishedNutrients: e.published,
+    transparencyLevel: e.transparencyLevel,
+    transparencyNote: e.transparencyLevel === "fuller" ? "This brand publishes its full typical analysis on a dry-matter basis, which raises its Nutritional Balance score." : e.transparencyLevel === "limited" ? "Only the label's guaranteed minimums and maximums are published, so Nutritional Balance is scored conservatively." : "A numeric, source-backed nutrient analysis is not published for this product, so Nutritional Balance is scored conservatively.",
+    nutrientConcern: e.concern,
     primaryProteinSource: optionalString(value.primaryProteinSource),
     grainFree: typeof value.grainFree === "boolean" ? value.grainFree : null,
-    lifestage: optionalString(value.lifestage),
-    caloriesPerCup: optionalString(value.caloriesPerCup),
+    lifestage: e.lifeStage || optionalString(value.lifestage),
+    caloriesPerCup: "N/A",
   };
 }
 
-function validatePetFoodAnalysis(obj: Record<string, any>): Record<string, any> {
+function validatePetFoodAnalysis(obj: Record<string, any>, sourceProduct: Record<string, any> | null = null): Record<string, any> {
   if (!isPlainObject(obj) || obj.error) {
     throw new Error("invalid pet-food analysis");
   }
 
+  const categories = normalizeCategories(obj.categories);
+  const ingredients = normalizeIngredients(obj.ingredients);
+  const nutritionAnalysis = normalizeNutritionAnalysis(obj.nutritionAnalysis, sourceProduct);
+  const weights = new Map([["protein quality", .2], ["ingredient safety", .2], ["nutritional balance", .3], ["low-nutrient binders", .15], ["additives & preservatives", .15]]);
+  const scores = new Map(categories.map((c) => [c.name.toLowerCase(), c.score]));
+  if (![...weights.keys()].every((name) => scores.has(name))) throw new Error("missing scoring categories");
+  const weighted = Math.round([...weights].reduce((sum, [name, weight]) => sum + Number(scores.get(name)) * weight, 0));
+  let overallScore = numberInRange(obj.overallScore, 1, 100);
+  if (Math.abs(overallScore - weighted) > 2) { console.warn("[ANALYZE] Corrected inconsistent overall score", { reported: overallScore, weighted }); overallScore = weighted; }
+  const ingredientText = ingredients.map((i) => i.name).join(" ").toLowerCase();
+  const primary = optionalString(nutritionAnalysis.primaryProteinSource).toLowerCase();
+  const cap = (maximum: number, reason: string) => { if (overallScore > maximum) { overallScore = maximum; console.warn("[ANALYZE] Applied server-side score cap", { maximum, reason }); } };
+  if (/\b(?:bha|bht|ethoxyquin)\b/.test(ingredientText)) cap(35, "prohibited preservative");
+  if (ingredientText.includes("propylene glycol")) cap(40, "propylene glycol");
+  if (/by[ -]?product/.test(primary) || /by[ -]?product/.test(optionalString(ingredients[0]?.name).toLowerCase())) cap(50, "by-product primary");
+  if (nutritionAnalysis.nutrientConcern?.level === "avoid") cap(35, "calcium profile maximum");
+  if (nutritionAnalysis.nutrientConcern?.level === "caution") cap(45, "calcium-to-phosphorus ratio");
   return {
     ...obj,
     productName: requiredString(obj.productName),
     brand: optionalString(obj.brand, "Unknown"),
     petType: normalizePetFoodPetType(obj.petType),
-    overallScore: numberInRange(obj.overallScore, 1, 100),
+    overallScore,
+    scoringVersion: NUTRITION_SCORING_VERSION,
     summary: requiredString(obj.summary),
     verdict: requiredString(obj.verdict),
-    ingredients: normalizeIngredients(obj.ingredients),
-    categories: normalizeCategories(obj.categories),
-    nutritionAnalysis: normalizeNutritionAnalysis(obj.nutritionAnalysis),
+    ingredients,
+    categories,
+    nutritionAnalysis,
     customerRating: null,
     recallHistory: "",
     pros: stringArray(obj.pros),
@@ -688,6 +766,7 @@ function validateLabelLookup(obj: Record<string, any>): Record<string, any> {
 function validateAnalysisResult(
   mode: string,
   obj: Record<string, any> | null,
+  sourceProduct: Record<string, any> | null = null,
 ): Record<string, any> | null {
   if (!obj) return null;
 
@@ -698,7 +777,7 @@ function validateAnalysisResult(
     if (mode === "human_food") {
       return validateHumanFoodAnalysis(obj);
     }
-    return validatePetFoodAnalysis(obj);
+    return validatePetFoodAnalysis(obj, sourceProduct);
   } catch (err) {
     console.error("[ANALYZE] Invalid Claude response:", (err as Error).message);
     return null;
@@ -741,6 +820,10 @@ function streamScanUsageEvent(scanUsage: Record<string, any> | null): Uint8Array
       scanUsage,
     })}\n\n`,
   );
+}
+
+function streamValidatedAnalysisEvent(analysis: Record<string, any>): Uint8Array {
+  return new TextEncoder().encode(`data: ${JSON.stringify({ type: "woof_validated_analysis", analysis })}\n\n`);
 }
 
 /**
@@ -881,6 +964,7 @@ Deno.serve(async (req) => {
   // ── 4. Build Claude messages (with input validation) ────────────
 
   let systemPrompt: string;
+  let verifiedProductContext: Record<string, any> | null = null;
   const userContent: Array<Record<string, any>> = [];
 
   if (mode === "photo") {
@@ -946,6 +1030,7 @@ Deno.serve(async (req) => {
 
     // Sanitize opffProduct before use
     const safeProduct = sanitizeOpffProduct(opffProduct);
+    verifiedProductContext = safeProduct;
     if (!hasVerifiedIngredientData(safeProduct)) {
       return json(
         { error: "Verified ingredient provenance is required for verified mode" },
@@ -1183,7 +1268,7 @@ Deno.serve(async (req) => {
             return;
           }
 
-          const analysis = validateAnalysisResult(mode, cleanAndParse(text));
+          const analysis = validateAnalysisResult(mode, cleanAndParse(text), verifiedProductContext);
           if (!analysis) {
             const reversedUsage = await reverseConsumedScan("invalid_stream_response");
             controller.enqueue(
@@ -1196,11 +1281,12 @@ Deno.serve(async (req) => {
           }
 
           if (mode !== "human_food" && mode !== "label_lookup") {
-            writeToCache(supabase, analysis, mode, cacheKey, opffProduct).catch(
+            writeToCache(supabase, analysis, mode, cacheKey, verifiedProductContext).catch(
               (err) => console.error("[ANALYZE] Stream cache write failed:", err.message),
             );
           }
 
+          controller.enqueue(streamValidatedAnalysisEvent(analysis));
           controller.enqueue(streamScanUsageEvent(scanUsage));
           streamResultDelivered = true;
         } catch (err) {
@@ -1256,7 +1342,7 @@ Deno.serve(async (req) => {
     );
   }
 
-  const analysis = validateAnalysisResult(mode, cleanAndParse(content));
+  const analysis = validateAnalysisResult(mode, cleanAndParse(content), verifiedProductContext);
   if (!analysis) {
     const reversedUsage = await reverseConsumedScan("invalid_nonstream_response");
     return json(
@@ -1270,7 +1356,7 @@ Deno.serve(async (req) => {
 
   if (mode !== "human_food" && mode !== "label_lookup") {
     // Fire-and-forget cache write — don't delay the response
-    writeToCache(supabase, analysis, mode, cacheKey, opffProduct).catch(
+    writeToCache(supabase, analysis, mode, cacheKey, verifiedProductContext).catch(
       (err) => console.error("[ANALYZE] Non-stream cache error:", err.message),
     );
   }

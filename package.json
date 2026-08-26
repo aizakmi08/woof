@@ -29,6 +29,8 @@
     "check:edge": "node scripts/check-edge-functions.mjs",
     "check:edge-types": "node scripts/check-edge-typecheck.mjs",
     "check:resolver-contract": "node scripts/check-product-resolver-contract.mjs",
+    "check:nutrition-scoring": "node scripts/check-nutrition-scoring.mjs",
+    "check:published-analysis": "node scripts/check-catalog-published-analysis.mjs",
     "check:catalog-miss": "node scripts/check-catalog-miss.mjs",
     "check:catalog": "node scripts/check-catalog-quality.mjs",
     "check:catalog-scraper": "node scripts/check-catalog-scraper.mjs",

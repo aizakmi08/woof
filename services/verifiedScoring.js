@@ -1,6 +1,8 @@
 import { catalogVerificationState } from "./catalogQuality";
 import { splitIngredientStatement } from "./catalogIngredients";
 
+export const NUTRITION_SCORING_VERSION = "2026-08-26-eric-v2";
+
 function compact(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
@@ -248,6 +250,7 @@ function scoreSafety(names) {
 }
 
 function numeric(value) {
+  if (value == null || typeof value === "boolean" || (typeof value === "string" && !value.trim())) return null;
   const parsed = typeof value === "string"
     ? Number.parseFloat(value.replace(/[% ,]/g, ""))
     : Number(value);
@@ -359,6 +362,9 @@ function scoreBalance(nutriments = {}, petType = "unknown", lifeStage = "") {
         level: "avoid",
         code: "calcium_above_profile_maximum",
         summary: `Published calcium is ${percentText(calciumDm)} on a dry-matter basis, above the ${calciumMaximum}% AAFCO profile maximum used for this life-stage screen.`,
+        calciumDryMatterPercent: calciumDm,
+        profileMaximumPercent: calciumMaximum,
+        lifeStage: compact(lifeStage),
       };
       detail = concern.summary;
     }
@@ -373,6 +379,7 @@ function scoreBalance(nutriments = {}, petType = "unknown", lifeStage = "") {
       level: "caution",
       code: "calcium_phosphorus_ratio_outside_profile",
       summary: `The published calcium-to-phosphorus ratio is ${calciumPhosphorusRatio.toFixed(2)}:1, outside the 1:1 to 2:1 profile range used by this screen.`,
+      calciumPhosphorusRatio,
     };
     detail = `${detail} ${concern.summary}`;
   }
@@ -595,17 +602,17 @@ export function buildVerifiedPetFoodAnalysis(product = {}) {
   });
 
   const analysisTypeLabel = balance.analysisType === "typical"
-    ? "Typical Analysis"
+    ? "Typical analysis"
     : balance.analysisType === "guaranteed"
-      ? "Guaranteed Analysis"
-      : "Nutrient Analysis";
+      ? "Guaranteed analysis"
+      : "Nutrient analysis";
   const analysisBasisLabel = balance.basis === "dry_matter"
     ? "Dry matter"
     : balance.basis === "as_fed"
       ? "As fed"
       : "Basis not stated";
   const nutrientSummary = hasPublishedNutrients
-    ? `${analysisTypeLabel} (${analysisBasisLabel.toLowerCase()}) was included in the nutritional-balance score.`
+    ? `${analysisTypeLabel} · ${analysisBasisLabel} was included in the Nutritional Balance score.`
     : "A full source-backed nutrient analysis was unavailable, so nutritional balance was scored conservatively.";
 
   return {
@@ -620,6 +627,7 @@ export function buildVerifiedPetFoodAnalysis(product = {}) {
     petType,
     imageUrl: product.imageUrl || null,
     sourceUrl: product.sourceUrl || null,
+    scoringVersion: NUTRITION_SCORING_VERSION,
     overallScore: score,
     summary: `Scored from the verified formula in the ${sourceLabel}. ${nutrientSummary}`,
     categories,
@@ -644,10 +652,10 @@ export function buildVerifiedPetFoodAnalysis(product = {}) {
       analysisBasisLabel,
       transparencyLevel: balance.transparencyLevel,
       transparencyNote: balance.transparencyLevel === "fuller"
-        ? "Fuller typical nutrient data is published and comparable on a dry-matter basis."
+        ? "This brand publishes its full typical analysis on a dry-matter basis, which raises its Nutritional Balance score."
         : balance.transparencyLevel === "limited"
-          ? "Guaranteed values are label minimums or maximums, not a full typical nutrient profile."
-          : "Full typical nutrient values are not available for this product record.",
+          ? "Only the label's guaranteed minimums and maximums are published, so Nutritional Balance is scored conservatively."
+          : "A numeric, source-backed nutrient analysis is not published for this product, so Nutritional Balance is scored conservatively.",
       nutrientConcern: balance.concern,
       primaryProteinSource: primaryProtein,
       grainFree: !names.some((name) => includesAny(lower(name), GRAIN_TERMS)),

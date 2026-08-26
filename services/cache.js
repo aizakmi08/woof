@@ -1,6 +1,6 @@
 import { supabase } from "./supabase";
 import { createLogger } from "./logger";
-import { hasVerifiedIngredientData, hasVerifiedProductImageData } from "./verifiedScoring";
+import { hasVerifiedIngredientData, hasVerifiedProductImageData, NUTRITION_SCORING_VERSION } from "./verifiedScoring";
 
 const logger = createLogger("CACHE");
 
@@ -47,6 +47,11 @@ export async function getCachedAnalysis(cacheKey) {
     }
 
     logger.debug("[CACHE] HIT for key:", cacheKey);
+
+    if (Number.isFinite(Number(data.analysis?.overallScore)) && data.analysis?.scoringVersion !== NUTRITION_SCORING_VERSION) {
+      logger.debug("[CACHE] Ignoring stale pet-food scoring version:", cacheKey);
+      return { hit: false };
+    }
 
     if (
       data.data_source === "verified" &&

@@ -143,6 +143,8 @@ function processSSELine(line, state) {
     const event = JSON.parse(data);
     if (event.type === "content_block_delta" && event.delta?.text) {
       state.text += event.delta.text;
+    } else if (event.type === "woof_validated_analysis" && isPlainObject(event.analysis)) {
+      state.text = JSON.stringify(event.analysis);
     } else if (event.type === "woof_error") {
       state.error = buildStreamEventError(event);
     } else if (event.type === "woof_scan_usage") {
@@ -392,23 +394,38 @@ function normalizeCategories(value) {
     .filter((item) => item.name);
 }
 
-function normalizeNutritionAnalysis(value) {
+function normalizeNutritionAnalysis(value, sourceProduct = null) {
   if (!isPlainObject(value)) return null;
-
+  const n = isPlainObject(sourceProduct?.nutriments) ? sourceProduct.nutriments : {};
+  const published = (sourceProduct?.hasPublishedNutrients === true || sourceProduct?.has_published_nutrients === true)
+    && Boolean(optionalString(sourceProduct?.sourceUrl || sourceProduct?.source_url))
+    && [n.protein, n.fat, n.fiber, n.moisture, n.calcium, n.phosphorus].some((item) => item != null && String(item).trim() !== "");
   return {
     proteinLevel: optionalString(value.proteinLevel),
-    proteinPercent: optionalString(value.proteinPercent),
+    proteinPercent: published ? optionalString(value.proteinPercent, "N/A") : "N/A",
     fatLevel: optionalString(value.fatLevel),
-    fatPercent: optionalString(value.fatPercent),
-    fiberPercent: optionalString(value.fiberPercent),
+    fatPercent: published ? optionalString(value.fatPercent, "N/A") : "N/A",
+    fiberPercent: published ? optionalString(value.fiberPercent, "N/A") : "N/A",
+    moisturePercent: published ? optionalString(value.moisturePercent, "N/A") : "N/A",
+    calciumDryMatterPercent: published ? optionalString(value.calciumDryMatterPercent, "N/A") : "N/A",
+    phosphorusDryMatterPercent: published ? optionalString(value.phosphorusDryMatterPercent, "N/A") : "N/A",
+    calciumPhosphorusRatio: published ? optionalString(value.calciumPhosphorusRatio, "N/A") : "N/A",
+    analysisType: published ? optionalString(value.analysisType, "unknown") : "unknown",
+    analysisTypeLabel: published ? optionalString(value.analysisTypeLabel, "Nutrient analysis") : "Nutrient analysis",
+    analysisBasis: published ? optionalString(value.analysisBasis, "unknown") : "unknown",
+    analysisBasisLabel: published ? optionalString(value.analysisBasisLabel, "Basis not stated") : "Basis not stated",
+    hasPublishedNutrients: published && value.hasPublishedNutrients === true,
+    transparencyLevel: published ? optionalString(value.transparencyLevel, "unknown") : "unknown",
+    transparencyNote: published ? optionalString(value.transparencyNote) : "A numeric, source-backed nutrient analysis is not published for this product, so Nutritional Balance is scored conservatively.",
+    nutrientConcern: published && isPlainObject(value.nutrientConcern) ? value.nutrientConcern : null,
     primaryProteinSource: optionalString(value.primaryProteinSource),
     grainFree: typeof value.grainFree === "boolean" ? value.grainFree : null,
     lifestage: optionalString(value.lifestage),
-    caloriesPerCup: optionalString(value.caloriesPerCup),
+    caloriesPerCup: "N/A",
   };
 }
 
-function validatePetFoodAnalysis(result) {
+function validatePetFoodAnalysis(result, sourceProduct = null) {
   if (!isPlainObject(result) || result.error) {
     throw new Error(result?.error || "Invalid analysis response from Claude.");
   }
@@ -423,7 +440,7 @@ function validatePetFoodAnalysis(result) {
     verdict: requiredString(result.verdict, "verdict"),
     ingredients: normalizeIngredients(result.ingredients),
     categories: normalizeCategories(result.categories),
-    nutritionAnalysis: normalizeNutritionAnalysis(result.nutritionAnalysis),
+    nutritionAnalysis: normalizeNutritionAnalysis(result.nutritionAnalysis, sourceProduct),
     customerRating: null,
     recallHistory: "",
   };
@@ -513,7 +530,7 @@ function validateLabelLookupResult(result) {
   };
 }
 
-function validateAnalysisResult(mode, result) {
+function validateAnalysisResult(mode, result, sourceProduct = null) {
   if (mode === "label_lookup") {
     return validateLabelLookupResult(result);
   }
@@ -522,7 +539,7 @@ function validateAnalysisResult(mode, result) {
     return validateHumanFoodAnalysis(result);
   }
 
-  return validatePetFoodAnalysis(result);
+  return validatePetFoodAnalysis(result, sourceProduct);
 }
 
 // Streaming engine — reads SSE chunks and calls onUpdate with partial JSON
@@ -666,7 +683,7 @@ async function _callStreaming({ mode, payload, onUpdate, signal, attempt = 1 }) 
     );
   }
 
-  const validated = validateAnalysisResult(mode, final);
+  const validated = validateAnalysisResult(mode, final, payload?.opffProduct || null);
   attachScanUsage(validated, streamState.scanUsage);
 
   onUpdate(validated);
@@ -705,7 +722,7 @@ async function _callNonStreaming({ mode, payload, signal, attempt = 1 }) {
     throw new Error("No response from Claude.");
   }
 
-  const validated = validateAnalysisResult(mode, cleanAndParse(content));
+  const validated = validateAnalysisResult(mode, cleanAndParse(content), payload?.opffProduct || null);
   return attachScanUsage(validated, data.scanUsage || null);
 }
 

@@ -10,14 +10,17 @@ import {
   buildVerifiedPetFoodAnalysis,
   hasVerifiedIngredientData,
   hasVerifiedProductImageData,
+  NUTRITION_SCORING_VERSION,
 } from "./verifiedScoring";
 import { getCachedAnalysis, normalizeCacheKey } from "./cache";
 import { addHistoryEntry } from "./history";
 import { consumeScan } from "./entitlements";
 import { createLogger } from "./logger";
 
-const LOCAL_RESULT_PREFIX = "@woof_result_";
-const LOCAL_RESULT_KEYS = "@woof_result_keys";
+const LOCAL_RESULT_PREFIX = "@woof_result_v2_";
+const LOCAL_RESULT_KEYS = "@woof_result_keys_v2";
+const LEGACY_LOCAL_RESULT_PREFIX = "@woof_result_";
+const LEGACY_LOCAL_RESULT_KEYS = "@woof_result_keys";
 const MAX_LOCAL_RESULTS = 30;
 const logger = createLogger("ANALYSIS");
 
@@ -888,11 +891,25 @@ async function _runPhoto({ tempId, base64, uri, signal, state }) {
 
 // ── Local result cache (AsyncStorage) ─────────────────────────
 
+let legacyResultPurgePromise = null;
+async function _purgeLegacyLocalResults() {
+  if (legacyResultPurgePromise) return legacyResultPurgePromise;
+  legacyResultPurgePromise = (async () => {
+    try {
+      const keys = JSON.parse(await AsyncStorage.getItem(LEGACY_LOCAL_RESULT_KEYS) || "[]");
+      const resultKeys = Array.isArray(keys) ? keys.map((key) => `${LEGACY_LOCAL_RESULT_PREFIX}${key}`) : [];
+      await AsyncStorage.multiRemove([LEGACY_LOCAL_RESULT_KEYS, ...resultKeys]);
+    } catch (err) { logger.debug("[ANALYSIS] Failed to purge legacy local results:", err.message); }
+  })();
+  return legacyResultPurgePromise;
+}
+
 async function _saveLocalResult(cacheKey, analysis, dataSource, opffData) {
   try {
+    await _purgeLegacyLocalResults();
     await AsyncStorage.setItem(
       `${LOCAL_RESULT_PREFIX}${cacheKey}`,
-      JSON.stringify({ analysis, dataSource, opffData, savedAt: Date.now() })
+      JSON.stringify({ analysis, dataSource, opffData, savedAt: Date.now(), scoringVersion: analysis?.scoringVersion || null })
     );
 
     const keysJson = await AsyncStorage.getItem(LOCAL_RESULT_KEYS) || "[]";
@@ -921,9 +938,11 @@ async function _saveLocalResult(cacheKey, analysis, dataSource, opffData) {
  */
 export async function getLocalResult(cacheKey) {
   try {
+    await _purgeLegacyLocalResults();
     const json = await AsyncStorage.getItem(`${LOCAL_RESULT_PREFIX}${cacheKey}`);
     if (!json) return null;
     const parsed = JSON.parse(json);
+    if (Number.isFinite(Number(parsed?.analysis?.overallScore)) && (parsed?.scoringVersion !== NUTRITION_SCORING_VERSION || parsed?.analysis?.scoringVersion !== NUTRITION_SCORING_VERSION)) return null;
     if (parsed?.dataSource === "verified" && !_hasVerifiedResultProvenance(parsed.opffData || {})) {
       logger.debug("[ANALYSIS] Ignoring local verified result without ingredient/image provenance:", cacheKey);
       return null;
@@ -936,6 +955,7 @@ export async function getLocalResult(cacheKey) {
 
 export async function clearLocalResults() {
   try {
+    await _purgeLegacyLocalResults();
     const keysJson = await AsyncStorage.getItem(LOCAL_RESULT_KEYS) || "[]";
     const keys = JSON.parse(keysJson);
     const resultKeys = Array.isArray(keys)

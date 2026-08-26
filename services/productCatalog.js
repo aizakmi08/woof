@@ -742,24 +742,56 @@ function ingredientTextFromProduct(product = {}) {
   );
 }
 
+function nutrientObject(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value;
+  if (typeof value !== "string" || !value.trim().startsWith("{")) return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch { return {}; }
+}
+
+function nutrientNumber(value) {
+  if (value == null || typeof value === "boolean" || (typeof value === "string" && !value.trim())) return null;
+  const parsed = typeof value === "string" ? Number.parseFloat(value.replace(/[% ,]/g, "")) : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function hasNumericNutrientFields(value = {}) {
+  const n = nutrientObject(value);
+  return [n.protein, n.crudeProtein, n.crude_protein, n.proteins_100g, n.fat, n.crudeFat, n.crude_fat, n.fat_100g,
+    n.fiber, n.crudeFiber, n.crude_fiber, n.fiber_100g, n.moisture, n.moisture_100g, n.calcium,
+    n.calciumPercent, n.calcium_percent, n.calcium_100g, n.phosphorus, n.phosphorusPercent,
+    n.phosphorus_percent, n.phosphorus_100g].some((item) => nutrientNumber(item) != null);
+}
+
+function hasTypicalAnalysisProvenance(root = {}, candidate = {}) {
+  const source = nutrientObject(root.publishedAnalysisSource || root.published_analysis_source || candidate.publishedAnalysisSource || candidate.published_analysis_source);
+  const label = compact(candidate.publisherLabel || candidate.publisher_label || source.publisherLabel || source.publisher_label).toLowerCase();
+  const type = compact(source.analysisType || source.analysis_type).toLowerCase();
+  const explicitLabel = /\b(?:typical|actual|average nutrient|laboratory)\b/.test(label);
+  return explicitLabel || (compact(source.status).toLowerCase() === "extracted"
+    && /\b(?:typical|actual|average nutrient|laboratory)\b/.test(`${label} ${type}`)
+    && Boolean(compact(source.sourceUrl || source.source_url)));
+}
+
 function normalizeNutriments(product = {}) {
-  const root = product.nutriments || product.nutritionalInfo || product.nutrient_panel || {};
-  const typical = root.typicalAnalysis || root.typical_analysis || root.actualAnalysis || root.actual_analysis;
-  const dryMatter = root.dryMatter || root.dry_matter;
-  const guaranteed = root.guaranteedAnalysis || root.guaranteed_analysis;
-  const n = typical || dryMatter || guaranteed || root;
-  const hasPublishedNutrients = product.hasPublishedNutrients === true
-    || product.has_published_nutrients === true;
-  const inferredAnalysisType = typical || dryMatter
-    ? "typical"
-    : guaranteed || hasPublishedNutrients
-      ? "guaranteed"
-      : null;
-  const inferredBasis = dryMatter
-    ? "dry_matter"
-    : guaranteed || hasPublishedNutrients
-      ? "as_fed"
-      : null;
+  const direct = nutrientObject(product.nutriments);
+  const nutritionalInfo = nutrientObject(product.nutritionalInfo || product.nutritional_info);
+  const panel = nutrientObject(product.nutrientPanel || product.nutrient_panel);
+  const root = Object.keys(direct).length ? direct : Object.keys(nutritionalInfo).length ? nutritionalInfo : panel;
+  const typical = nutrientObject(root.typicalAnalysis || root.typical_analysis || root.actualAnalysis || root.actual_analysis);
+  const dryMatter = nutrientObject(root.dryMatter || root.dry_matter);
+  const guaranteed = nutrientObject(root.guaranteedAnalysis || root.guaranteed_analysis);
+  const typicalCandidate = Object.keys(typical).length ? typical : dryMatter;
+  const provenanceRoot = { ...panel, ...nutritionalInfo, ...root };
+  const hasTypicalProvenance = hasTypicalAnalysisProvenance(provenanceRoot, Object.keys(typicalCandidate).length ? typicalCandidate : root);
+  const n = Object.keys(typicalCandidate).length ? typicalCandidate : Object.keys(guaranteed).length ? guaranteed : hasNumericNutrientFields(root) ? root : {};
+  const explicitType = compact(n.analysisType || n.analysis_type || root.analysisType || root.analysis_type || product.analysisType || product.analysis_type);
+  const explicitTypeIsTypical = /\b(?:typical|actual|average nutrient|laboratory)\b/i.test(explicitType);
+  const inferredAnalysisType = hasTypicalProvenance ? "typical" : Object.keys(guaranteed).length && hasNumericNutrientFields(guaranteed) ? "guaranteed" : null;
+  const inferredBasis = Object.keys(dryMatter).length && hasNumericNutrientFields(dryMatter) ? "dry_matter"
+    : Object.keys(guaranteed).length && hasNumericNutrientFields(guaranteed) ? "as_fed" : null;
   return {
     protein: n.protein ?? n.crudeProtein ?? n.crude_protein ?? n.proteins_100g ?? n.proteins ?? null,
     fat: n.fat ?? n.crudeFat ?? n.crude_fat ?? n.fat_100g ?? null,
@@ -769,12 +801,7 @@ function normalizeNutriments(product = {}) {
     calcium: n.calcium ?? n.calciumPercent ?? n.calcium_percent ?? n.calcium_100g ?? null,
     phosphorus: n.phosphorus ?? n.phosphorusPercent ?? n.phosphorus_percent ?? n.phosphorus_100g ?? null,
     energy: n.energy ?? n["energy-kcal_100g"] ?? n.energy_100g ?? null,
-    analysisType:
-      n.analysisType
-      || n.analysis_type
-      || root.analysisType
-      || root.analysis_type
-      || inferredAnalysisType,
+    analysisType: explicitTypeIsTypical && !hasTypicalProvenance ? null : explicitType || inferredAnalysisType,
     basis:
       n.basis
       || n.valueBasis
@@ -786,6 +813,7 @@ function normalizeNutriments(product = {}) {
       || root.value_basis
       || root.analysisBasis
       || root.analysis_basis
+      || product.basis || product.valueBasis || product.value_basis || product.analysisBasis || product.analysis_basis
       || inferredBasis,
   };
 }
@@ -2517,6 +2545,8 @@ export function catalogProductToVerifiedProduct(product = {}) {
     : [];
 
   const verifiedProduct = {
+    id: product.id || null,
+    cacheKey: product.cacheKey || product.cache_key || "",
     productName: product.productName,
     brand: product.brand,
     gtin: product.gtin || product.barcode || "",
@@ -2529,17 +2559,29 @@ export function catalogProductToVerifiedProduct(product = {}) {
     barcode: product.barcode || "",
     ingredientsText: product.ingredientsText || product.ingredientText || product.ingredients?.join(", ") || "",
     ingredients,
-    nutriments: product.nutriments || normalizeNutriments(product),
+    nutriments: normalizeNutriments(product),
+    nutritionalInfo: product.nutritionalInfo || product.nutritional_info || null,
+    nutrientPanel: product.nutrientPanel || product.nutrient_panel || null,
+    hasPublishedNutrients: product.hasPublishedNutrients === true || product.has_published_nutrients === true,
+    analysisType: product.analysisType || product.analysis_type || product.nutriments?.analysisType || product.nutriments?.analysis_type || null,
+    basis: product.basis || product.valueBasis || product.value_basis || product.analysisBasis || product.analysis_basis || product.nutriments?.basis || null,
     nutriscoreGrade: product.nutriscoreGrade || null,
     novaGroup: product.novaGroup || null,
-    imageUrl: product.imageUrl || null,
+    imageUrl: product.imageUrl || product.image_url || null,
     source: product.source || null,
-    sourceQuality: product.sourceQuality || null,
-    ingredientVerificationStatus: product.ingredientVerificationStatus || null,
-    imageVerificationStatus: product.imageVerificationStatus || null,
-    verifiedAt: product.verifiedAt || null,
-    sourceUrl: product.sourceUrl || null,
+    sourceQuality: product.sourceQuality || product.source_quality || null,
+    ingredientVerificationStatus: product.ingredientVerificationStatus || product.ingredient_verification_status || null,
+    imageVerificationStatus: product.imageVerificationStatus || product.image_verification_status || null,
+    verifiedAt: product.verifiedAt || product.verified_at || null,
+    sourceUrl: product.sourceUrl || product.source_url || null,
     sourceKind: product.sourceKind || "catalog",
+    ingredientCount: Number(product.ingredientCount || product.ingredient_count || ingredients.length) || 0,
+    availablePackageSizes: Array.isArray(product.availablePackageSizes || product.available_package_sizes) ? product.availablePackageSizes || product.available_package_sizes : [],
+    isCompleteFood: product.isCompleteFood ?? product.is_complete_food ?? true,
+    catalogExclusionReason: product.catalogExclusionReason || product.catalog_exclusion_reason || "",
+    formulaEvidenceTier: product.formulaEvidenceTier || product.formula_evidence_tier || product.nutritionalInfo?.formula_evidence_tier || product.nutritional_info?.formula_evidence_tier || null,
+    formulaVersionProvenance: product.formulaVersionProvenance || product.formula_version_provenance || product.nutritionalInfo?.formula_version_provenance || product.nutritional_info?.formula_version_provenance || null,
+    expiresAt: product.expiresAt || product.expires_at || null,
   };
 
   return {

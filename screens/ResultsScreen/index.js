@@ -1664,6 +1664,7 @@ export default function ResultsScreen({ route, navigation }) {
     __DEV__ && devPetProfile ? devPetProfile : profile?.pet_profile
   );
   const petSafety = !isHumanFood ? personalizePetSafety({ ...result, dataSource }, savedPetProfile) : null;
+  const nutrientConcern = !isHumanFood ? nutritionAnalysis?.nutrientConcern || null : null;
   const humanFoodPetName = routePetName || (
     savedPetProfile.petType === (petType || result?.petType)
       ? savedPetProfile.name
@@ -1677,7 +1678,7 @@ export default function ResultsScreen({ route, navigation }) {
         ? Colors.scoreDecent
         : Colors.scoreExcellent;
   const showProminentPetSafety = petSafety?.personalized === true
-    && petSafety.level !== "safe";
+    && petSafety.level !== "safe" && !nutrientConcern;
   const verificationSource = isIngredientCapture
     ? "User submission"
     : displayValueLabel(
@@ -2069,6 +2070,26 @@ export default function ResultsScreen({ route, navigation }) {
               </StreamSection>
             ) : null}
 
+            {nutrientConcern ? (
+              <StreamSection visible delay={45}>
+                <View
+                  style={[styles.personalizedWarning, { backgroundColor: nutrientConcern.level === "avoid" ? theme.dangerSurface : theme.cautionSurface, borderColor: nutrientConcern.level === "avoid" ? Colors.scoreConcerning : Colors.scoreDecent }]}
+                  accessible
+                  accessibilityRole="alert"
+                  accessibilityLabel={`Nutrient safety concern. ${nutrientConcern.summary}`}
+                >
+                  <View style={[styles.personalizedWarningIcon, { backgroundColor: theme.fill }]}>
+                    <AlertCircle size={24} color={nutrientConcern.level === "avoid" ? Colors.scoreConcerning : Colors.scoreDecent} strokeWidth={2.5} />
+                  </View>
+                  <View style={styles.personalizedWarningCopy}>
+                    <Text style={[styles.personalizedWarningEyebrow, { color: nutrientConcern.level === "avoid" ? Colors.scoreConcerning : Colors.scoreDecent }]}>NUTRIENT SAFETY CHECK</Text>
+                    <Text style={[styles.personalizedWarningTitle, { color: theme.textPrimary }]}>{nutrientConcern.code === "calcium_above_profile_maximum" ? "Calcium exceeds the profile maximum" : "Mineral balance needs review"}</Text>
+                    <Text style={[styles.personalizedWarningSummary, { color: theme.textSecondary }]}>{nutrientConcern.summary}</Text>
+                  </View>
+                </View>
+              </StreamSection>
+            ) : null}
+
             {/* 2. Score overview */}
             {hasScore ? (
               <StreamSection visible delay={50}>
@@ -2155,6 +2176,19 @@ export default function ResultsScreen({ route, navigation }) {
               <View style={styles.heroSection}>
                 <SkeletonCircle size={180} strokeWidth={12} />
               </View>
+            ) : null}
+
+            {!isHumanFood && nutritionAnalysis ? (
+              <StreamSection visible delay={75}>
+                <View style={{ backgroundColor: theme.card, borderColor: theme.separator, borderWidth: 1, borderRadius: Spacing.cardRadius, padding: 16, marginTop: 12 }} accessible accessibilityRole="summary">
+                  <Text style={{ color: theme.textPrimary, fontSize: 16, fontWeight: "700" }}>
+                    {nutritionAnalysis.hasPublishedNutrients ? [nutritionAnalysis.analysisTypeLabel || "Nutrient analysis", nutritionAnalysis.analysisBasisLabel !== "Basis not stated" ? nutritionAnalysis.analysisBasisLabel : null].filter(Boolean).join(" · ") : "Nutrient details not published"}
+                  </Text>
+                  <Text style={{ color: theme.textSecondary, fontSize: 14, lineHeight: 20, marginTop: 6 }}>
+                    {nutritionAnalysis.transparencyNote || "Nutritional Balance is scored conservatively when source-backed nutrient values are unavailable."}
+                  </Text>
+                </View>
+              </StreamSection>
             ) : null}
 
             {/* Scan limit banner (free users, new scans only) */}

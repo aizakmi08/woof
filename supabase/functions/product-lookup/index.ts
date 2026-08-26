@@ -218,26 +218,57 @@ function normalizeProduct(raw: Record<string, any>): Record<string, unknown> {
   };
 }
 
+function nutrientObject(value: any): Record<string, any> {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value;
+  if (typeof value !== "string" || !value.trim().startsWith("{")) return {};
+  try { const parsed = JSON.parse(value); return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {}; } catch { return {}; }
+}
+function nutrientNumber(value: any): number | null {
+  if (value == null || typeof value === "boolean" || (typeof value === "string" && !value.trim())) return null;
+  const parsed = typeof value === "string" ? Number.parseFloat(value.replace(/[% ,]/g, "")) : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+function hasNumericNutrientFields(value: any): boolean {
+  const n = nutrientObject(value);
+  return [n.protein, n.crudeProtein, n.crude_protein, n.proteins_100g, n.fat, n.crudeFat, n.crude_fat, n.fat_100g,
+    n.fiber, n.crudeFiber, n.crude_fiber, n.fiber_100g, n.moisture, n.moisture_100g, n.calcium,
+    n.calciumPercent, n.calcium_percent, n.calcium_100g, n.phosphorus, n.phosphorusPercent,
+    n.phosphorus_percent, n.phosphorus_100g].some((item) => nutrientNumber(item) != null);
+}
+function hasTypicalAnalysisProvenance(root: Record<string, any>, candidate: Record<string, any>): boolean {
+  const source = nutrientObject(root.publishedAnalysisSource || root.published_analysis_source || candidate.publishedAnalysisSource || candidate.published_analysis_source);
+  const label = compact(candidate.publisherLabel || candidate.publisher_label || source.publisherLabel || source.publisher_label).toLowerCase();
+  const type = compact(source.analysisType || source.analysis_type).toLowerCase();
+  return /\b(?:typical|actual|average nutrient|laboratory)\b/.test(label) || (compact(source.status).toLowerCase() === "extracted"
+    && /\b(?:typical|actual|average nutrient|laboratory)\b/.test(`${label} ${type}`) && Boolean(compact(source.sourceUrl || source.source_url)));
+}
+
 function normalizeCatalogProduct(raw: Record<string, any>): Record<string, unknown> {
   const row = raw.product || raw;
   const ingredients = ingredientList(row.ingredients);
   const ingredientText = compact(row.ingredient_text) || ingredients.join(", ");
-  const nutrientRoot = row.nutritional_info || row.nutrient_panel || {};
-  const typical = nutrientRoot.typicalAnalysis
+  const nutritionalInfo = nutrientObject(row.nutritional_info);
+  const nutrientPanel = nutrientObject(row.nutrient_panel);
+  const nutrientRoot = Object.keys(nutritionalInfo).length ? nutritionalInfo : nutrientPanel;
+  const typical = nutrientObject(nutrientRoot.typicalAnalysis
     || nutrientRoot.typical_analysis
     || nutrientRoot.actualAnalysis
-    || nutrientRoot.actual_analysis;
-  const dryMatter = nutrientRoot.dryMatter || nutrientRoot.dry_matter;
-  const guaranteed = nutrientRoot.guaranteedAnalysis || nutrientRoot.guaranteed_analysis;
-  const nutriments = typical || dryMatter || guaranteed || nutrientRoot;
-  const inferredAnalysisType = typical || dryMatter
+    || nutrientRoot.actual_analysis);
+  const dryMatter = nutrientObject(nutrientRoot.dryMatter || nutrientRoot.dry_matter);
+  const guaranteed = nutrientObject(nutrientRoot.guaranteedAnalysis || nutrientRoot.guaranteed_analysis);
+  const typicalCandidate = Object.keys(typical).length ? typical : dryMatter;
+  const hasTypicalProvenance = hasTypicalAnalysisProvenance(nutrientRoot, typicalCandidate);
+  const nutriments = Object.keys(typicalCandidate).length ? typicalCandidate : Object.keys(guaranteed).length ? guaranteed : hasNumericNutrientFields(nutrientRoot) ? nutrientRoot : {};
+  const explicitType = compact(nutriments.analysisType || nutriments.analysis_type || nutrientRoot.analysisType || nutrientRoot.analysis_type);
+  const explicitTypeIsTypical = /\b(?:typical|actual|average nutrient|laboratory)\b/i.test(explicitType);
+  const inferredAnalysisType = hasTypicalProvenance
     ? "typical"
-    : guaranteed || row.has_published_nutrients
+    : Object.keys(guaranteed).length && hasNumericNutrientFields(guaranteed)
       ? "guaranteed"
       : null;
-  const inferredBasis = dryMatter
+  const inferredBasis = Object.keys(dryMatter).length && hasNumericNutrientFields(dryMatter)
     ? "dry_matter"
-    : guaranteed || row.has_published_nutrients
+    : Object.keys(guaranteed).length && hasNumericNutrientFields(guaranteed)
       ? "as_fed"
       : null;
   const formulaEvidenceTier = compact(
@@ -273,12 +304,7 @@ function normalizeCatalogProduct(raw: Record<string, any>): Record<string, unkno
       calcium: nutriments.calcium ?? nutriments.calciumPercent ?? nutriments.calcium_percent ?? nutriments.calcium_100g ?? null,
       phosphorus: nutriments.phosphorus ?? nutriments.phosphorusPercent ?? nutriments.phosphorus_percent ?? nutriments.phosphorus_100g ?? null,
       energy: nutriments.energy ?? nutriments["energy-kcal_100g"] ?? nutriments.energy_100g ?? null,
-      analysisType:
-        nutriments.analysisType
-        || nutriments.analysis_type
-        || nutrientRoot.analysisType
-        || nutrientRoot.analysis_type
-        || inferredAnalysisType,
+      analysisType: explicitTypeIsTypical && !hasTypicalProvenance ? null : explicitType || inferredAnalysisType,
       basis:
         nutriments.basis
         || nutriments.valueBasis

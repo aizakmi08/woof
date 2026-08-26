@@ -148,7 +148,7 @@ function getHistoryAccessibilityLabel(item) {
   if (item.overallScore == null && item.scanMode === "human_food") {
     return `${name}, ${safetyLabel(item.safetyLevel)} for ${item.petType || "your pet"}`;
   }
-  return `${name}, score ${item.overallScore} out of 100`;
+  return `${name}, saved score ${item.overallScore} out of 100. Open to refresh from the current catalog.`;
 }
 
 function historyDisplayName(item) {
@@ -423,7 +423,10 @@ function HistoryRow({ item, onPress, onCompare, compareSelected, theme, index })
               </Text>
             </View>
           ) : (
-            <MiniScoreRing score={item.overallScore} delay={index * 100} />
+            <View style={{ alignItems: "center", gap: 2 }}>
+              <Text style={{ color: theme.textTertiary, fontSize: 9, fontWeight: "700", letterSpacing: 0 }}>SAVED</Text>
+              <MiniScoreRing score={item.overallScore} delay={index * 100} />
+            </View>
           )}
           <ChevronRight size={14} color={theme.textTertiary} strokeWidth={2} />
         </View>
@@ -521,7 +524,7 @@ function CompareProductColumn({ item, theme, slot, isLeader, onPress }) {
         },
       ]}
       accessibilityRole="button"
-      accessibilityLabel={`${historyDisplayName(item)}, score ${score} out of 100`}
+      accessibilityLabel={`${historyDisplayName(item)}, saved score ${score} out of 100`}
       accessibilityHint="Opens this saved scan result"
     >
       <MiniScoreRing score={score} />
@@ -557,7 +560,7 @@ function CompareRecentModal({ visible, items, theme, onClose, onOpenItem }) {
   const leader = leaderSlot === "right" ? right : left;
   const summary = leaderSlot === "tie"
     ? "These two scans are tied."
-    : `${historyDisplayName(leader)} scores ${delta} points higher.`;
+    : `${historyDisplayName(leader)} has a saved score ${delta} points higher. Open either result to refresh it from the current catalog.`;
 
   return (
     <Modal

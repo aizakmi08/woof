@@ -44,6 +44,12 @@ jobs:
       - name: Check product resolver contract
         run: npm run check:resolver-contract
 
+      - name: Check nutrition scoring production path
+        run: npm run check:nutrition-scoring
+
+      - name: Check published analysis extraction
+        run: npm run check:published-analysis
+
       - name: Check catalog quality
         run: npm run check:catalog
 
