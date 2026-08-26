@@ -946,7 +946,7 @@ Do not submit the next production build until:
 - `npm run check:live-listing -- --guest-validated` passes after App Store Connect metadata is updated and publicly visible, proving the live US App Store description no longer contains unsupported source, recall, or overbroad safety claims.
 - `APP_STORE_LISTING.md` replacement metadata has been applied or intentionally superseded in App Store Connect.
 - `APP_PRIVACY_DISCLOSURE.md` has been applied or intentionally superseded in App Store Connect, including `Data Used to Track You: No`, No IDFA/no tracking SDKs, linked-data categories, third-party processors, and Sentry Crash Data status.
-- `npm run check:eas-versioning` passes, `npx eas-cli@latest build:version:get -p ios` output is saved, and the submitted App Store Connect/TestFlight build row shows marketing version `1.2.1` with a build number greater than `41`.
+- `npm run check:eas-versioning` passes, `npx eas-cli@latest build:version:get -p ios` output is saved, and the submitted App Store Connect/TestFlight build row shows marketing version `1.2.3` with a build number greater than `55`.
 - `npm run edge:verify-live` passes against the live Supabase functions host, proving OPTIONS responses expose the expected `X-Woof-Function-Name` and `X-Woof-Function-Audit-Version` values for the tracked build.
 - `npm run check:edge-types` passes with Deno, proving the tracked Edge Functions type-check in the Deno runtime before deployment.
 - `npm run check:audit` passes after `npm ci`, proving production dependency advisories have no high/critical findings and have not regressed above the tracked moderate baseline.

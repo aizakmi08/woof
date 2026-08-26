@@ -1,10 +1,10 @@
 {
   "configVersion": 0,
   "apple": {
-    "version": "1.2.2",
+    "version": "1.2.3",
     "copyright": "2026 Woof",
     "release": {
-      "automaticRelease": false
+      "automaticRelease": true
     },
     "info": {
       "en-US": {
@@ -26,7 +26,7 @@
           "dry",
           "scan"
         ],
-        "releaseNotes": "- Faster front-label matching with on-device text recognition\n- Shorter, recoverable timeouts when an analysis provider is unavailable\n- Source-backed ingredient statements for verified catalog products\n- Smarter recipe and package-variant matching\n- Improved product images, nutrition display, accessibility, and stability",
+        "releaseNotes": "- Nutrition scoring now uses published manufacturer analysis when available\n- Clearer calcium and mineral-balance alerts\n- Honest limited-data messaging when nutrient details are not published\n- Saved pet-food results refresh against the current verified catalog\n- Accessibility and stability improvements",
         "marketingUrl": "https://aizakmi08.github.io/woof/",
         "supportUrl": "https://aizakmi08.github.io/woof/support.html",
         "title": "Woof Pet Food Scanner",

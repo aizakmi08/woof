@@ -255,11 +255,11 @@ const storeMetadata = [
 if (storeConfig.configVersion !== 0) {
   fail("store.config.json: expected configVersion 0");
 }
-if (storeApple.version !== "1.2.2") {
-  fail(`store.config.json: expected update version 1.2.2, got ${storeApple.version || "missing"}`);
+if (storeApple.version !== "1.2.3") {
+  fail(`store.config.json: expected update version 1.2.3, got ${storeApple.version || "missing"}`);
 }
-if (storeApple.release?.automaticRelease !== false) {
-  fail("store.config.json: keep automatic release disabled until final approval");
+if (storeApple.release?.automaticRelease !== true) {
+  fail("store.config.json: automatic release must match the approved App Store release plan");
 }
 for (const [label, actual, expected] of [
   ["title", storeInfo.title, appName],
@@ -272,8 +272,8 @@ for (const [label, actual, expected] of [
     fail(`store.config.json: ${label} must match APP_STORE_LISTING.md`);
   }
 }
-if (!storeInfo.releaseNotes?.toLowerCase().includes("source-backed ingredient statements")) {
-  fail("store.config.json: release notes must describe the verified-catalog change");
+if (!storeInfo.releaseNotes?.toLowerCase().includes("published manufacturer analysis")) {
+  fail("store.config.json: release notes must describe the published-analysis scoring change");
 }
 if (storeApple.review) {
   fail("store.config.json: keep App Review contact details and notes in APP_STORE_RELEASE_1.2.1.md, not the repository config");

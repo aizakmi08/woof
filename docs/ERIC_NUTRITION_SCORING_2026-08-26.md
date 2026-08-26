@@ -4,27 +4,30 @@
 
 The shipped-path plumbing defect is fixed on `codex/nutrition-scoring-release`: a raw `product_data` row now keeps its published nutrient flag, values, type, basis, and source provenance through row normalization, verified-product conversion, deterministic scoring, search caching, barcode lookup, and result rendering.
 
-The release is **not approved for production migration or TestFlight yet**. Manufacturer-page re-verification cannot be completed in this restricted-network session, and the Deno binary required for Edge typechecking is unavailable. No production data was mutated.
+Manufacturer source verification and the scoped production backend deployment are complete. The exact Nature's Logic repair is applied, and the updated `analyze` and `product-lookup` Edge Functions are live and fingerprint-verified. The App Store candidate is now version `1.2.3` because Apple already distributes `1.2.2` build `55`.
+
+The release is **not approved for App Review yet**. Strict release evidence still has pending TestFlight/device, privacy, RevenueCat, Sentry, KPI, and listing checks. The production catalog also misses the existing 750-brand and zero-open-acquisition-queue completeness targets.
 
 ## Eric products
 
 | Product | Before | After | Published values used | Rule | Manufacturer source | Verification status |
 |---|---:|---:|---|---|---|---|
-| Nature's Logic Canine Pork Meal Feast | 75 in the reproduced broken mapper path | 35 maximum; Nutritional Balance 25 maximum | Calcium 5.34% DM; phosphorus 2.84% DM; Actual Analysis; all life stages | Calcium exceeds the 1.8% AAFCO profile maximum | https://natureslogic.com/dog-products/canine-dry-kibble-pork/ | Values are exact in the source-backed migration and regression; live page re-fetch is still required before migration approval |
-| Nature's Logic Distinction Canine Pork Recipe | Prior production score not captured; nutrient category was hard-wired to the no-data path | 35 maximum; Nutritional Balance 25 maximum | Calcium 3.52% DM; phosphorus 1.96% DM; Actual Analysis; all life stages | Calcium exceeds the 1.8% AAFCO profile maximum | https://natureslogic.com/dog-products/distinction-canine-pork-recipe/ | Values are exact in the source-backed migration and regression; live page re-fetch is still required before migration approval |
+| Nature's Logic Canine Pork Meal Feast | 75 in the reproduced broken mapper path | 35 maximum; Nutritional Balance 25 maximum | Calcium 5.34% DM; phosphorus 2.84% DM; Actual Analysis; all life stages | Calcium exceeds the 1.8% AAFCO profile maximum | https://natureslogic.com/dog-products/canine-dry-kibble-pork/ | Verified on the live manufacturer page and in production |
+| Nature's Logic Distinction Canine Pork Recipe | Prior production score not captured; nutrient category was hard-wired to the no-data path | 35 maximum; Nutritional Balance 25 maximum | Calcium 3.52% DM; phosphorus 1.96% DM; Actual Analysis; all life stages | Calcium exceeds the 1.8% AAFCO profile maximum | https://natureslogic.com/dog-products/distinction-canine-pork-recipe/ | Verified on the live manufacturer page and in production; food form corrected from wet to dry |
 
 The end-to-end regression also proves that a comparable Typical Analysis scores 19 Nutritional Balance points above the same values presented only as Guaranteed Analysis. A Guaranteed Analysis is never promoted to Typical/Actual, and ingredient text is never used to infer nutrient levels.
 
 ## Newly capped-product review
 
-The Hill's and Fromm migration payloads contain no dog calcium value above the applicable threshold based on their encoded product/life-stage identities. The two Nature's Logic products above are the only known newly capped formulas in this change set. Because source pages could not be independently re-fetched in this session, both remain `pending_live_source_confirmation`; production application is blocked.
+The Hill's and Fromm migration payloads contain no dog calcium value above the applicable threshold based on their encoded product/life-stage identities. The two Nature's Logic products above are the only known newly capped formulas in this change set. Representative Hill's HTML and Fromm PDF extraction formats were independently confirmed against their official manufacturer sources.
 
 ## Coverage
 
 - Before enrichment: 2 numeric published-analysis rows, both versions of the same Nature's Logic formula (~0.008% of the catalog, per the release audit).
-- Prepared enrichment: approximately 304 exact cache-key rows: Hill's 192, Fromm 109, Nature's Logic 3.
+- Production after enrichment: 304 exact rows with numeric Typical/Actual Analysis, 0 rows with numeric Guaranteed Analysis in the normalized GA object, and 25,901 rows without normalized numeric analysis, across 26,205 total rows.
+- Production catalog readiness: 16,300 ready rows, 99.96% verified ingredient/image coverage, 396 ready brands, 9,376 dog rows, and 6,919 cat rows.
 - The Fromm payload preserves image/PDF-only profiles as `requires_verified_extraction` rather than promoting them.
-- Exact live counts for Guaranteed-Analysis-only and no-numeric-data rows require a read-only production query and are intentionally not guessed here.
+- The existing acquisition backlog is 10,386 open/in-progress rows affecting 14,068 products; this fails the repository's zero-backlog completeness target and is not modified by this scoring release.
 - Open Farm and Weruva image-only profiles and Royal Canin kcal-basis profiles remain pending. OCR should require two-person/value-range verification; kcal-basis normalization should retain the published kcal denominator and convert only when a source-backed energy density permits it.
 
 ## Dropped-field audit
@@ -51,7 +54,7 @@ The Hill's and Fromm migration payloads contain no dog calcium value above the a
 - Local result cache: bumped from unversioned keys to `@woof_result_v2_*`; legacy keys are purged on access.
 - Catalog search cache: bumped from v7 to v8.
 - Server cache: all pet-food scores without `2026-08-26-eric-v2` are ignored by the client.
-- The exact Nature's Logic repair migration deletes `analysis_cache` rows for the two manufacturer URLs when, and only when, that migration is approved and applied.
+- The exact Nature's Logic repair migration deleted `analysis_cache` rows for the two manufacturer URLs; the post-deployment count is zero.
 
 ## Verification completed
 
@@ -59,26 +62,24 @@ The Hill's and Fromm migration payloads contain no dog calcium value above the a
 - `check:resolver-contract`, `check:nutrition-scoring` (9 real-path cases), `check:published-analysis`
 - `check:catalog-miss`, `check:revenuecat`, `check:edge`, `check:catalog`, `check:catalog-scraper`
 - `check:sql` (817 migrations), `check:deployment`, `check:accessibility`, `check:analytics`, `npm run verify`
+- Clean `npm ci`; Deno typecheck for all 5 Edge Functions; live Edge audit-version verification
+- Manufacturer verification for both Nature's Logic pages plus representative Hill's HTML and Fromm PDF sources
+- Production correction migration, cache invalidation, production coverage query, and live Edge deployment
+- Dependency gate: 0 high/critical production advisories; 12 moderate Expo-toolchain advisories remain tracked
 
-Blocked/not run: `check:edge-types` (no Deno binary); live manufacturer re-fetch; production coverage query; clean `npm ci`/iOS export; simulator screenshots; physical-device scans; TestFlight build and submission.
+Blocked/not run: TestFlight build/device scans; accessibility smoke; App Store privacy/listing live evidence; RevenueCat purchase/restore evidence; Sentry/KPI evidence; App Review submission. The full preflight passes through dependency auditing but the catalog completeness gate fails on the existing brand/backlog targets.
 
 ## Eric decision: GA plus moisture transparency credit
 
 Current approved rubric gives the 5-point dry-matter comparability bonus only to Typical/Actual Analysis. A GA plus source-backed moisture can be converted for safety screening but receives no bonus. Recommendation for Eric's review: consider a smaller 2-point comparability credit for GA plus moisture, while keeping the 12-point Typical-vs-GA base gap and 2-point mineral-disclosure gap. This would reward useful disclosure without treating minimums/maximums as actual values. This proposal is **not implemented**.
 
-## Production gate and exact next commands
+## Remaining release gate
 
-After both Nature's Logic values and a sample from each Hill's/Fromm extraction format are confirmed against the linked manufacturer pages, review the pending SQL and run:
-
-```sh
-npx supabase db push
-```
-
-Then deploy the updated `product-lookup` and `analyze` functions using the repository deployment scripts, rerun the full suite including Deno typecheck, capture the required simulator/device evidence, and only then run:
+The reviewed production migration and both changed Edge Functions have been deployed and verified. After the pending strict evidence and catalog-completeness decisions are resolved, create and validate the TestFlight candidate, then run:
 
 ```sh
 npx eas-cli@latest build --platform ios --profile production
 npx eas-cli@latest submit --platform ios --profile production
 ```
 
-No command in this section was executed in this session.
+Neither EAS command in this section has been executed yet.
