@@ -3,7 +3,9 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { safeFetchText } from "./catalog-safe-fetch.mjs";
+import { extractPublishedAnalysisFromHtml, extractPublishedAnalysisFromText, mergePublishedAnalysis, publishedAnalysisPdfSource } from "./catalog-published-analysis.mjs";
 
 const TEMPLATE_HEADERS = [
   "cache_key",
@@ -108,6 +110,7 @@ const SOFT_NON_COMPLETE_FOOD_IDENTITY_PATTERNS = [
 const COMPLETE_FOOD_NUTRIENT_MARKER_REGEX = /\b(?:taurine|vitamin|zinc|ferrous|iron\s+sulfate|manganese|copper|potassium\s+iodide|calcium\s+iodate|choline\s+chloride|biotin|folic\s+acid|riboflavin|niacin|thiamine|pyridoxine|menadione)\b/i;
 const PAGE_DATA_CACHE = new Map();
 const PDF_TEXT_CACHE = new Map();
+const PUBLISHED_ANALYSIS_CACHE = new Map();
 
 function rawCacheDir(segment = "") {
   const dir = compact(getArg("--raw-cache-dir"));
@@ -2172,6 +2175,19 @@ async function officialPagePdfIngredients(html, baseUrl) {
   return result;
 }
 
+async function publishedAnalysisEvidence(html, baseUrl, allowRemoteEnrichment) {
+  const htmlAnalysis = extractPublishedAnalysisFromHtml(html, baseUrl);
+  if (htmlAnalysis) return { analysis: htmlAnalysis, source: null };
+  const source = publishedAnalysisPdfSource(html, baseUrl);
+  if (!source || !allowRemoteEnrichment) return { analysis: null, source };
+  if (PUBLISHED_ANALYSIS_CACHE.has(source.source_url)) return PUBLISHED_ANALYSIS_CACHE.get(source.source_url);
+  const bytes = await fetchPdfBytesQuietly(source.source_url);
+  const analysis = extractPublishedAnalysisFromText(extractPdfTextWithPython(bytes), source.source_url);
+  const result = { analysis, source };
+  PUBLISHED_ANALYSIS_CACHE.set(source.source_url, result);
+  return result;
+}
+
 function shopifyProductJsonUrlFor(sourceUrl, html = "") {
   try {
     const url = new URL(sourceUrl);
@@ -2850,7 +2866,7 @@ function applySourceOverrides(row, sourceOverrides = {}) {
   return output;
 }
 
-async function extractProduct(html, sourceUrl, {
+export async function extractProduct(html, sourceUrl, {
   pageData = null,
   sourceOverrides = {},
   allowRemoteEnrichment = false,
@@ -2888,6 +2904,7 @@ async function extractProduct(html, sourceUrl, {
   const officialPagePdf = allowRemoteEnrichment
     ? await officialPagePdfIngredients(html, productUrl || sourceUrl)
     : { ingredientText: "", sourceUrl: "" };
+  const publishedAnalysis = await publishedAnalysisEvidence(html, productUrl || sourceUrl, allowRemoteEnrichment);
   const rawProductName = firstText(
     petcoEvidence.productName,
     shopifyProduct?.title,
@@ -3064,7 +3081,7 @@ async function extractProduct(html, sourceUrl, {
     image_source_url: productUrl,
     is_complete_food: isCompleteFood,
     guaranteed_analysis: guaranteedAnalysis,
-    nutritional_info: extractFreshpetNutritionalInfo(freshpetData),
+    nutritional_info: mergePublishedAnalysis(extractFreshpetNutritionalInfo(freshpetData), publishedAnalysis.analysis, publishedAnalysis.source),
   }, sourceOverrides);
 }
 
@@ -3159,7 +3176,7 @@ function parseSnapshotSource(source, raw, fallbackSourceUrl) {
   };
 }
 
-async function readSource(source) {
+export async function readSource(source) {
   if (/^https?:\/\//i.test(source)) {
     const response = await safeFetchText(source, {
       userAgent: "WoofCatalogVerifier/1.0 (source-evidence extraction)",
@@ -3245,7 +3262,5 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error.message || error);
-  process.exit(1);
-});
+const isDirectInvocation = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isDirectInvocation) main().catch((error) => { console.error(error.message || error); process.exit(1); });

@@ -111,6 +111,7 @@ return {
 function loadVerifiedScoringModule() {
   const source = fs.readFileSync(verifiedScoringPath, "utf8")
     .replace(/^import[^\n]+\n/gm, "")
+    .replace(/\bexport const\b/g, "const")
     .replace(/\bexport function\b/g, "function");
 
   return new Function(`
