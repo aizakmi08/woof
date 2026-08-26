@@ -4,9 +4,9 @@
 
 The shipped-path plumbing defect is fixed on `codex/nutrition-scoring-release`: a raw `product_data` row now keeps its published nutrient flag, values, type, basis, and source provenance through row normalization, verified-product conversion, deterministic scoring, search caching, barcode lookup, and result rendering.
 
-Manufacturer source verification and the scoped production backend deployment are complete. The exact Nature's Logic repair is applied, and the updated `analyze` and `product-lookup` Edge Functions are live and fingerprint-verified. The App Store candidate is now version `1.2.3` because Apple already distributes `1.2.2` build `55`.
+Manufacturer source verification and the scoped production backend deployment are complete. The exact Nature's Logic repair is applied, and the updated `analyze` and `product-lookup` Edge Functions are live and fingerprint-verified. Apple already distributes `1.2.2` build `55`, so the signed App Store candidate is version `1.2.3` build `56` from commit `11865439`. EAS build `45185b70-01b7-4bb3-9c0f-3b0279052dd9` finished successfully, Apple processed the upload, and build `56` is `Ready to Submit` in the existing internal TestFlight group.
 
-The release is **not approved for App Review yet**. Strict release evidence still has pending TestFlight/device, privacy, RevenueCat, Sentry, KPI, and listing checks. The production catalog also misses the existing 750-brand and zero-open-acquisition-queue completeness targets.
+The App Store Connect version `1.2.3` is prepared with build `56`, nutrition-specific release notes, verified review contact details, and automatic release to all users after approval. It has not been added to an App Review submission. The release is **not approved for App Review yet**: strict evidence still has pending TestFlight/device, privacy, RevenueCat, Sentry, KPI, and listing checks, and the production catalog misses the existing 750-brand and zero-open-acquisition-queue completeness targets.
 
 ## Eric products
 
@@ -66,8 +66,10 @@ The Hill's and Fromm migration payloads contain no dog calcium value above the a
 - Manufacturer verification for both Nature's Logic pages plus representative Hill's HTML and Fromm PDF sources
 - Production correction migration, cache invalidation, production coverage query, and live Edge deployment
 - Dependency gate: 0 high/critical production advisories; 12 moderate Expo-toolchain advisories remain tracked
+- Signed EAS production build for iOS `1.2.3` build `56`; successful App Store Connect upload and Apple processing; internal TestFlight status `Ready to Submit`
+- App Store Connect `1.2.3` preparation with build `56`, release notes, review contact, immediate all-user release, and automatic release after approval
 
-Blocked/not run: TestFlight build/device scans; accessibility smoke; App Store privacy/listing live evidence; RevenueCat purchase/restore evidence; Sentry/KPI evidence; App Review submission. The full preflight passes through dependency auditing but the catalog completeness gate fails on the existing brand/backlog targets.
+Blocked/not run: TestFlight device scans; accessibility smoke; App Store privacy/listing live evidence; RevenueCat purchase/restore evidence; Sentry/KPI evidence; App Review submission. The full preflight passes through dependency auditing but the catalog completeness gate fails on the existing brand/backlog targets.
 
 ## Eric decision: GA plus moisture transparency credit
 
@@ -75,11 +77,4 @@ Current approved rubric gives the 5-point dry-matter comparability bonus only to
 
 ## Remaining release gate
 
-The reviewed production migration and both changed Edge Functions have been deployed and verified. After the pending strict evidence and catalog-completeness decisions are resolved, create and validate the TestFlight candidate, then run:
-
-```sh
-npx eas-cli@latest build --platform ios --profile production
-npx eas-cli@latest submit --platform ios --profile production
-```
-
-Neither EAS command in this section has been executed yet.
+The reviewed production migration and both changed Edge Functions are deployed and verified. The signed `1.2.3` build `56` TestFlight candidate is ready and the App Store version is prepared for automatic release after approval. Before adding it to App Review, complete a real-device scan/accessibility/purchase-and-restore smoke test, close or explicitly waive the strict privacy/listing/Sentry/KPI evidence, and resolve or explicitly waive the existing catalog-completeness thresholds. App Store Connect's `Add for Review` action remains intentionally untouched.
