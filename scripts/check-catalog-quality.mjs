@@ -249,7 +249,7 @@ const searchCachePath = "services/catalogSearchCache.js";
 const searchCache = read(searchCachePath);
 requireSnippet(searchCachePath, searchCache, "CACHE_TTL_MS", "catalog search cache TTL");
 requireSnippet(searchCachePath, searchCache, "MAX_CACHE_ENTRIES", "catalog search cache cap");
-requireSnippet(searchCachePath, searchCache, "@woof_catalog_search_cache_v7", "catalog search cache contract version");
+requireSnippet(searchCachePath, searchCache, "@woof_catalog_search_cache_v8", "catalog search cache contract version");
 requireSnippet(searchCachePath, searchCache, "ingredientVerificationStatus", "catalog cache preserves ingredient verification");
 requireSnippet(searchCachePath, searchCache, "imageVerificationStatus", "catalog cache preserves image verification");
 requireSnippet(searchCachePath, searchCache, "productLine", "catalog cache preserves product-line identity");
