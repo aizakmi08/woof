@@ -46,7 +46,11 @@ import { requestCatalogEvidenceConsent } from "../services/catalogEvidenceConsen
 import { useAuth } from "../services/auth";
 import { normalizePetProfile } from "../services/petProfile";
 import { logCaptureToResult, navigationTimingParams } from "../services/performanceTimings";
-import { DEV_QA_PET_RESULT, DEV_QA_SEARCH_PRODUCTS } from "../services/devQaFixtures";
+import {
+  DEV_QA_DRY_BAG_BOUNDARY_PRODUCTS,
+  DEV_QA_PET_RESULT,
+  DEV_QA_SEARCH_PRODUCTS,
+} from "../services/devQaFixtures";
 import { buildVerifiedPetFoodAnalysis } from "../services/verifiedScoring";
 
 const logger = createLogger("PRODUCT_SEARCH");
@@ -801,6 +805,7 @@ export default function ProductSearchScreen({ navigation, route }) {
   const [showingCached, setShowingCached] = useState(false);
   const [searchCorrection, setSearchCorrection] = useState("");
   const [resolutionDecision, setResolutionDecision] = useState(null);
+  const [resolutionEvidence, setResolutionEvidence] = useState(null);
   const [confirmedFormulaKey, setConfirmedFormulaKey] = useState("");
   const [searchFailureKind, setSearchFailureKind] = useState(null);
   const [noneOfTheseSelected, setNoneOfTheseSelected] = useState(false);
@@ -885,6 +890,24 @@ export default function ProductSearchScreen({ navigation, route }) {
       setIdentification({ found: true, labelRead: true, searchQuery: "QA Small Breed Chicken Recipe" });
       setResolutionDecision(LABEL_RESOLUTION_DECISIONS.RECOGNIZERS_DISAGREE);
       setProducts(DEV_QA_SEARCH_PRODUCTS);
+      return;
+    }
+
+    if (devFixture === "dry_bag_boundary") {
+      const dryBagProduct = DEV_QA_DRY_BAG_BOUNDARY_PRODUCTS[0];
+      setQuery("Purina ONE Chicken & Rice Formula 8 lb");
+      setIdentification({
+        found: true,
+        labelRead: true,
+        brand: "Purina ONE",
+        productName: "SmartBlend Natural Chicken & Rice Formula",
+        packageSize: "8 lb",
+        foodForm: "dry",
+        searchQuery: "Purina ONE Chicken & Rice Formula 8 lb",
+      });
+      setResolutionDecision(LABEL_RESOLUTION_DECISIONS.EXACT_CONFIRMED);
+      setConfirmedFormulaKey(productFormulaKey(dryBagProduct));
+      setProducts([dryBagProduct]);
       return;
     }
 
@@ -990,6 +1013,9 @@ export default function ProductSearchScreen({ navigation, route }) {
     autoOpen = false,
     labelConfidence = null,
     matchQuery = query,
+    labelIdentification = identification,
+    labelResolutionDecision = resolutionDecision,
+    labelResolutionEvidence = resolutionEvidence,
   } = {}) => {
     if (!autoOpen) {
       Haptics.selectionAsync();
@@ -1020,6 +1046,12 @@ export default function ProductSearchScreen({ navigation, route }) {
       resolvedProduct = hydrated;
     }
 
+    const recognizedEvidence = labelResolutionEvidence?.recognizedIdentity?.cloudImage?.productName
+      ? labelResolutionEvidence.recognizedIdentity.cloudImage
+      : labelResolutionEvidence?.recognizedIdentity?.onDeviceOcr;
+    const labelSelection = Boolean(
+      autoOpen || labelResolutionDecision || labelIdentification?.labelRead
+    );
     trackEvent(autoOpen ? "catalog_label_auto_opened" : "catalog_product_opened", {
       source_surface: sourceSurface,
       source: resolvedProduct.source,
@@ -1031,6 +1063,32 @@ export default function ProductSearchScreen({ navigation, route }) {
       ready_to_score: productIsReady(resolvedProduct),
       ingredient_count: resolvedProduct.ingredientCount,
       label_confidence: labelConfidence,
+      resolution_decision: labelResolutionDecision,
+      auto_opened: autoOpen,
+      manual_selected: labelSelection && !autoOpen,
+      selection_mode: autoOpen
+        ? "auto_open"
+        : labelSelection
+          ? "manual_label_candidate"
+          : "manual_search_result",
+      recognized_label_identity: recognizedEvidence?.productName || labelSummaryTitle(labelIdentification),
+      label_brand: recognizedEvidence?.brand || labelIdentification?.brand || null,
+      label_product_line: recognizedEvidence?.productLine || labelIdentification?.productLine || null,
+      label_flavor: recognizedEvidence?.flavor || labelIdentification?.flavor || null,
+      label_life_stage: recognizedEvidence?.lifeStage || labelIdentification?.lifeStage || null,
+      label_food_form: recognizedEvidence?.foodForm || labelIdentification?.foodForm || null,
+      label_food_form_evidence: recognizedEvidence?.foodFormEvidence || null,
+      label_package_size: recognizedEvidence?.packageSize || labelIdentification?.packageSize || null,
+      label_pet_type: recognizedEvidence?.petType || labelIdentification?.petType || null,
+      chosen_cache_key: resolvedProduct.cacheKey,
+      chosen_brand: resolvedProduct.brand,
+      chosen_product_name: resolvedProduct.productName,
+      chosen_product_line: resolvedProduct.productLine,
+      chosen_flavor: resolvedProduct.flavor,
+      chosen_life_stage: resolvedProduct.lifeStage,
+      chosen_food_form: resolvedProduct.foodForm,
+      chosen_package_size: resolvedProduct.packageSize,
+      chosen_pet_type: resolvedProduct.petType,
     });
 
     if (!productIsReady(resolvedProduct)) {
@@ -1086,7 +1144,19 @@ export default function ProductSearchScreen({ navigation, route }) {
       captureTimingMode: labelCaptureStartedAt ? "label_lookup" : null,
       ...(devFixtureResult ? { devFixtureResult } : {}),
     });
-  }, [canScan, devLiveResolver, labelCaptureStartedAt, labelImageUri, navigation, products, query, remainingScans]);
+  }, [
+    canScan,
+    devLiveResolver,
+    identification,
+    labelCaptureStartedAt,
+    labelImageUri,
+    navigation,
+    products,
+    query,
+    remainingScans,
+    resolutionDecision,
+    resolutionEvidence,
+  ]);
   const openProductResultRef = useRef(openProductResult);
 
   useEffect(() => {
@@ -1099,6 +1169,7 @@ export default function ProductSearchScreen({ navigation, route }) {
     setLabelLoading(false);
     setIdentification(null);
     setResolutionDecision(null);
+    setResolutionEvidence(null);
     setConfirmedFormulaKey("");
     setNoneOfTheseSelected(false);
     setRecognizedIdentityText("");
@@ -1432,6 +1503,7 @@ export default function ProductSearchScreen({ navigation, route }) {
         setRecognizedIdentityText(labelSummaryTitle(resultIdentification));
         setProducts(result.products);
         setResolutionDecision(result.decision);
+        setResolutionEvidence(result.resolutionEvidence);
         setConfirmedFormulaKey(
           result.confirmedProduct ? productFormulaKey(result.confirmedProduct) : ""
         );
@@ -1482,6 +1554,17 @@ export default function ProductSearchScreen({ navigation, route }) {
           disagreement_fields: result.resolutionEvidence.disagreementFields,
           reason_codes: result.resolutionEvidence.reasonCodes,
           visual_confirmation: result.resolutionEvidence.visualConfirmation,
+          recognized_on_device: result.resolutionEvidence.recognizedIdentity.onDeviceOcr,
+          recognized_cloud: result.resolutionEvidence.recognizedIdentity.cloudImage,
+          top_candidate_cache_key: result.products[0]?.cacheKey || null,
+          top_candidate_brand: result.products[0]?.brand || null,
+          top_candidate_product_name: result.products[0]?.productName || null,
+          top_candidate_food_form: result.products[0]?.foodForm || null,
+          top_candidate_package_size: result.products[0]?.packageSize || null,
+          confirmed_candidate: result.resolutionEvidence.confirmedCandidate,
+          auto_open_fired: result.resolutionEvidence.autoOpenFired,
+          manual_selected: false,
+          result_mode: result.resolutionEvidence.resultMode,
           runtime_config_source: runtimeConfig.source,
           automatic_recovery_attempted: automaticRecoveryAttempted,
           automatic_recovery_succeeded: automaticRecoverySucceeded,
@@ -1506,6 +1589,9 @@ export default function ProductSearchScreen({ navigation, route }) {
             autoOpen: true,
             labelConfidence: resultIdentification.confidence ?? null,
             matchQuery: resultIdentification.searchQuery || resultIdentification.productName || "",
+            labelIdentification: resultIdentification,
+            labelResolutionDecision: result.decision,
+            labelResolutionEvidence: result.resolutionEvidence,
           });
         }
       } catch (err) {
@@ -1788,7 +1874,11 @@ export default function ProductSearchScreen({ navigation, route }) {
   };
 
   const handleProductPress = (product) => {
-    openProductResult(product, { matchQuery: query });
+    const labelCandidate = Boolean(resolutionDecision || identification?.labelRead);
+    openProductResult(product, {
+      sourceSurface: labelCandidate ? "label_candidate_list" : "product_search",
+      matchQuery: query,
+    });
   };
 
   const labelFlowActive = Boolean(

@@ -125,7 +125,10 @@ function loadVerifiedScoringModule() {
 }
 
 async function loadLabelOcrMatchingModule() {
-  const source = fs.readFileSync(labelOcrMatchingPath, "utf8");
+  const labelResolutionSource = fs.readFileSync(labelResolutionPath, "utf8");
+  const labelResolutionUrl = `data:text/javascript;base64,${Buffer.from(labelResolutionSource).toString("base64")}`;
+  const source = fs.readFileSync(labelOcrMatchingPath, "utf8")
+    .replace('"./labelResolution"', `"${labelResolutionUrl}"`);
   return import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
 }
 
@@ -1450,6 +1453,254 @@ function checkStrictLabelCandidateMatching(api) {
   );
 }
 
+function checkFoodFormBoundaryRegression(catalogApi, labelResolutionApi, ocrApi) {
+  const candidate = (overrides = {}) => ({
+    sourceKind: "catalog",
+    cacheKey: "fixture:food-form",
+    brand: "Example Nutrition",
+    productName: "Example Nutrition Chicken and Rice Adult Dog Food",
+    flavor: "Chicken and Rice",
+    lifeStage: "adult",
+    foodForm: "dry",
+    packageSize: "8 lb",
+    petType: "dog",
+    rank: 10,
+    ...overrides,
+  });
+  const matches = (identification, products) => (
+    catalogApi.filterLabelCandidatesForIdentification(
+      { found: true, confidence: 0.96, petType: "dog", ...identification },
+      products
+    )
+  );
+
+  const purinaDry = candidate({
+    cacheKey: "census:6d34f8eedef1ed8299581434f850338d",
+    gtin: "017800475686",
+    brand: "Purina ONE",
+    productName: "Purina ONE SmartBlend Natural Dry Dog Food with Chicken & Rice",
+    flavor: "Chicken & Rice",
+    foodForm: "dry",
+    packageSize: "8 lb",
+  });
+  const purinaWet = candidate({
+    cacheKey: "nestle-purina-one:017800125963",
+    gtin: "017800125963",
+    brand: "Purina ONE",
+    productName: "Purina ONE Chicken & Brown Rice Entrée Classic Ground Wet Dog Food",
+    flavor: "Chicken & Brown Rice",
+    foodForm: "wet",
+    packageSize: "13 oz",
+  });
+  const purinaDryLabel = {
+    brand: "Purina ONE",
+    productName: "Chicken & Rice Formula Complete Adult Dog Food Meaty Morsels",
+    flavor: "Chicken & Rice",
+    lifeStage: "adult",
+    packageSize: "NET WT 8 LB (3.63 kg)",
+  };
+  const purinaMatches = matches(purinaDryLabel, [purinaWet, purinaDry]);
+  assert(
+    purinaMatches.length === 1 && purinaMatches[0]?.gtin === "017800475686",
+    `Purina ONE Chicken & Rice 8 lb OCR must exclude every wet candidate and keep the verified dry formula; matches=${JSON.stringify(purinaMatches.map((product) => [product.gtin, product.productName]))}`
+  );
+
+  const reverseMatches = matches(
+    {
+      brand: "Purina ONE",
+      productName: "Chicken & Brown Rice Entrée Classic Ground Adult Dog Food",
+      flavor: "Chicken & Brown Rice",
+      lifeStage: "adult",
+      packageSize: "13 oz",
+    },
+    [purinaDry, purinaWet]
+  );
+  assert(
+    reverseMatches.length === 1 && reverseMatches[0]?.gtin === "017800125963",
+    "a 13 oz wet label must exclude the multi-pound dry bag"
+  );
+
+  const noFormWet = candidate({
+    cacheKey: "fixture:wet-only",
+    productName: "Example Nutrition Chicken and Rice Adult Dog Food",
+    foodForm: "wet",
+    packageSize: "",
+  });
+  assert(
+    matches({
+      brand: "Example Nutrition",
+      productName: "Chicken and Rice Adult Dog Food",
+      flavor: "Chicken and Rice",
+      lifeStage: "adult",
+    }, [noFormWet]).length === 0,
+    "a label with no form or package evidence and only a wet candidate must abstain"
+  );
+
+  const inventedDry = candidate({
+    cacheKey: "invented:dry",
+    brand: "North Star Pet",
+    productName: "North Star Pet Harvest Chicken and Rice Adult Dog Food",
+    productLine: "Harvest",
+    packageSize: "12 lb",
+  });
+  const inventedWet = candidate({
+    cacheKey: "invented:wet",
+    brand: "North Star Pet",
+    productName: "North Star Pet Harvest Chicken and Rice Adult Dog Food",
+    productLine: "Harvest",
+    foodForm: "wet",
+    packageSize: "12.5 oz",
+  });
+  const inventedMatches = matches({
+    brand: "North Star Pet",
+    productName: "Harvest Chicken and Rice Adult Dog Food",
+    productLine: "Harvest",
+    lifeStage: "adult",
+    packageSize: "12 lb",
+  }, [inventedWet, inventedDry]);
+  assert(
+    inventedMatches.length === 1 && inventedMatches[0]?.cacheKey === "invented:dry",
+    "the package-form boundary must work for an invented brand without product-specific tuning"
+  );
+
+  const morselsMatches = matches({
+    brand: "North Star Pet",
+    productName: "Harvest Meaty Morsels Chicken and Rice Adult Dog Food",
+    productLine: "Harvest",
+    lifeStage: "adult",
+    packageSize: "8 lb",
+  }, [inventedWet, { ...inventedDry, packageSize: "8 lb" }]);
+  assert(
+    morselsMatches.length === 1 && morselsMatches[0]?.cacheKey === "invented:dry",
+    "Meaty Morsels on an 8 lb bag must remain dry-compatible"
+  );
+
+  const dryOcrMatches = ocrApi.filterProductsForOcr(
+    [purinaWet, purinaDry],
+    "PURINA ONE CHICKEN & RICE FORMULA MEATY MORSELS COMPLETE ADULT DOG FOOD NET WT 8 LB (3.63 kg)",
+    { requireVisibleCandidateVariants: true }
+  );
+  assert(
+    dryOcrMatches.length === 1 && dryOcrMatches[0]?.gtin === "017800475686",
+    "the on-device OCR compatibility gate must exclude the Purina wet can before ranking"
+  );
+
+  const poundToOunceConflict = labelResolutionApi.compareLabelIdentities(
+    purinaDryLabel,
+    purinaWet,
+    { requireVisibleCandidateVariants: true }
+  );
+  assert(
+    !poundToOunceConflict.compatible
+      && poundToOunceConflict.reasonCodes.includes("food_form_conflict")
+      && poundToOunceConflict.reasonCodes.includes("package_size_form_conflict")
+      && poundToOunceConflict.reasonCodes.includes("candidate_formula_variant_not_visible"),
+    "8 lb Chicken & Rice evidence must reject a 13 oz Brown Rice wet candidate for form, package scale, and hidden variant"
+  );
+  const ounceToPoundConflict = labelResolutionApi.compareLabelIdentities(
+    { brand: "North Star Pet", productName: "Chicken and Rice Adult Dog Food", packageSize: "13 oz", petType: "dog" },
+    inventedDry,
+    { requireVisibleCandidateVariants: true }
+  );
+  assert(
+    !ounceToPoundConflict.compatible
+      && ounceToPoundConflict.reasonCodes.includes("package_size_form_conflict"),
+    "13 oz label evidence must decisively conflict with a multi-pound dry candidate"
+  );
+
+  const wetVocabulary = [
+    "entree",
+    "classic ground",
+    "chunks in gravy",
+    "chunks in sauce",
+    "can",
+    "tray",
+    "tub",
+    "cup",
+    "cups",
+  ];
+  for (const term of wetVocabulary) {
+    const comparison = labelResolutionApi.compareLabelIdentities(
+      { brand: "North Star Pet", productLine: "Harvest", productName: `Harvest Chicken ${term} Adult Dog Food`, packageSize: "13 oz", petType: "dog" },
+      { ...inventedWet, productName: `North Star Pet Chicken ${term} Adult Dog Food` },
+      { requireVisibleCandidateVariants: true }
+    );
+    assert(comparison.compatible, `${term} must be recognized as wet-compatible`);
+  }
+  const realDryOpposite = labelResolutionApi.compareLabelIdentities(
+    {
+      brand: "IAMS",
+      productName: "IAMS MiniChunks Meaty Morsels Chicken Chunks with Ground Whole Grain Corn Dry Dog Food 4 cups daily",
+      packageSize: "8 lb",
+      petType: "dog",
+    },
+    {
+      brand: "IAMS",
+      productName: "IAMS MiniChunks Chicken and Whole Grains Dry Dog Food",
+      foodForm: "dry",
+      packageSize: "8 lb",
+      petType: "dog",
+    },
+    { requireVisibleCandidateVariants: true }
+  );
+  assert(
+    realDryOpposite.compatible,
+    "morsels, chunks, bites, ground grain, and feeding-cup text must not turn a real dry identity into wet food"
+  );
+
+  const contaminatedOcrIdentity = labelResolutionApi.reconcileLabelOutcomes([
+    {
+      path: "on_device_ocr",
+      result: {
+        query: "PURINA ONE CHICKEN & RICE FORMULA COMPLETE ADULT DOG FOOD NET WT 8 LB",
+        identification: {
+          found: true,
+          confidence: 0.94,
+          brand: purinaWet.brand,
+          productName: purinaWet.productName,
+          flavor: purinaWet.flavor,
+          lifeStage: "adult",
+          foodForm: "wet",
+          packageSize: "13 oz",
+          petType: "dog",
+        },
+        selectedProduct: { ...purinaWet, ocrMatchScore: 0.94 },
+        products: [{ ...purinaWet, ocrMatchScore: 0.94 }],
+      },
+    },
+    { path: "cloud_image", error: new Error("Label lookup timed out") },
+  ], { strictMatching: true, autoOpenEnabled: true });
+  assert(
+    contaminatedOcrIdentity.decision !== labelResolutionApi.LABEL_RESOLUTION_DECISIONS.EXACT_CONFIRMED
+      && !contaminatedOcrIdentity.selectedProduct,
+    "candidate-derived OCR identity must never validate its own hidden Brown Rice wet variant"
+  );
+
+  const productLineGuard = labelResolutionApi.compareLabelIdentities(
+    { brand: "North Star Pet", productName: "Chicken Adult Dog Food", packageSize: "8 lb", petType: "dog" },
+    { ...inventedDry, productLine: "Harvest" },
+    { requireVisibleCandidateVariants: true }
+  );
+  assert(
+    productLineGuard.reasonCodes.includes("candidate_product_line_not_visible"),
+    "candidate-only protected product lines must be rejected"
+  );
+  const protectedFieldReasons = labelResolutionApi.compareLabelIdentities(
+    { brand: "North Star Pet", productName: "Chicken Adult Dog Food", packageSize: "8 lb", petType: "dog" },
+    {
+      ...inventedDry,
+      productName: "North Star Pet Harvest Grain Free Large Breed Sensitive Chicken Adult Dry Dog Food",
+      productLine: "Harvest",
+    },
+    { requireVisibleCandidateVariants: true }
+  ).reasonCodes;
+  assert(
+    protectedFieldReasons.includes("candidate_condition_not_visible")
+      && protectedFieldReasons.includes("candidate_formula_variant_not_visible"),
+    "diet condition, breed size, and grain-free candidate-only variants must stay behind asymmetric guards"
+  );
+}
+
 function checkStrictLabelResolution(api) {
   const product = (overrides = {}) => ({
     sourceKind: "catalog",
@@ -1861,6 +2112,7 @@ function checkResolverWiring() {
   );
   const productCatalog = fs.readFileSync(path.join(root, "services", "productCatalog.js"), "utf8");
   const productSearchScreen = fs.readFileSync(path.join(root, "screens", "ProductSearchScreen.js"), "utf8");
+  const catalogCoverage = fs.readFileSync(path.join(root, "services", "catalogCoverage.js"), "utf8");
   const runtimeConfig = fs.readFileSync(path.join(root, "services", "runtimeConfig.js"), "utf8");
   const labelIdentityMigration = fs.readFileSync(
     path.join(
@@ -1945,9 +2197,25 @@ function checkResolverWiring() {
   assert(
     /setIdentification\(null\)/.test(clearScanContextSource)
       && /setResolutionDecision\(null\)/.test(clearScanContextSource)
+      && /setResolutionEvidence\(null\)/.test(clearScanContextSource)
       && /setConfirmedFormulaKey\(""\)/.test(clearScanContextSource)
       && /source === "typed" \|\| source === "submit"[\s\S]*clearScanContext\(\)/.test(productSearchScreen),
     "typed and submitted searches must clear stale label identification and exclusion state"
+  );
+  assert(
+    /manual_selected:\s*labelSelection && !autoOpen/.test(productSearchScreen)
+      && /selection_mode:[\s\S]*manual_label_candidate/.test(productSearchScreen)
+      && /recognized_label_identity:/.test(productSearchScreen)
+      && /label_food_form_evidence:/.test(productSearchScreen)
+      && /chosen_food_form:/.test(productSearchScreen)
+      && /chosen_package_size:/.test(productSearchScreen)
+      && /sourceSurface: labelCandidate \? "label_candidate_list"/.test(productSearchScreen)
+      && /auto_open_fired:/.test(catalogCoverage)
+      && /recognized_on_device:/.test(catalogCoverage)
+      && /confirmed_candidate:/.test(catalogCoverage)
+      && /top_food_form:/.test(catalogCoverage)
+      && /top_package_size:/.test(catalogCoverage),
+    "label telemetry must distinguish auto-open from manual selection and retain recognized versus chosen form and package identity"
   );
   assert(
     /labelCaptureStartedAt/.test(scannerScreen)
@@ -2266,7 +2534,8 @@ assert(
   "verified catalog quality must accept safe singular/plural identity equivalents"
 );
 checkPetProfileCases(loadPetProfileModule());
-checkLabelOcrMatchingCases(await loadLabelOcrMatchingModule());
+const labelOcrMatchingApi = await loadLabelOcrMatchingModule();
+checkLabelOcrMatchingCases(labelOcrMatchingApi);
 await checkHighlightedCameraFrameCrop();
 await checkReviewPromptCadence();
 const catalogApi = loadCatalogMergeModule();
@@ -2276,6 +2545,7 @@ checkStrictLabelCandidateMatching(catalogApi);
 const labelResolutionApi = loadLabelResolutionModule();
 checkHillsAdultSevenLabelResolution(catalogApi, labelResolutionApi);
 checkPackageSizeDoesNotChangeLifeStage(labelResolutionApi);
+checkFoodFormBoundaryRegression(catalogApi, labelResolutionApi, labelOcrMatchingApi);
 checkStrictLabelResolution(labelResolutionApi);
 checkVerifiedNutritionFacts(loadVerifiedScoringModule());
 checkEricRegressionFixtures();

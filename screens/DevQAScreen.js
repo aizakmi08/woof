@@ -157,6 +157,7 @@ export default function DevQAScreen({ navigation }) {
             });
           }} />
           <QaButton label="Exact match auto-open" theme={theme} onPress={() => navigation.navigate("ProductSearch", { devFixture: "exact_auto_open" })} />
+          <QaButton label="Dry bag boundary — Purina ONE 8 lb" theme={theme} onPress={() => navigation.navigate("ProductSearch", { devFixture: "dry_bag_boundary" })} />
           <QaButton label="Multiple package candidates" theme={theme} onPress={() => navigation.navigate("ProductSearch", { devFixture: "multi_candidate" })} />
           <QaButton label="Label not readable" theme={theme} onPress={() => navigation.navigate("ProductSearch", { devFixture: "not_readable" })} />
           <QaButton label="Label timeout" theme={theme} onPress={() => navigation.navigate("ProductSearch", { devFixture: "label_timeout" })} />

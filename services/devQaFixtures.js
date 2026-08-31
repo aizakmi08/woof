@@ -133,6 +133,27 @@ export const DEV_QA_SEARCH_PRODUCTS = [
   },
 ];
 
+export const DEV_QA_DRY_BAG_BOUNDARY_PRODUCTS = [
+  {
+    cacheKey: "census:6d34f8eedef1ed8299581434f850338d",
+    gtin: "017800475686",
+    productName: "SmartBlend Natural Chicken & Rice Formula",
+    brand: "Purina ONE",
+    petType: "dog",
+    form: "dry",
+    packageSize: "8 lb bag",
+    packageSizes: ["8 lb bag"],
+    ingredientCount: 5,
+    ingredients: chickenIngredients,
+    ingredientVerificationStatus: "retailer_verified",
+    imageVerificationStatus: "retailer_verified",
+    imageUrl: "",
+    sourceUrl: "https://www.purina.com/dogs/shop/purina-one-chicken-rice-dry-dog-food",
+    source: "retailer",
+    sourceQuality: "retailer_verified",
+  },
+];
+
 export const DEV_QA_HISTORY = [
   {
     id: "dev-history-pet-1",

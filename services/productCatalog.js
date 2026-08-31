@@ -213,6 +213,7 @@ const SEARCH_TEXTURE_EQUIVALENTS = {
   gravy: ["sauce"],
   loaf: ["pate", "mousse"],
   mousse: ["pate", "loaf"],
+  morsels: ["dry", "kibble"],
   pat: ["pate", "loaf", "mousse"],
   pate: ["loaf", "mousse"],
   sauce: ["gravy"],
@@ -1030,6 +1031,8 @@ function normalizedPackageSizeSignals(value) {
 }
 
 function packageSizeMatchScore(product = {}, lookupProduct = {}) {
+  const identityComparison = compareLabelIdentities(lookupProduct, product);
+  if (identityComparison.reasonCodes.includes("package_size_form_conflict")) return -1;
   const requested = normalizedPackageSizeSignals(lookupProduct.packageSize);
   if (requested.size === 0) return 0;
   const available = new Set(packageSizesForProduct(product)
@@ -1096,11 +1099,12 @@ function tokenHasEquivalent(token, candidateTokens) {
 function inferredFoodForm(product = {}) {
   const text = normalizeText(productIdentityText(product));
   if (!text) return "";
-  if (/\b(freeze dried|freeze|freshdried|dehydrated|air dried)\b/.test(text)) return "freeze_dried";
-  if (/\b(wet|canned|can|pate|pat|loaf|mousse|stew|stews|gravy|sauce|morsels|shreds|cuts|pouch|tray)\b/.test(text)) return "wet";
-  if (/\b(dry|kibble)\b/.test(text)) return "dry";
-  if (/\b(fresh|refrigerated|frozen)\b/.test(text)) return "fresh";
-  return "";
+  const forms = new Set();
+  if (/\b(freeze dried|freeze|freshdried|dehydrated|air dried)\b/.test(text)) forms.add("freeze_dried");
+  if (/\b(wet|canned|can|pate|pat|loaf|mousse|stew|stews|gravy|sauce|entree|classic ground|chunks in gravy|chunks in sauce|prime cuts|slices in gravy|slices in sauce|pouch|tray|tub|cup|cups)\b/.test(text)) forms.add("wet");
+  if (/\b(dry|kibble|clusters|minichunks)\b/.test(text)) forms.add("dry");
+  if (/\b(fresh|refrigerated|frozen)\b/.test(text)) forms.add("fresh");
+  return forms.size === 1 ? [...forms][0] : "";
 }
 
 function labelBrandCompatible(catalogProduct = {}, lookupProduct = {}) {
@@ -1261,9 +1265,24 @@ function strongLabelProductMatch(catalogProduct, lookupProduct) {
   const lookupPetType = normalizePetType(lookupProduct.petType);
   if (lookupPetType && !matchesPetType(catalogProduct, lookupPetType, { allowUnknown: false })) return false;
   if (!labelBrandCompatible(catalogProduct, lookupProduct)) return false;
+  const lookupConsumerBrand = consumerBrandForIdentity(lookupProduct);
+  const catalogConsumerBrand = consumerBrandForIdentity(catalogProduct);
+  const lookupTokens = requiredMatchTokenSet(productIdentityText(lookupProduct));
+  const catalogTokens = requiredMatchTokenSet(productIdentityText(catalogProduct));
+  const hasSharedPrimaryRecipe = [...PRIMARY_RECIPE_TERMS].some((term) => (
+    lookupTokens.has(term) && catalogTokens.has(term)
+  ));
+  const hasExactStructuredPackageIdentity = Boolean(
+    lookupConsumerBrand
+    && lookupConsumerBrand !== "purina_parent"
+    && lookupConsumerBrand === catalogConsumerBrand
+    && packageSizeMatchScore(catalogProduct, lookupProduct) === 1
+    && hasSharedPrimaryRecipe
+  );
   const hasStrongIdentity = strongProductMatch(catalogProduct, lookupProduct)
     || overlapScore(catalogProduct.productName, lookupProduct.productName) >= 0.45
-    || overlapScore(productIdentityText(catalogProduct), productIdentityText(lookupProduct)) >= 0.55;
+    || overlapScore(productIdentityText(catalogProduct), productIdentityText(lookupProduct)) >= 0.55
+    || hasExactStructuredPackageIdentity;
   if (!hasStrongIdentity) return false;
   if (!hasRequiredLabelTerms(catalogProduct, lookupProduct)) return false;
   if (!hasNoConflictingCandidateVariantTerms(catalogProduct, lookupProduct)) return false;
@@ -1277,7 +1296,11 @@ function strongLabelProductMatch(catalogProduct, lookupProduct) {
 
   const lookupIdentity = productIdentityText(lookupProduct);
   const lookupIdentityTokens = tokenSet(lookupIdentity);
-  if (lookupIdentityTokens.size >= 3 && overlapScore(productIdentityText(catalogProduct), lookupIdentity) < 0.45) {
+  if (
+    !hasExactStructuredPackageIdentity
+    && lookupIdentityTokens.size >= 3
+    && overlapScore(productIdentityText(catalogProduct), lookupIdentity) < 0.45
+  ) {
     return false;
   }
 
@@ -1962,7 +1985,8 @@ async function searchWoofCatalogForLabelOcr(ocrText, queries, limit, signal) {
     const fastCandidates = rankProductsForOcr(
       filterProductsForOcr(
         (data || []).map((row) => normalizeCatalogProduct(row, "catalog")),
-        canonicalOcrText
+        canonicalOcrText,
+        { requireVisibleCandidateVariants: true }
       ),
       canonicalOcrText
     );
@@ -1983,7 +2007,9 @@ async function searchWoofCatalogForLabelOcr(ocrText, queries, limit, signal) {
     });
     fallbackCandidates.push(...matches);
     const ranked = rankProductsForOcr(
-      filterProductsForOcr(fallbackCandidates, canonicalOcrText),
+      filterProductsForOcr(fallbackCandidates, canonicalOcrText, {
+        requireVisibleCandidateVariants: true,
+      }),
       canonicalOcrText
     );
     if (ranked.length > 0) return ranked;
@@ -2190,7 +2216,8 @@ export async function resolveProduct({
             targetPetType
           )
         ),
-        packageOcrText
+        packageOcrText,
+        { requireVisibleCandidateVariants: true }
       );
     const rankedCandidates = rankProductsForOcr(candidates, packageOcrText);
     const merged = mergeProducts(

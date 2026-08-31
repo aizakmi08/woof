@@ -130,7 +130,9 @@ async function searchCatalog({ supabaseUrl, anonKey, accessToken, ocrText, queri
     body: { queries: queries.slice(0, 4), max_results: 32 },
   });
   const primaryRanked = matching.rankProductsForOcr(
-    matching.filterProductsForOcr(primary.rows.map(normalizeProduct), ocrText),
+    matching.filterProductsForOcr(primary.rows.map(normalizeProduct), ocrText, {
+      requireVisibleCandidateVariants: true,
+    }),
     ocrText
   );
   return {
@@ -197,7 +199,9 @@ for (const fixture of fixtures) {
   });
   const rankingStartedAt = performance.now();
   const ranked = matching.rankProductsForOcr(
-    matching.filterProductsForOcr(search.rows.map(normalizeProduct), ocr.text),
+    matching.filterProductsForOcr(search.rows.map(normalizeProduct), ocr.text, {
+      requireVisibleCandidateVariants: true,
+    }),
     ocr.text
   );
   const selected = matching.pickVerifiedProductForOcr(ranked, ocr.text);
