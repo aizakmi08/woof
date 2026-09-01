@@ -96,6 +96,7 @@ import {
 } from "../../services/petProfile";
 import {
   logCaptureToResult,
+  logLabelScanStageTimings,
   navigationTimingParams,
 } from "../../services/performanceTimings";
 
@@ -306,6 +307,7 @@ export default function ResultsScreen({ route, navigation }) {
     historyResultSnapshot,
     captureStartedAt,
     captureTimingMode,
+    labelStageTimings,
     devFixtureResult,
     devFixtureError,
     devFixtureLoadingStatus,
@@ -1087,7 +1089,14 @@ export default function ResultsScreen({ route, navigation }) {
       mode: captureTimingMode || (isHumanFood ? "human_food" : mode),
       outcome: error ? "error" : "success",
     });
-  }, [captureStartedAt, captureTimingMode, done, error, isHumanFood, mode]);
+    if ((captureTimingMode || mode) === "label_lookup" || labelStageTimings) {
+      logLabelScanStageTimings({
+        captureStartedAt,
+        stageTimings: labelStageTimings,
+        outcome: error ? "error" : "success",
+      });
+    }
+  }, [captureStartedAt, captureTimingMode, done, error, isHumanFood, labelStageTimings, mode]);
 
   // Increment scan count for free users when a new analysis completes
   useEffect(() => {

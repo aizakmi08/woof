@@ -45,7 +45,11 @@ import { BRAND_NAME } from "../config/brand";
 import { requestCatalogEvidenceConsent } from "../services/catalogEvidenceConsent";
 import { useAuth } from "../services/auth";
 import { normalizePetProfile } from "../services/petProfile";
-import { logCaptureToResult, navigationTimingParams } from "../services/performanceTimings";
+import {
+  logCaptureToResult,
+  logLabelScanStageTimings,
+  navigationTimingParams,
+} from "../services/performanceTimings";
 import {
   DEV_QA_DRY_BAG_BOUNDARY_PRODUCTS,
   DEV_QA_PET_RESULT,
@@ -213,6 +217,15 @@ function productMatchesQueryTerms(product, queryText = "") {
 
 function productIsReady(product) {
   return productIsVerifiedReady(product);
+}
+
+function catalogProductNeedsHydration(product) {
+  return Boolean(
+    product?.cacheKey
+    && Number(product?.ingredientCount || 0) >= 5
+    && !String(product?.ingredientsText || "").trim()
+    && (!Array.isArray(product?.ingredients) || product.ingredients.length === 0)
+  );
 }
 
 function ingredientStatusLabel({ exactConfirmed = false, ready = false } = {}) {
@@ -791,6 +804,7 @@ export default function ProductSearchScreen({ navigation, route }) {
   const labelOcrDurationMs = Number(route.params?.labelOcrDurationMs) || null;
   const labelCaptureId = route.params?.labelCaptureId || "";
   const labelCaptureStartedAt = Number(route.params?.labelCaptureStartedAt) || null;
+  const scannerLabelStageTimings = route.params?.labelStageTimings || null;
   const labelAttempt = Math.max(1, Number(route.params?.labelAttempt) || 1);
   const devFixture = __DEV__ ? route.params?.devFixture : null;
   const devLiveResolver = __DEV__ && route.params?.devLiveResolver === true;
@@ -823,6 +837,7 @@ export default function ProductSearchScreen({ navigation, route }) {
   const searchAbortRef = useRef(null);
   const labelRunRef = useRef({ key: "", runId: 0 });
   const labelAbortRef = useRef(null);
+  const hydrationPrefetchRef = useRef(new Map());
   const recognizedOcrRef = useRef({
     text: labelOcrText,
     lines: labelOcrLines,
@@ -835,6 +850,27 @@ export default function ProductSearchScreen({ navigation, route }) {
 
   const trimmedQuery = query.trim();
   const title = labelLoading ? "Reading label" : "Find Product";
+
+  const prefetchCatalogHydration = useCallback((product, signal) => {
+    if (!catalogProductNeedsHydration(product)) return null;
+    const key = String(product.cacheKey || "").trim();
+    if (!key) return null;
+    const existing = hydrationPrefetchRef.current.get(key);
+    if (existing) return existing;
+    if (hydrationPrefetchRef.current.size >= 2) return null;
+
+    const startedAt = Date.now();
+    const promise = getCatalogProduct(key, { signal });
+    const entry = { key, startedAt, promise };
+    hydrationPrefetchRef.current.set(key, entry);
+    promise.then((hydrated) => {
+      trackEvent("catalog_product_hydration_prefetch_completed", {
+        success: Boolean(hydrated),
+        latency_ms: Date.now() - startedAt,
+      });
+    }).catch(() => {});
+    return entry;
+  }, []);
 
   useEffect(() => {
     if (petTypeFilterTouchedRef.current) return;
@@ -1016,25 +1052,38 @@ export default function ProductSearchScreen({ navigation, route }) {
     labelIdentification = identification,
     labelResolutionDecision = resolutionDecision,
     labelResolutionEvidence = resolutionEvidence,
+    labelScanStageTimings = null,
   } = {}) => {
     if (!autoOpen) {
       Haptics.selectionAsync();
     }
 
     let resolvedProduct = product;
-    const needsHydration = Boolean(
-      product?.cacheKey
-      && Number(product?.ingredientCount || 0) >= 5
-      && !String(product?.ingredientsText || "").trim()
-      && (!Array.isArray(product?.ingredients) || product.ingredients.length === 0)
-    );
+    let completedLabelStageTimings = labelScanStageTimings;
+    const needsHydration = catalogProductNeedsHydration(product);
     if (needsHydration) {
-      const hydrationStartedAt = Date.now();
-      const hydrated = await getCatalogProduct(product.cacheKey);
+      const prefetched = hydrationPrefetchRef.current.get(product.cacheKey);
+      const hydrationStartedAt = prefetched?.startedAt || Date.now();
+      const hydrationWaitStartedAt = Date.now();
+      const hydrated = await (prefetched?.promise || getCatalogProduct(product.cacheKey));
+      const hydrationTotalMs = Date.now() - hydrationStartedAt;
+      const hydrationWaitMs = Date.now() - hydrationWaitStartedAt;
+      completedLabelStageTimings = labelScanStageTimings ? {
+        ...labelScanStageTimings,
+        hydrationTotalMs,
+        hydrationWaitMs,
+        hydrationPrefetched: Boolean(prefetched),
+        hydrationOverlapMs: prefetched
+          ? Math.max(0, hydrationWaitStartedAt - hydrationStartedAt)
+          : 0,
+      } : null;
       trackEvent("catalog_product_hydration_completed", {
         source_surface: sourceSurface,
         success: Boolean(hydrated),
-        latency_ms: Date.now() - hydrationStartedAt,
+        latency_ms: hydrationTotalMs,
+        wait_latency_ms: hydrationWaitMs,
+        prefetched: Boolean(prefetched),
+        overlap_ms: completedLabelStageTimings?.hydrationOverlapMs || 0,
       });
       if (!hydrated) {
         Alert.alert(
@@ -1142,6 +1191,7 @@ export default function ProductSearchScreen({ navigation, route }) {
       uri: labelImageUri || resolvedProduct.imageUrl || null,
       captureStartedAt: labelCaptureStartedAt,
       captureTimingMode: labelCaptureStartedAt ? "label_lookup" : null,
+      labelStageTimings: completedLabelStageTimings,
       ...(devFixtureResult ? { devFixtureResult } : {}),
     });
   }, [
@@ -1156,6 +1206,7 @@ export default function ProductSearchScreen({ navigation, route }) {
     remainingScans,
     resolutionDecision,
     resolutionEvidence,
+    prefetchCatalogHydration,
   ]);
   const openProductResultRef = useRef(openProductResult);
 
@@ -1324,6 +1375,7 @@ export default function ProductSearchScreen({ navigation, route }) {
       setProducts([]);
       setShowingCached(false);
       setSearchCorrection("");
+      hydrationPrefetchRef.current.clear();
       recognizedOcrRef.current = {
         text: labelOcrText,
         lines: labelOcrLines,
@@ -1341,6 +1393,10 @@ export default function ProductSearchScreen({ navigation, route }) {
       const startedAt = labelCaptureStartedAt && labelCaptureStartedAt <= resolverStartedAt
         ? labelCaptureStartedAt
         : resolverStartedAt;
+      let measuredLabelStages = {
+        ...(scannerLabelStageTimings || {}),
+        captureToResolverMs: resolverStartedAt - startedAt,
+      };
       try {
         const runtimeConfigPromise = getLabelResolutionConfig();
         const visualStartedAt = Date.now();
@@ -1361,6 +1417,7 @@ export default function ProductSearchScreen({ navigation, route }) {
           })
             .then((result) => {
               prefetchResolutionImages(result);
+              prefetchCatalogHydration(result?.selectedProduct, lifecycleController.signal);
               return {
                 result,
                 path: "cloud_image",
@@ -1403,7 +1460,10 @@ export default function ProductSearchScreen({ navigation, route }) {
             },
           })
             .then((outcome) => {
-              if (outcome?.result) prefetchResolutionImages(outcome.result);
+              if (outcome?.result) {
+                prefetchResolutionImages(outcome.result);
+                prefetchCatalogHydration(outcome.result.selectedProduct, lifecycleController.signal);
+              }
               return outcome ? {
                 ...outcome,
                 latencyMs: Date.now() - ocrStartedAt,
@@ -1442,11 +1502,37 @@ export default function ProductSearchScreen({ navigation, route }) {
           onTimeout: abortRequests,
         });
         const outcomes = await outcomesPromise;
+        const recognitionWallMs = Date.now() - resolverStartedAt;
+        const reconciliationStartedAt = Date.now();
         let result = reconcileLabelOutcomes(outcomes, runtimeConfig);
+        const reconciliationMs = Date.now() - reconciliationStartedAt;
 
         if (!result) {
           throw new Error("No readable label text was found.");
         }
+        prefetchCatalogHydration(result.selectedProduct, lifecycleController.signal);
+        const visualOutcome = outcomes.find((outcome) => outcome.path === "cloud_image");
+        const ocrOutcome = outcomes.find((outcome) => outcome.path === "on_device_ocr");
+        const catalogStages = ocrOutcome?.result?.stageTimings
+          || visualOutcome?.result?.stageTimings
+          || {};
+        measuredLabelStages = {
+          ...measuredLabelStages,
+          recognitionWallMs,
+          visualPathMs: visualOutcome?.latencyMs ?? null,
+          ocrPathMs: ocrOutcome?.latencyMs ?? null,
+          reconciliationMs,
+          catalogIdentityRpcMs: catalogStages.fastRpcMs ?? null,
+          candidateGateMs: catalogStages.candidateGateMs ?? catalogStages.fastGateMs ?? null,
+          fastRawCount: catalogStages.fastRawCount ?? null,
+          fastVisibleCandidateCount: catalogStages.fastVisibleCandidateCount ?? null,
+          fallbackTriggered: catalogStages.fallbackTriggered === true,
+          fallbackReason: catalogStages.fallbackReason ?? null,
+          fallbackQueryCount: catalogStages.fallbackQueryCount ?? 0,
+          fallbackLookupWallMs: catalogStages.fallbackLookupWallMs ?? 0,
+          fallbackLookupSerialEquivalentMs: catalogStages.fallbackLookupSerialEquivalentMs ?? 0,
+          fallbackLookupSavedMs: catalogStages.fallbackLookupSavedMs ?? 0,
+        };
         const recognizedOcr = recognizedOcrRef.current;
         const recognizedQuery = labelOcrSearchQueries(
           recognizedOcr.text,
@@ -1572,11 +1658,28 @@ export default function ProductSearchScreen({ navigation, route }) {
           total_latency_ms: Date.now() - startedAt,
           resolver_latency_ms: Date.now() - resolverStartedAt,
           capture_to_resolver_ms: resolverStartedAt - startedAt,
+          recognition_wall_ms: measuredLabelStages.recognitionWallMs ?? null,
+          visual_path_ms: measuredLabelStages.visualPathMs ?? null,
+          ocr_path_ms: measuredLabelStages.ocrPathMs ?? null,
+          reconciliation_ms: measuredLabelStages.reconciliationMs ?? null,
+          catalog_identity_rpc_ms: measuredLabelStages.catalogIdentityRpcMs ?? null,
+          candidate_gate_ms: measuredLabelStages.candidateGateMs ?? null,
+          fallback_triggered: measuredLabelStages.fallbackTriggered === true,
+          fallback_reason: measuredLabelStages.fallbackReason ?? null,
+          fallback_lookup_wall_ms: measuredLabelStages.fallbackLookupWallMs ?? 0,
+          fallback_lookup_serial_equivalent_ms:
+            measuredLabelStages.fallbackLookupSerialEquivalentMs ?? 0,
+          fallback_lookup_saved_ms: measuredLabelStages.fallbackLookupSavedMs ?? 0,
         });
         if (!result.selectedProduct) {
           logCaptureToResult({
             captureStartedAt: labelCaptureStartedAt,
             mode: "label_lookup",
+            outcome: result.decision,
+          });
+          logLabelScanStageTimings({
+            captureStartedAt: labelCaptureStartedAt,
+            stageTimings: measuredLabelStages,
             outcome: result.decision,
           });
         }
@@ -1592,6 +1695,7 @@ export default function ProductSearchScreen({ navigation, route }) {
             labelIdentification: resultIdentification,
             labelResolutionDecision: result.decision,
             labelResolutionEvidence: result.resolutionEvidence,
+            labelScanStageTimings: measuredLabelStages,
           });
         }
       } catch (err) {
@@ -1639,6 +1743,11 @@ export default function ProductSearchScreen({ navigation, route }) {
           mode: "label_lookup",
           outcome: "error",
         });
+        logLabelScanStageTimings({
+          captureStartedAt: labelCaptureStartedAt,
+          stageTimings: measuredLabelStages,
+          outcome: "error",
+        });
       } finally {
         lifecycleController.signal.removeEventListener("abort", abortRequests);
         if (labelAbortRef.current === lifecycleController) labelAbortRef.current = null;
@@ -1670,7 +1779,9 @@ export default function ProductSearchScreen({ navigation, route }) {
     labelOcrLines,
     labelOcrText,
     petTypeFilter,
+    prefetchCatalogHydration,
     runSearch,
+    scannerLabelStageTimings,
   ]);
 
   useEffect(() => {

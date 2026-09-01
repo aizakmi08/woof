@@ -9,7 +9,9 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURE_PATH = path.join(ROOT, "scripts", "fixtures", "live-label-lookup-cases.json");
-const IMAGE_DIR = path.join(ROOT, "outputs", "live-label-audit", "images");
+const IMAGE_DIR = process.env.WOOF_LABEL_AUDIT_IMAGE_DIR
+  ? path.resolve(process.env.WOOF_LABEL_AUDIT_IMAGE_DIR)
+  : path.join(ROOT, "outputs", "live-label-audit", "images");
 const OUTPUT_PATH = path.join(ROOT, "outputs", "live-label-audit", "on-device-report.json");
 const MATCHING_PATH = path.join(ROOT, "services", "labelOcrMatching.js");
 const SIMULATOR_ID = process.env.WOOF_SIMULATOR_ID || "booted";
@@ -92,7 +94,13 @@ async function simulatorAccessToken(projectRef) {
 }
 
 async function loadMatchingApi() {
-  const source = await fsp.readFile(MATCHING_PATH, "utf8");
+  const labelResolutionSource = await fsp.readFile(
+    path.join(ROOT, "services", "labelResolution.js"),
+    "utf8"
+  );
+  const labelResolutionUrl = `data:text/javascript;base64,${Buffer.from(labelResolutionSource).toString("base64")}`;
+  const source = (await fsp.readFile(MATCHING_PATH, "utf8"))
+    .replace('"./labelResolution"', `"${labelResolutionUrl}"`);
   return import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
 }
 
@@ -135,10 +143,54 @@ async function searchCatalog({ supabaseUrl, anonKey, accessToken, ocrText, queri
     }),
     ocrText
   );
+  if (primaryRanked.length > 0) {
+    return {
+      ...primary,
+      path: "lightweight_identity_indexed",
+      primaryRawCount: primary.rows.length,
+      primaryVisibleCount: primaryRanked.length,
+      primaryTopScore: primaryRanked[0]?.ocrMatchScore || 0,
+      fallbackTriggered: false,
+      fallbackQueryCount: 0,
+      fallbackWallMs: 0,
+      fallbackSerialEquivalentMs: 0,
+      fallbackSavedMs: 0,
+    };
+  }
+
+  const fallbackQueries = queries
+    .map(compact)
+    .filter((query, index, values) => (
+      query.length >= 2
+      && values.findIndex((candidate) => normalized(candidate) === normalized(query)) === index
+    ))
+    .slice(0, 2);
+  const fallbackStartedAt = performance.now();
+  const fallbackLookups = await Promise.all(fallbackQueries.map((query) => callSearchRpc({
+    supabaseUrl,
+    anonKey,
+    accessToken,
+    functionName: "search_verified_products",
+    body: { q: query, max_results: 16 },
+  })));
+  const fallbackWallMs = performance.now() - fallbackStartedAt;
+  const fallbackSerialEquivalentMs = fallbackLookups.reduce(
+    (total, lookup) => total + lookup.elapsedMs,
+    0
+  );
   return {
-    ...primary,
-    path: "lightweight_identity_indexed",
-    primaryTopScore: primaryRanked[0]?.ocrMatchScore || 0,
+    rows: fallbackLookups.flatMap((lookup) => lookup.rows),
+    elapsedMs: primary.elapsedMs + fallbackWallMs,
+    path: "bounded_parallel_fallback",
+    primaryRawCount: primary.rows.length,
+    primaryVisibleCount: 0,
+    primaryTopScore: 0,
+    fallbackTriggered: true,
+    fallbackQueryCount: fallbackQueries.length,
+    fallbackWallMs,
+    fallbackIndividualMs: fallbackLookups.map((lookup) => lookup.elapsedMs),
+    fallbackSerialEquivalentMs,
+    fallbackSavedMs: Math.max(0, fallbackSerialEquivalentMs - fallbackWallMs),
   };
 }
 
@@ -224,6 +276,14 @@ for (const fixture of fixtures) {
     queryCount: queries.length,
     resolutionPath: search.path,
     primaryTopScore: search.primaryTopScore,
+    primaryRawCount: search.primaryRawCount,
+    primaryVisibleCount: search.primaryVisibleCount,
+    fallbackTriggered: search.fallbackTriggered,
+    fallbackQueryCount: search.fallbackQueryCount,
+    fallbackWallMs: Math.round(search.fallbackWallMs),
+    fallbackIndividualMs: (search.fallbackIndividualMs || []).map(Math.round),
+    fallbackSerialEquivalentMs: Math.round(search.fallbackSerialEquivalentMs),
+    fallbackSavedMs: Math.round(search.fallbackSavedMs),
     ocrMs: Math.round(Number(ocr.durationMs) || 0),
     searchMs: Math.round(search.elapsedMs),
     rankingMs: Math.round(rankingMs),
@@ -231,7 +291,7 @@ for (const fixture of fixtures) {
     harnessWallClockMs: Math.round(harnessWallClockMs),
     ocrText: ocr.text,
   });
-  console.log(`${passed ? "PASS" : "FAIL"} ${fixture.id} rank=${expectedIndex >= 0 ? expectedIndex + 1 : "-"} path=${search.path} score=${Number(search.primaryTopScore || 0).toFixed(2)} ocr=${Math.round(ocr.durationMs)}ms search=${Math.round(search.elapsedMs)}ms pipeline=${Math.round(totalMs)}ms harness=${Math.round(harnessWallClockMs)}ms`);
+  console.log(`${passed ? "PASS" : "FAIL"} ${fixture.id} rank=${expectedIndex >= 0 ? expectedIndex + 1 : "-"} path=${search.path} score=${Number(search.primaryTopScore || 0).toFixed(2)} ocr=${Math.round(ocr.durationMs)}ms search=${Math.round(search.elapsedMs)}ms fallback_wall=${Math.round(search.fallbackWallMs)}ms fallback_serial=${Math.round(search.fallbackSerialEquivalentMs)}ms saved=${Math.round(search.fallbackSavedMs)}ms pipeline=${Math.round(totalMs)}ms harness=${Math.round(harnessWallClockMs)}ms`);
 }
 
 const totals = cases.map((testCase) => testCase.totalMs);
@@ -246,6 +306,7 @@ const summary = {
   p95HarnessWallClockMs: Math.round(percentile(cases.map((testCase) => testCase.harnessWallClockMs), 0.95)),
   targetP95Ms: P95_TARGET_MS,
 };
+await fsp.mkdir(path.dirname(OUTPUT_PATH), { recursive: true });
 await fsp.writeFile(OUTPUT_PATH, `${JSON.stringify({ summary, cases }, null, 2)}\n`);
 console.log(JSON.stringify(summary, null, 2));
 

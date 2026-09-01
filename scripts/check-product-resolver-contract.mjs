@@ -2301,9 +2301,28 @@ function checkResolverWiring() {
     "label resolution must cancel slow cloud work and automatically recover from readable OCR"
   );
   assert(
-    /await getCatalogProduct\(product\.cacheKey\)/.test(productSearchScreen)
+    /prefetchCatalogHydration/.test(productSearchScreen)
+      && /prefetched\?\.promise \|\| getCatalogProduct\(product\.cacheKey\)/.test(productSearchScreen)
+      && /hydrationOverlapMs/.test(productSearchScreen)
+      && /prefetchCatalogHydration\(result\.selectedProduct, lifecycleController\.signal\)/.test(productSearchScreen)
+      && !/prefetchCatalogHydration\(result\.selectedProduct, requestController\.signal\)/.test(productSearchScreen)
       && /catalog_product_hydration_completed/.test(productSearchScreen),
-    "lightweight identity results must hydrate verified ingredients before analysis opens"
+    "lightweight identity results must prefetch and reuse verified ingredients before analysis opens"
+  );
+  assert(
+    /Promise\.all\(fallbackQueries\.map\(async/.test(productCatalog)
+      && /fallbackQueries = boundedQueries\.slice\(0, 2\)/.test(productCatalog)
+      && /fallbackLookupSerialEquivalentMs/.test(productCatalog)
+      && /fallbackLookupSavedMs/.test(productCatalog)
+      && !/for \(const query of boundedQueries\.slice\(0, 2\)\)/.test(productCatalog),
+    "the two bounded label fallbacks must run in parallel and quantify avoided serial wait"
+  );
+  assert(
+    /label_scan_stage_timings/.test(performanceTimings)
+      && /recognition_wall_ms/.test(productSearchScreen)
+      && /fallback_lookup_wall_ms/.test(productSearchScreen)
+      && /hydration_wait_ms/.test(performanceTimings),
+    "label resolution must emit measured recognizer, gate, fallback, and hydration stages"
   );
   assert(
     /const runtimeConfigPromise = getLabelResolutionConfig\(\)[\s\S]*const visualPromise/.test(productSearchScreen)
