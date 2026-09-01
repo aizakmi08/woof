@@ -1,7 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const FUNCTION_NAME = "label-lookup";
-const FUNCTION_AUDIT_VERSION = "2026-08-20-edge-front-label-identity-v19";
+const FUNCTION_AUDIT_VERSION = "2026-09-01-edge-package-form-identity-v20";
 const MAX_IMAGE_B64_LENGTH = 2_400_000;
 // On-device OCR runs in parallel and handles the common fast path. The second,
 // shorter attempt is only for transient provider failures and stays within the
@@ -41,7 +41,7 @@ Separate the product identity from benefit badges and marketing claims. Phrases 
 
 Return the consumer-facing brand in brand, not a corporate parent. For Purina packages, use Beneful, Moist & Meaty, Purina ONE, Pro Plan, Fancy Feast, Friskies, Cat Chow, or Dog Chow when that name is visible; do not reduce those brands to Purina. Put a line such as Originals, RawMix, or Complete Essentials in productLine. Put every prominent protein or named recipe such as Farm-Raised Beef, Burger with Cheddar, or Wild Ocean in flavor as well as productName when visible.
 
-Determine petType independently and carefully. Use visible DOG/CAT wording plus unmistakable package evidence such as a dog or cat silhouette, species icon, or animal photo. A small cat silhouette printed on the front label is positive cat evidence and outranks learned familiarity with similarly named dog products. When no DOG or DOGS wording is visible, never return dog merely because the recipe or brand also sells dog food. Return unknown when the package does not provide reliable species evidence. For foodForm, preserve freeze-dried when it is visibly stated instead of reducing it to dry.
+Determine petType independently and carefully. Use visible DOG/CAT wording plus unmistakable package evidence such as a dog or cat silhouette, species icon, or animal photo. A small cat silhouette printed on the front label is positive cat evidence and outranks learned familiarity with similarly named dog products. When no DOG or DOGS wording is visible, never return dog merely because the recipe or brand also sells dog food. Return unknown when the package does not provide reliable species evidence. For foodForm, preserve freeze-dried when it is visibly stated instead of reducing it to dry. Use unmistakable physical package evidence too: a multi-pound upright bag or visible kibble is dry, while a single can, tray, or pouch is wet. A bag must not become wet merely because its net weight is written in ounces. A multi-can or multi-pouch case can have a total weight in pounds and is still wet. Marketing copy such as "meaty morsels in every bite" does not make a multi-pound bag wet. If package form evidence conflicts, return an empty foodForm instead of guessing.
 
 Classify productCategory only from wording visibly printed on the centered package. Use complete_food for a normal dog/cat food, treat/topper/mixer/supplement only when that category is explicitly visible, and unknown when uncertain. Copy the exact short visible phrases supporting the category into categoryEvidence. Text on neighboring products, shelf tags, search results, reviews, recommendations, or navigation must not classify the centered product. If complete-food and non-complete wording conflict, return productCategory unknown. Never infer ingredients, scores, reviews, recalls, or nutrition. If the package is not pet food or the identity is unreadable, return found=false. Return only compact JSON with no markdown.
 

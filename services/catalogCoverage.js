@@ -87,6 +87,7 @@ function recognizedIdentityMetadata(identification = {}) {
     label_flavor: textOrNull(identification?.flavor, 100),
     label_life_stage: textOrNull(identification?.lifeStage, 40),
     label_food_form: textOrNull(identification?.foodForm, 40),
+    label_package_size: textOrNull(identification?.packageSize, 60),
   };
 }
 
@@ -246,6 +247,16 @@ export async function logCatalogLookupEvent({
         disagreement_fields: compactArray(resolutionEvidence?.disagreementFields, 20),
         reason_codes: compactArray(resolutionEvidence?.reasonCodes, 20),
         visual_confirmation: textOrNull(resolutionEvidence?.visualConfirmation, 40),
+        auto_open_enabled: typeof resolutionEvidence?.autoOpenEnabled === "boolean"
+          ? resolutionEvidence.autoOpenEnabled
+          : null,
+        auto_open_fired: typeof resolutionEvidence?.autoOpenFired === "boolean"
+          ? resolutionEvidence.autoOpenFired
+          : null,
+        result_mode: textOrNull(resolutionEvidence?.resultMode, 40),
+        recognized_on_device: resolutionEvidence?.recognizedIdentity?.onDeviceOcr || null,
+        recognized_cloud: resolutionEvidence?.recognizedIdentity?.cloudImage || null,
+        confirmed_candidate: resolutionEvidence?.confirmedCandidate || null,
         verification_state: textOrNull(verificationState?.state, 40),
         verification_gaps: Array.isArray(verificationState?.gaps) ? verificationState.gaps.slice(0, 10) : [],
         latency_ms: numberOrNull(latencyMs),
@@ -257,6 +268,8 @@ export async function logCatalogLookupEvent({
         top_source: textOrNull(topProduct?.source, 40),
         top_brand: textOrNull(topProduct?.brand, 80),
         top_product_name: textOrNull(topProduct?.productName, 120),
+        top_food_form: textOrNull(topProduct?.foodForm, 40),
+        top_package_size: textOrNull(topProduct?.packageSize, 60),
       },
     });
 

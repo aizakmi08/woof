@@ -74,6 +74,7 @@ export default function DevQAScreen({ navigation }) {
   const theme = useTheme();
   const [triggerError, setTriggerError] = useState(false);
   const [timings, setTimings] = useState(() => getPerformanceTimingSnapshot());
+  const labelStages = timings.labelScanStages;
   if (!__DEV__) return null;
   if (triggerError && devBoundaryErrorArmed) {
     devBoundaryErrorArmed = false;
@@ -126,6 +127,15 @@ export default function DevQAScreen({ navigation }) {
           <Text style={[styles.metricText, { color: theme.textSecondary }]}>JS boot → interactive: {timings.coldStartInteractiveMs ?? "not captured"} ms</Text>
           <Text style={[styles.metricText, { color: theme.textSecondary }]}>Tap → camera: {timings.tapToCameraMs ?? "not captured"} ms</Text>
           <Text style={[styles.metricText, { color: theme.textSecondary }]}>Capture → result: {timings.captureToResultMs ?? "not captured"} ms</Text>
+          {labelStages ? (
+            <>
+              <Text style={[styles.metricText, { color: theme.textSecondary }]}>Label camera / crop / prepare: {labelStages.cameraCaptureMs ?? "—"} / {labelStages.scanFrameCropMs ?? "—"} / {labelStages.imageOptimizationAndOcrWallMs ?? "—"} ms</Text>
+              <Text style={[styles.metricText, { color: theme.textSecondary }]}>Recognition visual / OCR / wall: {labelStages.visualPathMs ?? "—"} / {labelStages.ocrPathMs ?? "—"} / {labelStages.recognitionWallMs ?? "—"} ms</Text>
+              <Text style={[styles.metricText, { color: theme.textSecondary }]}>Catalog RPC / gating: {labelStages.catalogIdentityRpcMs ?? "—"} / {labelStages.candidateGateMs ?? "—"} ms</Text>
+              <Text style={[styles.metricText, { color: theme.textSecondary }]}>Fallback wall / serial-equivalent / saved: {labelStages.fallbackLookupWallMs ?? 0} / {labelStages.fallbackLookupSerialEquivalentMs ?? 0} / {labelStages.fallbackLookupSavedMs ?? 0} ms</Text>
+              <Text style={[styles.metricText, { color: theme.textSecondary }]}>Hydration total / blocking wait: {labelStages.hydrationTotalMs ?? "—"} / {labelStages.hydrationWaitMs ?? "—"} ms</Text>
+            </>
+          ) : null}
           <QaButton label="Refresh measured timings" theme={theme} onPress={() => setTimings(getPerformanceTimingSnapshot())} />
         </QaSection>
         <QaSection title="Onboarding & home" theme={theme}>
@@ -157,6 +167,7 @@ export default function DevQAScreen({ navigation }) {
             });
           }} />
           <QaButton label="Exact match auto-open" theme={theme} onPress={() => navigation.navigate("ProductSearch", { devFixture: "exact_auto_open" })} />
+          <QaButton label="Dry bag boundary — Purina ONE 8 lb" theme={theme} onPress={() => navigation.navigate("ProductSearch", { devFixture: "dry_bag_boundary" })} />
           <QaButton label="Multiple package candidates" theme={theme} onPress={() => navigation.navigate("ProductSearch", { devFixture: "multi_candidate" })} />
           <QaButton label="Label not readable" theme={theme} onPress={() => navigation.navigate("ProductSearch", { devFixture: "not_readable" })} />
           <QaButton label="Label timeout" theme={theme} onPress={() => navigation.navigate("ProductSearch", { devFixture: "label_timeout" })} />

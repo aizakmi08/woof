@@ -35,6 +35,9 @@ const DEFAULT_LIMIT = 16;
 // normally completes far earlier, but retains enough cold-start/network margin.
 const CATALOG_RPC_TIMEOUT_MS = 6_000;
 const LABEL_RPC_TIMEOUT_MS = 4_500;
+const CATALOG_PRODUCT_CACHE_TTL_MS = 10 * 60 * 1000;
+const CATALOG_PRODUCT_CACHE_MAX_ENTRIES = 24;
+const catalogProductCache = new Map();
 const LABEL_IDENTITY_RPC = "search_verified_product_identities_for_label";
 const LEGACY_LABEL_RPC = "search_verified_products_for_label_fast";
 const MIN_SCORABLE_CATALOG_RANK = 3;
@@ -213,6 +216,7 @@ const SEARCH_TEXTURE_EQUIVALENTS = {
   gravy: ["sauce"],
   loaf: ["pate", "mousse"],
   mousse: ["pate", "loaf"],
+  morsels: ["dry", "kibble"],
   pat: ["pate", "loaf", "mousse"],
   pate: ["loaf", "mousse"],
   sauce: ["gravy"],
@@ -1058,6 +1062,8 @@ function normalizedPackageSizeSignals(value) {
 }
 
 function packageSizeMatchScore(product = {}, lookupProduct = {}) {
+  const identityComparison = compareLabelIdentities(lookupProduct, product);
+  if (identityComparison.reasonCodes.includes("package_size_form_conflict")) return -1;
   const requested = normalizedPackageSizeSignals(lookupProduct.packageSize);
   if (requested.size === 0) return 0;
   const available = new Set(packageSizesForProduct(product)
@@ -1124,11 +1130,12 @@ function tokenHasEquivalent(token, candidateTokens) {
 function inferredFoodForm(product = {}) {
   const text = normalizeText(productIdentityText(product));
   if (!text) return "";
-  if (/\b(freeze dried|freeze|freshdried|dehydrated|air dried)\b/.test(text)) return "freeze_dried";
-  if (/\b(wet|canned|can|pate|pat|loaf|mousse|stew|stews|gravy|sauce|morsels|shreds|cuts|pouch|tray)\b/.test(text)) return "wet";
-  if (/\b(dry|kibble)\b/.test(text)) return "dry";
-  if (/\b(fresh|refrigerated|frozen)\b/.test(text)) return "fresh";
-  return "";
+  const forms = new Set();
+  if (/\b(freeze dried|freeze|freshdried|dehydrated|air dried)\b/.test(text)) forms.add("freeze_dried");
+  if (/\b(wet|canned|can|pate|pat|loaf|mousse|stew|stews|gravy|sauce|entree|classic ground|chunks in gravy|chunks in sauce|prime cuts|slices in gravy|slices in sauce|pouch|tray|tub|cup|cups)\b/.test(text)) forms.add("wet");
+  if (/\b(dry|kibble|clusters|minichunks)\b/.test(text)) forms.add("dry");
+  if (/\b(fresh|refrigerated|frozen)\b/.test(text)) forms.add("fresh");
+  return forms.size === 1 ? [...forms][0] : "";
 }
 
 function labelBrandCompatible(catalogProduct = {}, lookupProduct = {}) {
@@ -1289,9 +1296,24 @@ function strongLabelProductMatch(catalogProduct, lookupProduct) {
   const lookupPetType = normalizePetType(lookupProduct.petType);
   if (lookupPetType && !matchesPetType(catalogProduct, lookupPetType, { allowUnknown: false })) return false;
   if (!labelBrandCompatible(catalogProduct, lookupProduct)) return false;
+  const lookupConsumerBrand = consumerBrandForIdentity(lookupProduct);
+  const catalogConsumerBrand = consumerBrandForIdentity(catalogProduct);
+  const lookupTokens = requiredMatchTokenSet(productIdentityText(lookupProduct));
+  const catalogTokens = requiredMatchTokenSet(productIdentityText(catalogProduct));
+  const hasSharedPrimaryRecipe = [...PRIMARY_RECIPE_TERMS].some((term) => (
+    lookupTokens.has(term) && catalogTokens.has(term)
+  ));
+  const hasExactStructuredPackageIdentity = Boolean(
+    lookupConsumerBrand
+    && lookupConsumerBrand !== "purina_parent"
+    && lookupConsumerBrand === catalogConsumerBrand
+    && packageSizeMatchScore(catalogProduct, lookupProduct) === 1
+    && hasSharedPrimaryRecipe
+  );
   const hasStrongIdentity = strongProductMatch(catalogProduct, lookupProduct)
     || overlapScore(catalogProduct.productName, lookupProduct.productName) >= 0.45
-    || overlapScore(productIdentityText(catalogProduct), productIdentityText(lookupProduct)) >= 0.55;
+    || overlapScore(productIdentityText(catalogProduct), productIdentityText(lookupProduct)) >= 0.55
+    || hasExactStructuredPackageIdentity;
   if (!hasStrongIdentity) return false;
   if (!hasRequiredLabelTerms(catalogProduct, lookupProduct)) return false;
   if (!hasNoConflictingCandidateVariantTerms(catalogProduct, lookupProduct)) return false;
@@ -1305,7 +1327,11 @@ function strongLabelProductMatch(catalogProduct, lookupProduct) {
 
   const lookupIdentity = productIdentityText(lookupProduct);
   const lookupIdentityTokens = tokenSet(lookupIdentity);
-  if (lookupIdentityTokens.size >= 3 && overlapScore(productIdentityText(catalogProduct), lookupIdentity) < 0.45) {
+  if (
+    !hasExactStructuredPackageIdentity
+    && lookupIdentityTokens.size >= 3
+    && overlapScore(productIdentityText(catalogProduct), lookupIdentity) < 0.45
+  ) {
     return false;
   }
 
@@ -1764,6 +1790,7 @@ function buildResolveProductResult({
   products = [],
   selectedProduct = null,
   confidence = null,
+  stageTimings = null,
 } = {}) {
   const verificationQuery = compact(searchedQuery || query);
   // Catalog evidence quality is independent from how a user worded the
@@ -1790,6 +1817,7 @@ function buildResolveProductResult({
     products: verifiedProducts,
     selectedProduct: selected,
     recommendedProduct: selected,
+    stageTimings,
     verificationState: selected?.verificationState || verifiedProducts[0]?.verificationState || {
       state: status,
       label: status === CATALOG_QUALITY_STATES.EXCLUDED
@@ -1974,74 +2002,183 @@ async function searchWoofCatalogFuzzy(query, limit, { signal } = {}) {
 }
 
 async function searchWoofCatalogForLabelOcr(ocrText, queries, limit, signal) {
+  const startedAt = Date.now();
+  const seenQueries = new Set();
   const boundedQueries = (Array.isArray(queries) ? queries : [])
     .map(compact)
-    .filter((query) => query.length >= 2)
+    .filter((query) => {
+      const key = normalizeText(query);
+      if (query.length < 2 || !key || seenQueries.has(key)) return false;
+      seenQueries.add(key);
+      return true;
+    })
     .slice(0, 4);
-  if (boundedQueries.length === 0) return [];
+  if (boundedQueries.length === 0) {
+    return {
+      products: [],
+      timings: {
+        totalMs: Date.now() - startedAt,
+        fallbackTriggered: false,
+        fallbackReason: "no_query",
+      },
+    };
+  }
 
   const canonicalOcrText = normalizeLabelOcrText(ocrText);
+  const fastRpcStartedAt = Date.now();
   const { data, error } = await searchWoofCatalogLabelIdentities(
     boundedQueries,
     limit,
     signal
   );
+  const fastRpcMs = Date.now() - fastRpcStartedAt;
+  const fastRawCount = Array.isArray(data) ? data.length : 0;
+  let fastGateMs = 0;
+  let fastVisibleCandidateCount = 0;
   if (!error) {
+    const fastGateStartedAt = Date.now();
     const fastCandidates = rankProductsForOcr(
       filterProductsForOcr(
         (data || []).map((row) => normalizeCatalogProduct(row, "catalog")),
-        canonicalOcrText
+        canonicalOcrText,
+        { requireVisibleCandidateVariants: true }
       ),
       canonicalOcrText
     );
-    if (fastCandidates.length > 0) return fastCandidates;
+    fastGateMs = Date.now() - fastGateStartedAt;
+    fastVisibleCandidateCount = fastCandidates.length;
+    if (fastCandidates.length > 0) {
+      return {
+        products: fastCandidates,
+        timings: {
+          totalMs: Date.now() - startedAt,
+          fastRpcMs,
+          fastRawCount,
+          fastGateMs,
+          fastVisibleCandidateCount,
+          fallbackTriggered: false,
+          fallbackReason: null,
+          fallbackQueryCount: 0,
+          fallbackLookupWallMs: 0,
+          fallbackLookupSerialEquivalentMs: 0,
+          fallbackLookupSavedMs: 0,
+        },
+      };
+    }
   } else if (!rpcFunctionUnavailable(error)) {
     throw error;
   }
 
-  // Backward-compatible rollout path: at most two sequential indexed lookups.
+  // Backward-compatible rollout path: at most two parallel indexed lookups.
   // Never revive the previous 4 + 1 + 1 + 12 concurrent request fan-out.
-  const fallbackCandidates = [];
-  for (const query of boundedQueries.slice(0, 2)) {
-    if (signal?.aborted) break;
-    const matches = await searchWoofCatalog(query, 16, {
+  const fallbackQueries = boundedQueries.slice(0, 2);
+  const fallbackLookupStartedAt = Date.now();
+  const fallbackLookups = await Promise.all(fallbackQueries.map(async (fallbackQuery) => {
+    if (signal?.aborted) return { matches: [], latencyMs: 0 };
+    const lookupStartedAt = Date.now();
+    const matches = await searchWoofCatalog(fallbackQuery, 16, {
       signal,
       allowLegacyFallback: false,
       timeoutMs: LABEL_RPC_TIMEOUT_MS,
     });
-    fallbackCandidates.push(...matches);
-    const ranked = rankProductsForOcr(
-      filterProductsForOcr(fallbackCandidates, canonicalOcrText),
-      canonicalOcrText
-    );
-    if (ranked.length > 0) return ranked;
-  }
-  return fallbackCandidates;
+    return {
+      matches,
+      latencyMs: Date.now() - lookupStartedAt,
+    };
+  }));
+  const fallbackLookupWallMs = Date.now() - fallbackLookupStartedAt;
+  const fallbackLookupSerialEquivalentMs = fallbackLookups.reduce(
+    (total, lookup) => total + lookup.latencyMs,
+    0
+  );
+  const fallbackCandidates = fallbackLookups.flatMap((lookup) => lookup.matches);
+  const fallbackGateStartedAt = Date.now();
+  const rankedFallbackCandidates = rankProductsForOcr(
+    filterProductsForOcr(fallbackCandidates, canonicalOcrText, {
+      requireVisibleCandidateVariants: true,
+    }),
+    canonicalOcrText
+  );
+  const fallbackGateMs = Date.now() - fallbackGateStartedAt;
+
+  return {
+    products: rankedFallbackCandidates.length > 0
+      ? rankedFallbackCandidates
+      : fallbackCandidates,
+    timings: {
+      totalMs: Date.now() - startedAt,
+      fastRpcMs,
+      fastRawCount,
+      fastGateMs,
+      fastVisibleCandidateCount,
+      fallbackTriggered: true,
+      fallbackReason: error ? "identity_rpc_unavailable" : "rank_floor_empty",
+      fallbackQueryCount: fallbackQueries.length,
+      fallbackIndividualMs: fallbackLookups.map((lookup) => lookup.latencyMs),
+      fallbackRawCount: fallbackCandidates.length,
+      fallbackGateMs,
+      fallbackLookupWallMs,
+      fallbackLookupSerialEquivalentMs,
+      fallbackLookupSavedMs: Math.max(
+        0,
+        fallbackLookupSerialEquivalentMs - fallbackLookupWallMs
+      ),
+    },
+  };
 }
 
 async function searchWoofCatalogForLabelIdentity(queries, limit, signal) {
+  const startedAt = Date.now();
   const boundedQueries = (Array.isArray(queries) ? queries : [])
     .map(compact)
     .filter((query) => query.length >= 2)
     .slice(0, 4);
-  if (boundedQueries.length === 0) return [];
+  if (boundedQueries.length === 0) {
+    return {
+      products: [],
+      timings: { totalMs: Date.now() - startedAt, fallbackTriggered: false },
+    };
+  }
 
+  const fastRpcStartedAt = Date.now();
   const { data, error } = await searchWoofCatalogLabelIdentities(
     boundedQueries,
     limit,
     signal
   );
+  const fastRpcMs = Date.now() - fastRpcStartedAt;
   if (!error) {
-    return (data || []).map((row) => normalizeCatalogProduct(row, "catalog"));
+    return {
+      products: (data || []).map((row) => normalizeCatalogProduct(row, "catalog")),
+      timings: {
+        totalMs: Date.now() - startedAt,
+        fastRpcMs,
+        fastRawCount: Array.isArray(data) ? data.length : 0,
+        fallbackTriggered: false,
+      },
+    };
   }
   if (!rpcFunctionUnavailable(error)) throw error;
 
   logger.debug("[CATALOG] Fast label search unavailable; using one direct lookup:", error.message);
-  return searchWoofCatalog(boundedQueries[0], Math.min(Math.max(limit, 1), 16), {
+  const fallbackStartedAt = Date.now();
+  const products = await searchWoofCatalog(boundedQueries[0], Math.min(Math.max(limit, 1), 16), {
     signal,
     allowLegacyFallback: false,
     timeoutMs: LABEL_RPC_TIMEOUT_MS,
   });
+  return {
+    products,
+    timings: {
+      totalMs: Date.now() - startedAt,
+      fastRpcMs,
+      fastRawCount: Array.isArray(data) ? data.length : 0,
+      fallbackTriggered: true,
+      fallbackReason: "identity_rpc_unavailable",
+      fallbackQueryCount: 1,
+      fallbackLookupWallMs: Date.now() - fallbackStartedAt,
+    },
+  };
 }
 
 async function searchWoofCatalogLabelIdentities(queries, limit, signal) {
@@ -2209,17 +2346,18 @@ export async function resolveProduct({
       });
     }
 
-    const candidates = signal?.aborted
-      ? []
-      : filterProductsForOcr(
-        filterVerifiedLabelCatalogResults(
-          filterByPetType(
-            await searchWoofCatalogForLabelOcr(packageOcrText, searchQueries, 48, signal),
-            targetPetType
-          )
-        ),
-        packageOcrText
-      );
+    const lookupStartedAt = Date.now();
+    const labelLookup = signal?.aborted
+      ? { products: [], timings: { totalMs: 0, aborted: true } }
+      : await searchWoofCatalogForLabelOcr(packageOcrText, searchQueries, 48, signal);
+    const candidateGateStartedAt = Date.now();
+    const candidates = filterProductsForOcr(
+      filterVerifiedLabelCatalogResults(
+        filterByPetType(labelLookup.products, targetPetType)
+      ),
+      packageOcrText,
+      { requireVisibleCandidateVariants: true }
+    );
     const rankedCandidates = rankProductsForOcr(candidates, packageOcrText);
     const merged = mergeProducts(
       collapseFrontLabelSourceVersions(rankedCandidates),
@@ -2234,6 +2372,7 @@ export async function resolveProduct({
       ? [bestProduct.brand, bestProduct.productName].map(compact).filter(Boolean).join(" ")
       : searchQueries[0];
     const confidence = bestProduct?.ocrMatchScore || 0;
+    const candidateGateMs = Date.now() - candidateGateStartedAt;
     const identification = bestProduct ? {
       found: true,
       confidence,
@@ -2270,6 +2409,13 @@ export async function resolveProduct({
       products: ranked,
       selectedProduct,
       confidence,
+      stageTimings: {
+        ...labelLookup.timings,
+        lookupAndGateMs: Date.now() - lookupStartedAt,
+        candidateGateMs,
+        preGateCandidateCount: labelLookup.products.length,
+        postGateCandidateCount: ranked.length,
+      },
     });
   }
 
@@ -2326,14 +2472,14 @@ export async function resolveProduct({
 
     const effectiveQuery = correctCatalogSearchQuery(searchQuery).query || searchQuery;
     const targetPetType = normalizePetType(identification?.petType);
-    const candidates = signal?.aborted
-      ? []
-      : filterVerifiedLabelCatalogResults(
-        filterByPetType(
-          await searchWoofCatalogForLabelIdentity(searchQueries, 48, signal),
-          targetPetType
-        )
-      );
+    const lookupStartedAt = Date.now();
+    const labelLookup = signal?.aborted
+      ? { products: [], timings: { totalMs: 0, aborted: true } }
+      : await searchWoofCatalogForLabelIdentity(searchQueries, 48, signal);
+    const candidateGateStartedAt = Date.now();
+    const candidates = filterVerifiedLabelCatalogResults(
+      filterByPetType(labelLookup.products, targetPetType)
+    );
     const strictCandidates = filterLabelCandidatesForIdentification(identification, candidates);
     const products = mergeProducts(
       collapseFrontLabelSourceVersions(strictCandidates),
@@ -2342,6 +2488,7 @@ export async function resolveProduct({
       targetPetType
     );
     const selectedProduct = pickVerifiedProductForIdentification(identification, products);
+    const candidateGateMs = Date.now() - candidateGateStartedAt;
 
     return buildResolveProductResult({
       type,
@@ -2351,6 +2498,13 @@ export async function resolveProduct({
       products,
       selectedProduct,
       confidence: identification?.confidence ?? 0,
+      stageTimings: {
+        ...labelLookup.timings,
+        lookupAndGateMs: Date.now() - lookupStartedAt,
+        candidateGateMs,
+        preGateCandidateCount: labelLookup.products.length,
+        postGateCandidateCount: products.length,
+      },
     });
   }
 
@@ -2387,6 +2541,17 @@ export async function getCatalogProduct(cacheKey, { signal } = {}) {
   if (!key) return null;
   if (signal?.aborted) return null;
 
+  const cached = catalogProductCache.get(key);
+  if (cached) {
+    if ((Date.now() - cached.cachedAt) <= CATALOG_PRODUCT_CACHE_TTL_MS) {
+      // Refresh insertion order so the bounded map behaves as an LRU cache.
+      catalogProductCache.delete(key);
+      catalogProductCache.set(key, cached);
+      return cached.product;
+    }
+    catalogProductCache.delete(key);
+  }
+
   const controller = new AbortController();
   const onAbort = () => controller.abort();
   signal?.addEventListener?.("abort", onAbort, { once: true });
@@ -2413,7 +2578,14 @@ export async function getCatalogProduct(cacheKey, { signal } = {}) {
     return null;
   }
 
-  return data ? normalizeCatalogProduct(data, "catalog") : null;
+  if (!data) return null;
+
+  const product = normalizeCatalogProduct(data, "catalog");
+  catalogProductCache.set(key, { product, cachedAt: Date.now() });
+  while (catalogProductCache.size > CATALOG_PRODUCT_CACHE_MAX_ENTRIES) {
+    catalogProductCache.delete(catalogProductCache.keys().next().value);
+  }
+  return product;
 }
 
 export async function findVerifiedCatalogProductByBarcode(barcode, { signal } = {}) {

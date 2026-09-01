@@ -1,3 +1,9 @@
+import {
+  compareLabelIdentities,
+  packageWeightMeasurements,
+  packageWeightsOverlap,
+} from "./labelResolution";
+
 const MATCH_STOP_WORDS = new Set([
   "adult",
   "and",
@@ -325,9 +331,9 @@ function inferredFoodForm(value) {
   }
 
   const forms = new Set();
-  if (/\b(dry|kibble)\b/.test(text)) forms.add("dry");
+  if (/\b(dry|kibble|clusters|minichunks)\b/.test(text)) forms.add("dry");
   if (/\b(freeze dried|freshdried|dehydrated|air dried)\b/.test(text)) forms.add("freeze_dried");
-  if (/\b(wet|canned|pate|loaf|mousse|stew|gravy|sauce|morsels|shreds|cuts)\b/.test(text)) {
+  if (/\b(wet|canned|can|pate|loaf|mousse|stew|gravy|sauce|entree|classic ground|chunks in gravy|chunks in sauce|prime cuts|slices in gravy|slices in sauce|pouch|tray|tub|cup|cups)\b/.test(text)) {
     forms.add("wet");
   }
   if (/\b(fresh|refrigerated|frozen)\b/.test(text)) forms.add("fresh");
@@ -418,7 +424,9 @@ function brandVisibleInOcr(product = {}, ocrText = "") {
   return brandTokens.some((token) => ocrTokens.has(token));
 }
 
-function hasCompatibleOcrIdentity(product = {}, ocrText = "") {
+function hasCompatibleOcrIdentity(product = {}, ocrText = "", {
+  requireVisibleCandidateVariants = false,
+} = {}) {
   if (!brandVisibleInOcr(product, ocrText)) return false;
 
   const ocrPetType = inferredPetType(ocrText);
@@ -429,6 +437,15 @@ function hasCompatibleOcrIdentity(product = {}, ocrText = "") {
   const productFoodForm = inferredFoodForm(productIdentityText(product))
     || canonicalFoodForm(product.foodForm);
   if (ocrFoodForm && productFoodForm && ocrFoodForm !== productFoodForm) return false;
+  if (!compareLabelIdentities(
+    {
+      productName: ocrText,
+      packageSize: ocrText,
+      petType: ocrPetType,
+    },
+    product,
+    { requireVisibleCandidateVariants }
+  ).compatible) return false;
 
   const ocrLifeStage = lifeStageGroup(ocrText);
   const productLifeStage = lifeStageGroup(product, { product: true });
@@ -497,10 +514,10 @@ function hasCompatibleOcrIdentity(product = {}, ocrText = "") {
   return true;
 }
 
-export function filterProductsForOcr(products = [], ocrText = "") {
+export function filterProductsForOcr(products = [], ocrText = "", options = {}) {
   if (!normalizeText(ocrText)) return [];
   return (Array.isArray(products) ? products : [])
-    .filter((product) => hasCompatibleOcrIdentity(product, ocrText));
+    .filter((product) => hasCompatibleOcrIdentity(product, ocrText, options));
 }
 
 function tokenSet(value) {
@@ -678,13 +695,17 @@ export function labelOcrProductMatchScore(product = {}, ocrText = "") {
   ));
 }
 
+function productPackageSizeText(product = {}) {
+  return [
+    product.packageSize,
+    product.package_size,
+    ...(Array.isArray(product.availablePackageSizes) ? product.availablePackageSizes : []),
+    ...(Array.isArray(product.available_package_sizes) ? product.available_package_sizes : []),
+  ].filter(Boolean).join(" ");
+}
+
 function packageSizeMatchesOcr(product = {}, ocrText = "") {
-  const packageSize = String(product.packageSize || "").toLowerCase();
-  const packageSizeMatch = packageSize.match(/\b(\d+(?:\.\d+)?)\s*(lb|lbs|oz|kg|g)\b/);
-  if (!packageSizeMatch) return false;
-  return new RegExp(
-    `\\b${packageSizeMatch[1].replace(".", "\\.")}\\s*${packageSizeMatch[2]}s?\\b`
-  ).test(String(ocrText || "").toLowerCase());
+  return packageWeightsOverlap(ocrText, productPackageSizeText(product));
 }
 
 export function rankProductsForOcr(products = [], ocrText = "") {
@@ -761,6 +782,13 @@ export function pickVerifiedProductForOcr(products = [], ocrText = "") {
   const [best] = products;
   if (!best || best.ocrMatchScore < AUTO_OPEN_SCORE) return null;
   if (distinctiveTokenCount(ocrText) < 3) return null;
+  const visibleMeasurements = packageWeightMeasurements(ocrText);
+  const candidateMeasurements = packageWeightMeasurements(productPackageSizeText(best));
+  if (
+    visibleMeasurements.length > 0
+    && candidateMeasurements.length > 0
+    && !packageSizeMatchesOcr(best, ocrText)
+  ) return null;
   const bestFormulaKey = ocrFormulaKey(best);
   const frontIndistinguishableVersions = products.filter(
     (product) => ocrFormulaKey(product) === bestFormulaKey

@@ -462,6 +462,9 @@ export default function ScannerScreen({ navigation, route }) {
     const isCurrentCapture = () => captureRunIdRef.current === captureRunId;
     let captureStage = "camera_capture";
     const captureStartedAt = Date.now();
+    let cameraCaptureMs = null;
+    let scanFrameCropMs = null;
+    let imageOptimizationAndOcrWallMs = null;
 
     setCaptureProgress("Capturing photo…");
     setCapturing(true);
@@ -482,6 +485,7 @@ export default function ScannerScreen({ navigation, route }) {
       const photo = await cameraRef.current.takePictureAsync({
         quality: isLabelLookup ? 0.72 : 0.8,
       });
+      cameraCaptureMs = Date.now() - captureStartedAt;
       if (!isCurrentCapture()) return;
 
       if (!photo?.uri) {
@@ -518,6 +522,7 @@ export default function ScannerScreen({ navigation, route }) {
         height: scanFrameCrop.height / photo.height,
       };
       const shouldUseNativeCrop = Platform.OS === "ios" && nativeLabelCropIsAvailable();
+      const scanFrameCropStartedAt = Date.now();
       const nativeFramedPhoto = shouldUseNativeCrop
         ? await cropLabelToNormalizedRegion(photo.uri, normalizedCrop)
         : null;
@@ -535,6 +540,7 @@ export default function ScannerScreen({ navigation, route }) {
       const cropEngine = nativeFramedPhoto
         ? "woof_native_uikit"
         : "expo_image_manipulator_fallback";
+      scanFrameCropMs = Date.now() - scanFrameCropStartedAt;
       if (!isCurrentCapture()) return;
 
       // Start at a label-readable size that usually meets the upload target in
@@ -550,6 +556,7 @@ export default function ScannerScreen({ navigation, route }) {
       // OCR and visual recognition must inspect the same pixels inside the
       // highlighted frame. Never allow surrounding shelf or browser text to
       // compete with the product label the user intentionally framed.
+      const imageOptimizationAndOcrStartedAt = Date.now();
       const labelOcrPromise = isLabelLookup && labelOcrIsAvailable()
         ? recognizeLabelText(framedPhoto.uri)
         : Promise.resolve(null);
@@ -560,6 +567,7 @@ export default function ScannerScreen({ navigation, route }) {
         } : undefined),
         labelOcrPromise,
       ]);
+      imageOptimizationAndOcrWallMs = Date.now() - imageOptimizationAndOcrStartedAt;
       if (!isCurrentCapture()) return;
 
       if (isLabelLookup) {
@@ -630,6 +638,10 @@ export default function ScannerScreen({ navigation, route }) {
         target_width: resized.targetWidth,
         compression: resized.compression,
         capture_to_handoff_ms: Date.now() - captureStartedAt,
+        camera_capture_ms: cameraCaptureMs,
+        scan_frame_crop_ms: scanFrameCropMs,
+        image_optimization_and_ocr_wall_ms: imageOptimizationAndOcrWallMs,
+        on_device_ocr_ms: isLabelLookup ? Math.round(labelOcr?.durationMs || 0) : null,
       });
 
       setCaptureProgress(
@@ -651,6 +663,13 @@ export default function ScannerScreen({ navigation, route }) {
           labelOcrDurationMs: labelOcr?.usable ? labelOcr.durationMs : null,
           labelCaptureId: `${Date.now()}`,
           labelCaptureStartedAt: captureStartedAt,
+          labelStageTimings: {
+            cameraCaptureMs,
+            scanFrameCropMs,
+            imageOptimizationAndOcrWallMs,
+            onDeviceOcrMs: Math.round(labelOcr?.durationMs || 0),
+            captureToHandoffMs: Date.now() - captureStartedAt,
+          },
           labelAttempt: Math.max(1, Number(route.params?.labelAttempt) || 1),
           sourceSurface: "scanner_label_lookup",
         };

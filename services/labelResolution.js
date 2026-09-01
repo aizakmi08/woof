@@ -55,11 +55,31 @@ const LIFE_STAGE_GROUPS = [
 ];
 const FORM_GROUPS = [
   new Set(["freeze dried", "dehydrated", "air dried"]),
-  new Set(["wet", "canned", "pate", "loaf", "mousse", "stew", "gravy", "pouch"]),
+  new Set([
+    "wet",
+    "canned",
+    "pate",
+    "loaf",
+    "mousse",
+    "stew",
+    "gravy",
+    "pouch",
+    "entree",
+    "classic ground",
+    "chunks in gravy",
+    "chunks in sauce",
+    "can",
+    "tray",
+    "tub",
+    "cup",
+    "cups",
+  ]),
   new Set(["semi moist", "soft dry", "soft"]),
-  new Set(["dry", "kibble"]),
+  new Set(["dry", "kibble", "clusters", "minichunks"]),
   new Set(["fresh", "refrigerated", "frozen"]),
 ];
+const WET_FORM_GROUP = 1;
+const DRY_FORM_GROUP = 3;
 const FORMULA_VARIANT_TERMS = new Set([
   "ancient grains",
   "brown rice",
@@ -146,6 +166,7 @@ export function normalizeIdentityText(value) {
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .replace(/\bsmall and mini\b/g, "small mini")
+    .replace(/\bgrains? and legume free\b/g, "grain free")
     .trim();
 }
 
@@ -187,6 +208,106 @@ function normalizedPetType(value) {
 function matchingGroup(value, groups) {
   const text = normalizeIdentityText(labelIdentityText(value));
   return groups.findIndex((group) => [...group].some((term) => phrasePresent(text, term)));
+}
+
+function matchingFoodFormGroups(value = {}) {
+  const text = normalizeIdentityText(labelIdentityText(value));
+  if (/\b(?:raw|broth) coated\b/.test(text)) {
+    return [DRY_FORM_GROUP];
+  }
+  return FORM_GROUPS
+    .map((group, index) => (
+      [...group].some((term) => phrasePresent(text, term)) ? index : -1
+    ))
+    .filter((index) => index >= 0);
+}
+
+function matchingFoodFormGroup(value = {}) {
+  const matchingGroups = matchingFoodFormGroups(value);
+  if (matchingGroups.length <= 1) return matchingGroups[0] ?? -1;
+
+  const packageGroup = packageFormEvidenceGroup(value);
+  return matchingGroups.includes(packageGroup) ? packageGroup : -1;
+}
+
+function weightInGrams(amount, unit) {
+  if (["lb", "lbs", "pound", "pounds"].includes(unit)) return amount * 453.59237;
+  if (["kg", "kilogram", "kilograms"].includes(unit)) return amount * 1000;
+  if (["oz", "ounce", "ounces"].includes(unit)) return amount * 28.349523125;
+  return amount;
+}
+
+export function packageWeightMeasurements(value = {}) {
+  const text = compact(typeof value === "string" ? value : labelIdentityText(value)).toLowerCase();
+  const measurements = [];
+  const pattern = /\b(\d+(?:[.,]\d+)?)\s*(lb|lbs|pound|pounds|kg|kilogram|kilograms|oz|ounce|ounces|g|gram|grams)\b/g;
+  let match;
+  while ((match = pattern.exec(text)) !== null) {
+    const amount = Number(match[1].replace(",", "."));
+    if (Number.isFinite(amount) && amount > 0) {
+      measurements.push({
+        amount,
+        unit: match[2],
+        grams: weightInGrams(amount, match[2]),
+      });
+    }
+  }
+  return measurements;
+}
+
+export function packageWeightsOverlap(left = {}, right = {}, tolerance = 0.035) {
+  const leftMeasurements = packageWeightMeasurements(left);
+  const rightMeasurements = packageWeightMeasurements(right);
+  if (leftMeasurements.length === 0 || rightMeasurements.length === 0) return false;
+
+  return leftMeasurements.some((leftMeasurement) => (
+    rightMeasurements.some((rightMeasurement) => {
+      const difference = Math.abs(leftMeasurement.grams - rightMeasurement.grams);
+      const scale = Math.max(leftMeasurement.grams, rightMeasurement.grams);
+      return difference <= Math.max(2, scale * tolerance);
+    })
+  ));
+}
+
+function packageFormEvidenceGroup(value = {}) {
+  const packageText = normalizeIdentityText(labelIdentityText(value));
+  if (
+    /\b(?:cans|pouches|trays|tubs)\b/.test(packageText)
+    || /\b\d+(?:[.,]\d+)?\s*(?:oz|ounce|ounces|g|gram|grams)\s+can\b/.test(packageText)
+  ) {
+    return WET_FORM_GROUP;
+  }
+  if (/\b(?:bag|bags)\b/.test(packageText)) return DRY_FORM_GROUP;
+
+  // Explicit form wording is stronger than package scale. This keeps a
+  // multi-can case whose total is expressed in pounds from becoming "dry",
+  // and a small dry trial bag expressed in ounces from becoming "wet".
+  if (matchingFoodFormGroups(value).length === 1) return -1;
+
+  const measurements = packageWeightMeasurements(value);
+  if (measurements.some(({ unit }) => (
+    ["lb", "lbs", "pound", "pounds", "kg", "kilogram", "kilograms"].includes(unit)
+  ))) {
+    return DRY_FORM_GROUP;
+  }
+
+  const hasCanScaleWeight = measurements.some(({ amount, unit }) => {
+    if (["oz", "ounce", "ounces"].includes(unit)) return amount <= 30;
+    if (["g", "gram", "grams"].includes(unit)) return amount <= (30 * 28.349523125);
+    return false;
+  });
+  return hasCanScaleWeight ? WET_FORM_GROUP : -1;
+}
+
+function foodFormEvidenceGroup(value = {}) {
+  const visibleForm = matchingFoodFormGroup(value);
+  const packageForm = packageFormEvidenceGroup(value);
+  return visibleForm >= 0 ? visibleForm : packageForm;
+}
+
+function visiblePackageSize(value = {}) {
+  const measurements = packageWeightMeasurements(value);
+  return measurements.map(({ amount, unit }) => `${amount} ${unit}`).join(" / ");
 }
 
 function matchingLifeStageGroup(value = {}) {
@@ -235,7 +356,7 @@ function presentTerms(value, terms) {
 function identityFormulaKey(product = {}) {
   const identity = normalizeIdentityText(labelIdentityText(product));
   const lifeStageGroup = matchingLifeStageGroup(product);
-  const foodFormGroup = matchingGroup(product, FORM_GROUPS);
+  const foodFormGroup = matchingFoodFormGroup(product);
   const protectedParts = [
     ...presentTerms(product, PRODUCT_LINE_TERMS),
     ...presentTerms(product, RECIPE_TERMS),
@@ -323,14 +444,39 @@ export function compareLabelIdentities(left = {}, right = {}, {
     reasonCodes.push("candidate_life_stage_not_visible");
   }
 
-  const leftForm = matchingGroup(left, FORM_GROUPS);
-  const rightForm = matchingGroup(right, FORM_GROUPS);
+  const leftPackageForm = packageFormEvidenceGroup(left);
+  const rightPackageForm = packageFormEvidenceGroup(right);
+  const leftForm = foodFormEvidenceGroup(left);
+  const rightForm = foodFormEvidenceGroup(right);
   if (leftForm >= 0 && rightForm >= 0) {
     if (leftForm === rightForm) agreementFields.push("food_form");
     else {
       disagreementFields.push("food_form");
       reasonCodes.push("food_form_conflict");
     }
+  } else if (requireVisibleCandidateVariants && rightForm >= 0 && leftForm < 0) {
+    disagreementFields.push("food_form");
+    reasonCodes.push("candidate_food_form_not_visible");
+  }
+
+  const packageFormConflict = (
+    leftPackageForm >= 0
+    && rightForm >= 0
+    && leftPackageForm !== rightForm
+  ) || (
+    rightPackageForm >= 0
+    && leftForm >= 0
+    && rightPackageForm !== leftForm
+  );
+  if (packageFormConflict) {
+    disagreementFields.push("package_size");
+    reasonCodes.push("package_size_form_conflict");
+  } else if (
+    leftPackageForm >= 0
+    && rightPackageForm >= 0
+    && leftPackageForm === rightPackageForm
+  ) {
+    agreementFields.push("package_size_form");
   }
 
   const leftLines = presentTerms(left, PRODUCT_LINE_TERMS);
@@ -353,6 +499,13 @@ export function compareLabelIdentities(left = {}, right = {}, {
     else {
       disagreementFields.push("product_line");
       reasonCodes.push("product_line_conflict");
+    }
+  }
+  if (requireVisibleCandidateVariants) {
+    const hiddenCandidateLines = rightLines.filter((term) => !leftLines.includes(term));
+    if (hiddenCandidateLines.length) {
+      disagreementFields.push("product_line");
+      reasonCodes.push("candidate_product_line_not_visible");
     }
   }
 
@@ -542,14 +695,44 @@ function deterministicOcrProduct(outcome) {
   ) return null;
 
   const comparison = compareLabelIdentities(
-    identification,
+    outcomeVisibleIdentity(outcome),
     selected,
     { requireVisibleCandidateVariants: true }
   );
   return comparison.compatible ? selected : null;
 }
 
+function visiblePetType(value) {
+  const text = normalizeIdentityText(value);
+  if (/\b(?:dog|dogs|canine)\b/.test(text)) return "dog";
+  if (/\b(?:cat|cats|feline)\b/.test(text)) return "cat";
+  return "";
+}
+
+function outcomeVisibleIdentity(outcome) {
+  const identification = outcomeIdentity(outcome);
+  if (outcome?.path !== "on_device_ocr") return identification;
+
+  const visibleText = compact(outcome?.result?.query || outcome?.result?.ocrText);
+  if (!visibleText) return identification;
+  return {
+    ...identification,
+    manufacturer: "",
+    consumerBrand: "",
+    brand: "",
+    productLine: "",
+    productName: visibleText,
+    flavor: "",
+    lifeStage: "",
+    foodForm: "",
+    packageSize: visiblePackageSize(visibleText),
+    petType: visiblePetType(visibleText),
+  };
+}
+
 function identityEvidence(identity = {}) {
+  const explicitFoodForm = compact(identity.foodForm);
+  const formEvidenceGroup = foodFormEvidenceGroup(identity);
   return {
     manufacturer: compact(identity.manufacturer),
     consumerBrand: consumerBrandForIdentity(identity),
@@ -558,7 +741,13 @@ function identityEvidence(identity = {}) {
     productName: compact(identity.productName),
     flavor: compact(identity.flavor),
     lifeStage: compact(identity.lifeStage),
-    foodForm: compact(identity.foodForm),
+    foodForm: explicitFoodForm,
+    foodFormEvidence: formEvidenceGroup === DRY_FORM_GROUP
+      ? "dry"
+      : formEvidenceGroup === WET_FORM_GROUP
+        ? "wet"
+        : explicitFoodForm,
+    packageSize: compact(identity.packageSize) || visiblePackageSize(identity),
     petType: normalizedPetType(identity) || "unknown",
   };
 }
@@ -614,10 +803,11 @@ export function reconcileLabelOutcomes(outcomes = [], {
   const primaryIdentification = { ...outcomeIdentity(primary) };
   const visualIdentification = outcomeIdentity(visual);
   const ocrIdentification = outcomeIdentity(ocr);
+  const visibleOcrIdentification = outcomeVisibleIdentity(ocr);
   const visualSelected = outcomeSelected(visual);
   const ocrSelected = outcomeSelected(ocr);
   const identityComparison = visual && ocr
-    ? compareLabelIdentities(ocrIdentification, visualIdentification)
+    ? compareLabelIdentities(visibleOcrIdentification, visualIdentification)
     : { compatible: true, agreementFields: [], disagreementFields: [], reasonCodes: [] };
   const bothExcluded = visualIdentification.excluded === true && ocrIdentification.excluded === true;
   let decision = LABEL_RESOLUTION_DECISIONS.NOT_READABLE;
@@ -639,18 +829,25 @@ export function reconcileLabelOutcomes(outcomes = [], {
     reasonCodes.push("recognizer_identity_conflict");
   } else if (visual && ocr && visualSelected && ocrSelected) {
     const sameFormula = productKey(visualSelected) === productKey(ocrSelected);
-    const visibleCandidateComparison = compareLabelIdentities(
-      { ...ocrIdentification, ...visualIdentification },
-      visualSelected,
-      { requireVisibleCandidateVariants: true }
-    );
-    if (sameFormula && visibleCandidateComparison.compatible) {
+    const visibleCandidateComparisons = [
+      compareLabelIdentities(
+        visibleOcrIdentification,
+        visualSelected,
+        { requireVisibleCandidateVariants: true }
+      ),
+      compareLabelIdentities(
+        visualIdentification,
+        visualSelected,
+        { requireVisibleCandidateVariants: true }
+      ),
+    ];
+    if (sameFormula && visibleCandidateComparisons.every((comparison) => comparison.compatible)) {
       decision = LABEL_RESOLUTION_DECISIONS.EXACT_CONFIRMED;
       confirmedProduct = visualSelected;
     } else {
       decision = LABEL_RESOLUTION_DECISIONS.RECOGNIZERS_DISAGREE;
       reasonCodes.push(
-        ...visibleCandidateComparison.reasonCodes,
+        ...visibleCandidateComparisons.flatMap((comparison) => comparison.reasonCodes),
         sameFormula ? "candidate_variant_not_confirmed" : "recognizers_selected_different_products"
       );
     }
@@ -727,7 +924,7 @@ export function reconcileLabelOutcomes(outcomes = [], {
       pathsAvailable: completed.map((outcome) => outcome.path),
       pathsFailed: errors.map((outcome) => outcome.path),
       recognizedIdentity: {
-        onDeviceOcr: identityEvidence(ocrIdentification),
+        onDeviceOcr: identityEvidence(visibleOcrIdentification),
         cloudImage: identityEvidence(visualIdentification),
       },
       agreementFields: identityComparison.agreementFields,
@@ -750,6 +947,9 @@ export function reconcileLabelOutcomes(outcomes = [], {
         : "not_confirmed",
       strictMatching,
       autoOpenEnabled,
+      autoOpenFired: Boolean(selectedProduct),
+      resultMode: selectedProduct ? "auto_open" : "candidate_list_or_abstention",
+      confirmedCandidate: identityEvidence(confirmedProduct || {}),
     },
   };
 }
