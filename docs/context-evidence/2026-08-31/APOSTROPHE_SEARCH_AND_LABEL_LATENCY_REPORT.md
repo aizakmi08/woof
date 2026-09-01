@@ -51,7 +51,7 @@ Read-only `EXPLAIN (ANALYZE, BUFFERS)` measurements:
 | `Newman's Own` | 48.5 ms | 0 rows |
 | `newmans own` | 30.5 ms | 0 rows |
 
-The migration-local assertions verify query shape and apostrophe/plain equivalence. The separate post-apply audit runs all six public RPC probes under a verification-only 3 s local timeout, requires the expected brand, rejects a one-character prefix, and requires each probe to complete within 2.5 s.
+The migration-local assertions verify query shape and apostrophe/plain equivalence. The separate post-apply audit runs all six public RPC probes under an 18 s total watchdog, requires the expected brand when eligible catalog evidence exists, rejects a one-character prefix, and independently requires each probe to complete within 2.5 s. The timeout is intentionally a total watchdog because PostgreSQL applies `statement_timeout` to the entire `DO` statement, not each loop iteration.
 
 No permanent `statement_timeout` change is included. After the fixed production p95 is measured below 2.5 s, a follow-up function-level 4 s timeout is reasonable; applying it before verifying the query plan would hide the underlying regression.
 
@@ -197,3 +197,21 @@ It does not repair the root prefix-query shape. The bounded-prefix helper is sti
 | `newmans own` | 0 rows |
 
 Therefore the index migration is preserved in this branch, but it is not a substitute for the pending bounded-prefix migration or its six-query post-apply audit.
+
+## 2026-09-01 systemic hardening
+
+The production index fixed Eric's exact observed timeout, but the root query-shape defect still exists until the pending migration is approved. The migration and its permanent regression gate now protect the whole class rather than only the three reported brands:
+
+- input is truncated to 512 characters before normalization;
+- at most 12 tokens are accepted, and each token must be 2–64 alphanumeric characters;
+- a singular alternative is generated only for bounded alphabetic words ending in `s`;
+- curly apostrophes, straight apostrophes, hyphens, and ampersands share the same normalized path;
+- malformed punctuation-only, one-character, and oversized-token inputs resolve to `NULL`;
+- the install-time assertion scans every regular function in `public`, not a fixed function-name allowlist, for the unsafe whitespace-to-`:* &` builder;
+- the repository check rejects any later timestamped migration that reintroduces that builder.
+
+The post-apply audit also distinguishes search correctness from catalog eligibility. It requires a brand result when an eligible, current, verified complete-food row exists. When no such row exists—as is currently true for Newman's Own—it records a `verified catalog gap` instead of weakening ingredient, image, source, or complete-food verification gates to manufacture a result.
+
+The clean label identity RPC is not server-CPU bound: a fresh read-only warm `EXPLAIN (ANALYZE, BUFFERS)` for four representative Hill's queries completed in **246.6 ms** and returned 19 rows. The simulator's 1704 ms RPC stage is therefore predominantly cold/network time. No risky SQL rewrite was made under a false bottleneck assumption. Instead, successful full-product hydration now uses a ten-minute, 24-entry LRU cache, while preserving cancellation and never caching failures. Its behavioral contract proves repeated keys use one request, aborted work performs no request/cache mutation, and the least-recently-used entry is evicted at the bound.
+
+The full release gate passed again after these changes, in the documented fail-fast order: 173 syntax-scanned files, the behavioral resolver contract, catalog quality, 814 SQL migrations, 808 deployable audit migrations and five functions, eight pet-safety scenarios, 61 claim-safety files, and final verification with 814 migrations.

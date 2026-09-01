@@ -35,6 +35,9 @@ const DEFAULT_LIMIT = 16;
 // normally completes far earlier, but retains enough cold-start/network margin.
 const CATALOG_RPC_TIMEOUT_MS = 6_000;
 const LABEL_RPC_TIMEOUT_MS = 4_500;
+const CATALOG_PRODUCT_CACHE_TTL_MS = 10 * 60 * 1000;
+const CATALOG_PRODUCT_CACHE_MAX_ENTRIES = 24;
+const catalogProductCache = new Map();
 const LABEL_IDENTITY_RPC = "search_verified_product_identities_for_label";
 const LEGACY_LABEL_RPC = "search_verified_products_for_label_fast";
 const MIN_SCORABLE_CATALOG_RANK = 3;
@@ -2510,6 +2513,17 @@ export async function getCatalogProduct(cacheKey, { signal } = {}) {
   if (!key) return null;
   if (signal?.aborted) return null;
 
+  const cached = catalogProductCache.get(key);
+  if (cached) {
+    if ((Date.now() - cached.cachedAt) <= CATALOG_PRODUCT_CACHE_TTL_MS) {
+      // Refresh insertion order so the bounded map behaves as an LRU cache.
+      catalogProductCache.delete(key);
+      catalogProductCache.set(key, cached);
+      return cached.product;
+    }
+    catalogProductCache.delete(key);
+  }
+
   const controller = new AbortController();
   const onAbort = () => controller.abort();
   signal?.addEventListener?.("abort", onAbort, { once: true });
@@ -2536,7 +2550,14 @@ export async function getCatalogProduct(cacheKey, { signal } = {}) {
     return null;
   }
 
-  return data ? normalizeCatalogProduct(data, "catalog") : null;
+  if (!data) return null;
+
+  const product = normalizeCatalogProduct(data, "catalog");
+  catalogProductCache.set(key, { product, cachedAt: Date.now() });
+  while (catalogProductCache.size > CATALOG_PRODUCT_CACHE_MAX_ENTRIES) {
+    catalogProductCache.delete(catalogProductCache.keys().next().value);
+  }
+  return product;
 }
 
 export async function findVerifiedCatalogProductByBarcode(barcode, { signal } = {}) {

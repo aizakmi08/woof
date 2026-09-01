@@ -48,6 +48,32 @@ function loadCatalogMergeModule() {
   return new Function(`
     const createLogger = () => ({ debug() {} });
     const catalogProductIsVerifiedReady = () => true;
+    const catalogVerificationState = () => ({ state: "verified_ready", readyToScore: true });
+    let catalogHydrationCallCount = 0;
+    const supabase = {
+      from() {
+        let cacheKey = "";
+        return {
+          select() { return this; },
+          eq(_column, value) { cacheKey = value; return this; },
+          abortSignal() { return this; },
+          async maybeSingle() {
+            catalogHydrationCallCount += 1;
+            return {
+              data: {
+                cache_key: cacheKey,
+                product_name: \`Fixture \${cacheKey}\`,
+                brand: "Fixture Brand",
+                pet_type: "dog",
+                ingredient_count: 5,
+                ingredients: ["chicken", "rice", "oats", "fat", "vitamins"],
+              },
+              error: null,
+            };
+          },
+        };
+      },
+    };
     ${labelResolutionSource}
     ${source}
     return {
@@ -71,6 +97,8 @@ function loadCatalogMergeModule() {
       sortCatalogSearchProducts,
       mergeProducts,
       nonCompleteFoodReason,
+      getCatalogProduct,
+      catalogHydrationCalls: () => catalogHydrationCallCount,
     };
   `)();
 }
@@ -146,6 +174,36 @@ function assert(condition, message) {
   if (!condition) {
     throw new Error(message);
   }
+}
+
+async function checkCatalogHydrationCache(catalogApi) {
+  const first = await catalogApi.getCatalogProduct("fixture:cache");
+  const second = await catalogApi.getCatalogProduct("fixture:cache");
+  assert(
+    first?.cacheKey === "fixture:cache"
+      && second?.cacheKey === "fixture:cache"
+      && catalogApi.catalogHydrationCalls() === 1,
+    "repeated catalog hydration must reuse the bounded in-memory cache"
+  );
+
+  const aborted = new AbortController();
+  aborted.abort();
+  const callsBeforeAbort = catalogApi.catalogHydrationCalls();
+  assert(
+    await catalogApi.getCatalogProduct("fixture:aborted", { signal: aborted.signal }) === null
+      && catalogApi.catalogHydrationCalls() === callsBeforeAbort,
+    "an aborted hydration must not read from or write to the catalog cache"
+  );
+
+  for (let index = 0; index < 25; index += 1) {
+    await catalogApi.getCatalogProduct(`fixture:lru:${index}`);
+  }
+  const callsBeforeEvictedRead = catalogApi.catalogHydrationCalls();
+  await catalogApi.getCatalogProduct("fixture:cache");
+  assert(
+    catalogApi.catalogHydrationCalls() === callsBeforeEvictedRead + 1,
+    "catalog hydration cache must evict its least-recently-used entry at the configured bound"
+  );
 }
 
 async function checkHighlightedCameraFrameCrop() {
@@ -1585,6 +1643,121 @@ function checkFoodFormBoundaryRegression(catalogApi, labelResolutionApi, ocrApi)
     "the on-device OCR compatibility gate must exclude the Purina wet can before ranking"
   );
 
+  const wrongDrySize = {
+    ...purinaDry,
+    cacheKey: "fixture:purina-dry-13lb",
+    packageSize: "13 lb",
+  };
+  const wrongDrySizeRanked = ocrApi.rankProductsForOcr(
+    [wrongDrySize],
+    "PURINA ONE CHICKEN & RICE FORMULA COMPLETE ADULT DRY DOG FOOD NET WT 8 LB"
+  );
+  assert(
+    wrongDrySizeRanked.length === 1
+      && ocrApi.pickVerifiedProductForOcr(
+        wrongDrySizeRanked,
+        "PURINA ONE CHICKEN & RICE FORMULA COMPLETE ADULT DRY DOG FOOD NET WT 8 LB"
+      ) === null,
+    "a strong same-form OCR match must not auto-open a known incompatible package weight"
+  );
+
+  const metricEquivalentDry = {
+    ...purinaDry,
+    cacheKey: "fixture:purina-dry-metric",
+    packageSize: "3.63 kg",
+  };
+  const metricEquivalentRanked = ocrApi.rankProductsForOcr(
+    [metricEquivalentDry],
+    "PURINA ONE CHICKEN & RICE FORMULA COMPLETE ADULT DRY DOG FOOD NET WT 8 LB"
+  );
+  assert(
+    ocrApi.pickVerifiedProductForOcr(
+      metricEquivalentRanked,
+      "PURINA ONE CHICKEN & RICE FORMULA COMPLETE ADULT DRY DOG FOOD NET WT 8 LB"
+    )?.cacheKey === metricEquivalentDry.cacheKey,
+    "equivalent imperial and metric package weights must remain auto-open compatible"
+  );
+
+  const wetMultipack = labelResolutionApi.compareLabelIdentities(
+    {
+      brand: "North Star Pet",
+      productName: "Chicken in Gravy Wet Dog Food 12 Cans",
+      packageSize: "NET WT 9.75 LB (12 x 13 OZ cans)",
+      petType: "dog",
+    },
+    {
+      ...inventedWet,
+      productName: "North Star Pet Chicken in Gravy Wet Dog Food",
+      productLine: "",
+      packageSize: "12 x 13 oz cans",
+    },
+    { requireVisibleCandidateVariants: true }
+  );
+  assert(
+    wetMultipack.compatible && !wetMultipack.reasonCodes.includes("food_form_conflict"),
+    "explicit wet/container evidence must keep a multi-pound case of cans wet"
+  );
+
+  const smallDryBag = labelResolutionApi.compareLabelIdentities(
+    {
+      brand: "North Star Pet",
+      productName: "Chicken and Rice Dry Dog Food",
+      packageSize: "13 oz bag",
+      petType: "dog",
+    },
+    {
+      ...inventedDry,
+      productName: "North Star Pet Chicken and Rice Dry Dog Food",
+      productLine: "",
+      packageSize: "13 oz bag",
+    },
+    { requireVisibleCandidateVariants: true }
+  );
+  assert(
+    smallDryBag.compatible && !smallDryBag.reasonCodes.includes("food_form_conflict"),
+    "explicit dry wording must keep a small ounce-denominated trial bag dry"
+  );
+
+  const bagOnlyBoundary = labelResolutionApi.compareLabelIdentities(
+    {
+      brand: "North Star Pet",
+      productName: "Chicken and Rice Adult Dog Food",
+      packageSize: "NET WT 13 OZ BAG",
+      petType: "dog",
+    },
+    {
+      ...inventedWet,
+      productName: "North Star Pet Chicken and Rice Wet Dog Food",
+      productLine: "",
+      packageSize: "13 oz can",
+    },
+    { requireVisibleCandidateVariants: true }
+  );
+  assert(
+    !bagOnlyBoundary.compatible
+      && bagOnlyBoundary.reasonCodes.includes("food_form_conflict"),
+    "a visible bag must never resolve to a same-weight can when explicit form text is absent"
+  );
+
+  const freezeDriedConflict = labelResolutionApi.compareLabelIdentities(
+    {
+      brand: "North Star Pet",
+      productName: "Chicken Freeze-Dried Dog Food",
+      petType: "dog",
+    },
+    {
+      ...inventedDry,
+      productName: "North Star Pet Chicken Dry Kibble Dog Food",
+      foodForm: "dry",
+    },
+    { requireVisibleCandidateVariants: true }
+  );
+  assert(
+    !freezeDriedConflict.compatible
+      && freezeDriedConflict.reasonCodes.includes("food_form_conflict"),
+    "freeze-dried and conventional dry food must remain distinct form boundaries"
+  );
+
   const poundToOunceConflict = labelResolutionApi.compareLabelIdentities(
     purinaDryLabel,
     purinaWet,
@@ -2140,6 +2313,10 @@ function checkResolverWiring() {
     path.join(root, "supabase", "functions", "product-lookup", "index.ts"),
     "utf8"
   );
+  const labelLookup = fs.readFileSync(
+    path.join(root, "supabase", "functions", "label-lookup", "index.ts"),
+    "utf8"
+  );
   const historyService = fs.readFileSync(path.join(root, "services", "history.js"), "utf8");
   const resultsComponents = fs.readFileSync(path.join(root, "screens", "ResultsScreen", "components.js"), "utf8");
   const authService = fs.readFileSync(path.join(root, "services", "auth.js"), "utf8");
@@ -2293,6 +2470,13 @@ function checkResolverWiring() {
     "the on-device audit must exercise the same RPC and timeout contract as the app"
   );
   assert(
+    /multi-pound upright bag or visible kibble is dry/.test(labelLookup)
+      && /bag must not become wet merely because its net weight is written in ounces/.test(labelLookup)
+      && /multi-can or multi-pouch case/.test(labelLookup)
+      && /meaty morsels in every bite/.test(labelLookup),
+    "cloud recognition must distinguish physical package form from marketing copy and multipack total weight"
+  );
+  assert(
     /onTimeout: abortRequests/.test(productSearchScreen)
       && /finish\(\{ cancelPending: true \}\)/.test(productSearchScreen)
       && /mergeAutomaticLabelRecovery/.test(productSearchScreen)
@@ -2308,6 +2492,13 @@ function checkResolverWiring() {
       && !/prefetchCatalogHydration\(result\.selectedProduct, requestController\.signal\)/.test(productSearchScreen)
       && /catalog_product_hydration_completed/.test(productSearchScreen),
     "lightweight identity results must prefetch and reuse verified ingredients before analysis opens"
+  );
+  assert(
+    /CATALOG_PRODUCT_CACHE_TTL_MS = 10 \* 60 \* 1000/.test(productCatalog)
+      && /CATALOG_PRODUCT_CACHE_MAX_ENTRIES = 24/.test(productCatalog)
+      && /catalogProductCache\.get\(key\)/.test(productCatalog)
+      && /catalogProductCache\.delete\(catalogProductCache\.keys\(\)\.next\(\)\.value\)/.test(productCatalog),
+    "successful catalog hydration must use a short-lived bounded cache across repeated scan and search paths"
   );
   assert(
     /Promise\.all\(fallbackQueries\.map\(async/.test(productCatalog)
@@ -2558,6 +2749,7 @@ checkLabelOcrMatchingCases(labelOcrMatchingApi);
 await checkHighlightedCameraFrameCrop();
 await checkReviewPromptCadence();
 const catalogApi = loadCatalogMergeModule();
+await checkCatalogHydrationCache(catalogApi);
 checkFormulaVariantMerging(catalogApi);
 checkRelaxedCatalogQueries(catalogApi);
 checkStrictLabelCandidateMatching(catalogApi);

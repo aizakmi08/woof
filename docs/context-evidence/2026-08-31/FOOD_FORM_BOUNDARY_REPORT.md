@@ -8,13 +8,24 @@
 ## Resolver changes
 
 - Food form is a hard compatibility boundary in every label path. Candidate-only form now reports `candidate_food_form_not_visible` when strict visible-variant matching is enabled.
-- Package evidence feeds the same form comparison: pound/kilogram weights are dry-bag evidence, while ounce/gram weights up to 30 oz are can/pouch-scale evidence. Opposing evidence reports `package_size_form_conflict` and excludes the candidate before ranking.
-- Wet vocabulary now covers unambiguous wet forms and containers (`entree`, `entrée`, `classic ground`, `chunks in gravy`, `chunks in sauce`, `can`, `tray`, `tub`, `cup/cups`). Dry vocabulary covers `clusters` and `minichunks`. Ambiguous words such as bare `ground`, `chunks`, `morsels`, `bites`, `bag`, and `crunchy` were intentionally not made form evidence.
-- Package-derived evidence takes precedence over an isolated, conflicting surface word. This keeps real dry identities such as “meaty morsels,” grain text containing “ground,” and feeding directions containing “cups” dry-compatible.
+- Package evidence feeds the same form comparison: physical bags are non-wet/dry-package evidence; plural can/pouch/tray/tub packs and weight-labeled cans are wet-package evidence; and weight scale is used only when explicit form/container evidence is absent. Opposing evidence reports `package_size_form_conflict` and excludes the candidate before ranking.
+- Wet vocabulary covers unambiguous wet forms and containers (`entree`, `entrée`, `classic ground`, `chunks in gravy`, `chunks in sauce`, `can`, `tray`, `tub`, `cup/cups`). Dry vocabulary covers `clusters` and `minichunks`. Bare `ground`, `chunks`, `morsels`, `bites`, and `crunchy` remain non-evidence; `bag` is considered only as physical package evidence so an ounce-denominated bag cannot be mistaken for a can.
+- Explicit form and physical-container evidence take precedence over weight scale. This keeps a 9.75 lb case of 12 cans wet, a 13 oz dry trial bag dry, and real dry identities containing “meaty morsels,” grain text containing “ground,” or feeding directions containing “cups” dry-compatible.
 - Candidate filtering, OCR compatibility, verified catalog lookup, and auto-open reconciliation all use strict identity comparison on label paths. Cross-form candidates are removed rather than merely down-ranked.
 - The recipe-variant bypass came from comparing a candidate-enriched recognition identity against the same candidate. Reconciliation now compares raw OCR-visible identity independently for each recognizer, so candidate-only `brown rice` correctly reports `candidate_formula_variant_not_visible`.
 - Product-line candidate-only variants now have an asymmetric guard. Diet condition, breed size, and grain-free candidate-only terms were already protected. Species already rejects explicit dog/cat conflicts and ambiguous auto-open sets; a missing-side species guard was not added because many safe front labels omit the word dog/cat and existing real fixtures depend on that behavior.
 - Result telemetry now records resolution decision, auto-open attempt/outcome, manual candidate selection surface, raw recognized identities, and recognized-vs-chosen brand/product/form/package evidence.
+
+## 2026-09-01 systemic hardening
+
+- The same bag/can boundary now applies even when OCR does not read the words `dry` or `wet`: a visible bag cannot resolve to a same-weight can.
+- Final OCR auto-open compares known package weights after converting pounds, kilograms, ounces, and grams. A known 8 lb label cannot auto-open a known 13 lb candidate, while 8 lb and 3.63 kg remain equivalent within a 3.5% tolerance.
+- Wet multipacks compare all visible measurements, so `9.75 lb (12 x 13 oz cans)` remains compatible with `12 x 13 oz cans` rather than being classified from total pounds.
+- Freeze-dried/dehydrated/air-dried remains a separate form group from conventional dry kibble.
+- The cloud recognizer prompt now encodes the same physical-package rules and explicitly says that “meaty morsels in every bite” is marketing copy, not wet-form evidence. Conflicting evidence must abstain with an empty `foodForm`.
+- These are generic invariants in the resolver contract, not brand-specific exceptions. New cases cover bag-only versus can, wet pound-total multipacks, ounce-size dry bags, exact package mismatch, imperial/metric equivalence, freeze-dried versus dry, and the existing feeding-cup false-positive guard.
+
+The full release gate passed after the hardening: `check:syntax`, `check:resolver-contract`, `check:catalog`, `check:sql`, `check:deployment`, `check:pet-safety`, `check:claims`, and `verify`. Production is unchanged: the cloud prompt requires an edge-function deployment and the client gates require a replacement TestFlight build.
 
 ## Regression and runtime evidence
 

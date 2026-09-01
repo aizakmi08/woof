@@ -1,4 +1,8 @@
-import { compareLabelIdentities } from "./labelResolution";
+import {
+  compareLabelIdentities,
+  packageWeightMeasurements,
+  packageWeightsOverlap,
+} from "./labelResolution";
 
 const MATCH_STOP_WORDS = new Set([
   "adult",
@@ -691,13 +695,17 @@ export function labelOcrProductMatchScore(product = {}, ocrText = "") {
   ));
 }
 
+function productPackageSizeText(product = {}) {
+  return [
+    product.packageSize,
+    product.package_size,
+    ...(Array.isArray(product.availablePackageSizes) ? product.availablePackageSizes : []),
+    ...(Array.isArray(product.available_package_sizes) ? product.available_package_sizes : []),
+  ].filter(Boolean).join(" ");
+}
+
 function packageSizeMatchesOcr(product = {}, ocrText = "") {
-  const packageSize = String(product.packageSize || "").toLowerCase();
-  const packageSizeMatch = packageSize.match(/\b(\d+(?:\.\d+)?)\s*(lb|lbs|oz|kg|g)\b/);
-  if (!packageSizeMatch) return false;
-  return new RegExp(
-    `\\b${packageSizeMatch[1].replace(".", "\\.")}\\s*${packageSizeMatch[2]}s?\\b`
-  ).test(String(ocrText || "").toLowerCase());
+  return packageWeightsOverlap(ocrText, productPackageSizeText(product));
 }
 
 export function rankProductsForOcr(products = [], ocrText = "") {
@@ -774,6 +782,13 @@ export function pickVerifiedProductForOcr(products = [], ocrText = "") {
   const [best] = products;
   if (!best || best.ocrMatchScore < AUTO_OPEN_SCORE) return null;
   if (distinctiveTokenCount(ocrText) < 3) return null;
+  const visibleMeasurements = packageWeightMeasurements(ocrText);
+  const candidateMeasurements = packageWeightMeasurements(productPackageSizeText(best));
+  if (
+    visibleMeasurements.length > 0
+    && candidateMeasurements.length > 0
+    && !packageSizeMatchesOcr(best, ocrText)
+  ) return null;
   const bestFormulaKey = ocrFormulaKey(best);
   const frontIndistinguishableVersions = products.filter(
     (product) => ocrFormulaKey(product) === bestFormulaKey

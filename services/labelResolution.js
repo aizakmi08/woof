@@ -210,23 +210,34 @@ function matchingGroup(value, groups) {
   return groups.findIndex((group) => [...group].some((term) => phrasePresent(text, term)));
 }
 
-function matchingFoodFormGroup(value = {}) {
+function matchingFoodFormGroups(value = {}) {
   const text = normalizeIdentityText(labelIdentityText(value));
   if (/\b(?:raw|broth) coated\b/.test(text)) {
-    return DRY_FORM_GROUP;
+    return [DRY_FORM_GROUP];
   }
-  const matchingGroups = FORM_GROUPS
+  return FORM_GROUPS
     .map((group, index) => (
       [...group].some((term) => phrasePresent(text, term)) ? index : -1
     ))
     .filter((index) => index >= 0);
+}
+
+function matchingFoodFormGroup(value = {}) {
+  const matchingGroups = matchingFoodFormGroups(value);
   if (matchingGroups.length <= 1) return matchingGroups[0] ?? -1;
 
   const packageGroup = packageFormEvidenceGroup(value);
   return matchingGroups.includes(packageGroup) ? packageGroup : -1;
 }
 
-function packageWeightMeasurements(value = {}) {
+function weightInGrams(amount, unit) {
+  if (["lb", "lbs", "pound", "pounds"].includes(unit)) return amount * 453.59237;
+  if (["kg", "kilogram", "kilograms"].includes(unit)) return amount * 1000;
+  if (["oz", "ounce", "ounces"].includes(unit)) return amount * 28.349523125;
+  return amount;
+}
+
+export function packageWeightMeasurements(value = {}) {
   const text = compact(typeof value === "string" ? value : labelIdentityText(value)).toLowerCase();
   const measurements = [];
   const pattern = /\b(\d+(?:[.,]\d+)?)\s*(lb|lbs|pound|pounds|kg|kilogram|kilograms|oz|ounce|ounces|g|gram|grams)\b/g;
@@ -234,13 +245,45 @@ function packageWeightMeasurements(value = {}) {
   while ((match = pattern.exec(text)) !== null) {
     const amount = Number(match[1].replace(",", "."));
     if (Number.isFinite(amount) && amount > 0) {
-      measurements.push({ amount, unit: match[2] });
+      measurements.push({
+        amount,
+        unit: match[2],
+        grams: weightInGrams(amount, match[2]),
+      });
     }
   }
   return measurements;
 }
 
+export function packageWeightsOverlap(left = {}, right = {}, tolerance = 0.035) {
+  const leftMeasurements = packageWeightMeasurements(left);
+  const rightMeasurements = packageWeightMeasurements(right);
+  if (leftMeasurements.length === 0 || rightMeasurements.length === 0) return false;
+
+  return leftMeasurements.some((leftMeasurement) => (
+    rightMeasurements.some((rightMeasurement) => {
+      const difference = Math.abs(leftMeasurement.grams - rightMeasurement.grams);
+      const scale = Math.max(leftMeasurement.grams, rightMeasurement.grams);
+      return difference <= Math.max(2, scale * tolerance);
+    })
+  ));
+}
+
 function packageFormEvidenceGroup(value = {}) {
+  const packageText = normalizeIdentityText(labelIdentityText(value));
+  if (
+    /\b(?:cans|pouches|trays|tubs)\b/.test(packageText)
+    || /\b\d+(?:[.,]\d+)?\s*(?:oz|ounce|ounces|g|gram|grams)\s+can\b/.test(packageText)
+  ) {
+    return WET_FORM_GROUP;
+  }
+  if (/\b(?:bag|bags)\b/.test(packageText)) return DRY_FORM_GROUP;
+
+  // Explicit form wording is stronger than package scale. This keeps a
+  // multi-can case whose total is expressed in pounds from becoming "dry",
+  // and a small dry trial bag expressed in ounces from becoming "wet".
+  if (matchingFoodFormGroups(value).length === 1) return -1;
+
   const measurements = packageWeightMeasurements(value);
   if (measurements.some(({ unit }) => (
     ["lb", "lbs", "pound", "pounds", "kg", "kilogram", "kilograms"].includes(unit)
@@ -259,9 +302,6 @@ function packageFormEvidenceGroup(value = {}) {
 function foodFormEvidenceGroup(value = {}) {
   const visibleForm = matchingFoodFormGroup(value);
   const packageForm = packageFormEvidenceGroup(value);
-  if (packageForm >= 0 && visibleForm >= 0 && packageForm !== visibleForm) {
-    return packageForm;
-  }
   return visibleForm >= 0 ? visibleForm : packageForm;
 }
 

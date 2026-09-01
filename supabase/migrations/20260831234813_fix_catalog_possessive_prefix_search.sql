@@ -16,7 +16,7 @@ AS $function$
   WITH normalized AS (
     SELECT NULLIF(
       trim(regexp_replace(
-        extensions.unaccent(lower(COALESCE(value, ''))),
+        extensions.unaccent(lower(left(COALESCE(value, ''), 512))),
         '[^a-z0-9]+',
         ' ',
         'g'
@@ -29,7 +29,8 @@ AS $function$
     FROM normalized
     CROSS JOIN LATERAL regexp_split_to_table(normalized.value, '\s+')
       WITH ORDINALITY AS token(value, ordinality)
-    WHERE length(token.value) >= 2
+    WHERE token.ordinality <= 12
+      AND length(token.value) BETWEEN 2 AND 64
       AND token.value ~ '^[a-z0-9]+$'
   ),
   deduped AS (
@@ -43,8 +44,7 @@ AS $function$
     SELECT
       deduped.ordinality,
       CASE
-        WHEN length(deduped.value) >= 4
-          AND right(deduped.value, 1) = 's'
+        WHEN deduped.value ~ '^[a-z]{3,63}s$'
         THEN '(' || quote_literal(deduped.value) || ':* | '
           || quote_literal(left(deduped.value, length(deduped.value) - 1)) || ':*)'
         ELSE quote_literal(deduped.value) || ':*'
@@ -138,8 +138,17 @@ BEGIN
     AND to_tsvector('simple', 'Nature''s Logic') @@ public.catalog_bounded_prefix_tsquery('Nature''s Logic')
     AND to_tsvector('simple', 'Hill''s Science Diet') @@ public.catalog_bounded_prefix_tsquery('Hill''s Science Diet')
     AND to_tsvector('simple', 'Newman''s Own') @@ public.catalog_bounded_prefix_tsquery('Newman''s Own')
+    AND to_tsvector('simple', 'Acme''s Field & Farm') @@ public.catalog_bounded_prefix_tsquery('Acme’s Field-and-Farm')
   ) THEN
     RAISE EXCEPTION 'Possessive/plain brand equivalence regression';
+  END IF;
+
+  IF numnode(public.catalog_bounded_prefix_tsquery(
+    'token01 token02 token03 token04 token05 token06 token07 token08 token09 token10 token11 token12 token13 token14 token15'
+  )) > 12
+    OR public.catalog_bounded_prefix_tsquery(repeat('x', 600)) IS NOT NULL
+  THEN
+    RAISE EXCEPTION 'Catalog prefix-query resource bounds regressed';
   END IF;
 
   IF EXISTS (
@@ -147,11 +156,7 @@ BEGIN
     FROM pg_proc p
     JOIN pg_namespace n ON n.oid = p.pronamespace
     WHERE n.nspname = 'public'
-      AND p.proname IN (
-        'search_products',
-        'search_verified_products_base_v2',
-        'search_verified_products_ranked_v1'
-      )
+      AND p.prokind = 'f'
       AND pg_get_functiondef(p.oid) LIKE '%to_tsquery%:* & %'
   ) THEN
     RAISE EXCEPTION 'An unsafe catalog prefix-query builder remains installed';

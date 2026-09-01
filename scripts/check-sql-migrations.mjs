@@ -192,9 +192,10 @@ function checkNoDangerousDrops(migration) {
 }
 
 function checkCatalogPossessivePrefixRegression(migrations) {
-  const migration = migrations.find((candidate) => (
+  const migrationIndex = migrations.findIndex((candidate) => (
     candidate.file.endsWith("_fix_catalog_possessive_prefix_search.sql")
   ));
+  const migration = migrations[migrationIndex];
   if (!migration) {
     fail("catalog search: missing possessive-prefix regression migration");
     return;
@@ -202,7 +203,9 @@ function checkCatalogPossessivePrefixRegression(migrations) {
 
   for (const required of [
     "catalog_bounded_prefix_tsquery",
-    "length(token.value) >= 2",
+    "left(COALESCE(value, ''), 512)",
+    "token.ordinality <= 12",
+    "length(token.value) BETWEEN 2 AND 64",
     "public.search_products(text,integer)",
     "public.search_verified_products_base_v2(text,integer)",
     "public.search_verified_products_ranked_v1(text,integer)",
@@ -214,26 +217,42 @@ function checkCatalogPossessivePrefixRegression(migrations) {
     "newmans own",
     "Degenerate catalog prefix queries must return NULL",
     "A one-character prefix lexeme survived catalog query normalization",
+    "Catalog prefix-query resource bounds regressed",
+    "p.prokind = 'f'",
   ]) {
     if (!migration.sql.includes(required)) {
       fail(`catalog search: possessive-prefix migration is missing ${required}`);
     }
   }
 
-  if (!/right\(deduped\.value, 1\) = 's'[\s\S]+?left\(deduped\.value, length\(deduped\.value\) - 1\)/i.test(migration.sql)) {
+  if (!/deduped\.value\s*~\s*'\^\[a-z\]\{3,63\}s\$'[\s\S]+?left\(deduped\.value, length\(deduped\.value\) - 1\)/i.test(migration.sql)) {
     fail("catalog search: plain possessive forms must include a bounded singular alternative");
   }
   if (/SET\s+statement_timeout/i.test(migration.sql)) {
     fail("catalog search: statement_timeout is recommendation-only until fixed-query timings are verified");
   }
 
+  const unsafePrefixBuilder = /to_tsquery[\s\S]{0,1800}regexp_replace[\s\S]{0,900}':\*\s*&\s*'/i;
+  const rootVersion = migration.file.split("_", 1)[0];
+  const laterTimestampMigrations = migrations.filter((candidate) => {
+    const candidateVersion = candidate.file.split("_", 1)[0];
+    return candidateVersion.length === 14 && candidateVersion > rootVersion;
+  });
+  for (const laterMigration of laterTimestampMigrations) {
+    if (unsafePrefixBuilder.test(laterMigration.sql)) {
+      fail(`${laterMigration.file}: catalog search reintroduces an unbounded whitespace-to-prefix query builder`);
+    }
+  }
+
   const auditPath = path.join("scripts", "catalog-possessive-search-audit.sql");
   const audit = fs.existsSync(auditPath) ? fs.readFileSync(auditPath, "utf8") : "";
   for (const required of [
-    "SET LOCAL statement_timeout = '3000ms'",
+    "SET LOCAL statement_timeout = '18000ms'",
+    "statement_timeout covers the whole DO statement",
     "search_verified_products(probe.query_text, 10)",
     "elapsed_ms > 2500",
     "Expected brand was not returned",
+    "verified catalog gap",
     "Degenerate short-token query did not resolve to NULL",
   ]) {
     if (!audit.includes(required)) {
