@@ -1,7 +1,7 @@
 {
   "configVersion": 0,
   "apple": {
-    "version": "1.2.3",
+    "version": "1.2.4",
     "copyright": "2026 Woof",
     "release": {
       "automaticRelease": true
@@ -26,7 +26,7 @@
           "dry",
           "scan"
         ],
-        "releaseNotes": "- Nutrition scoring now uses published manufacturer analysis when available\n- Clearer calcium and mineral-balance alerts\n- Honest limited-data messaging when nutrient details are not published\n- Saved pet-food results refresh against the current verified catalog\n- Accessibility and stability improvements",
+        "releaseNotes": "- More reliable searches for brand names with apostrophes and punctuation\n- Stronger package-form matching so dry bags cannot resolve to canned or pouched food\n- Faster scan-to-score results with fewer timeout failures\n- Nutrition scoring uses published manufacturer analysis when available\n- Accessibility and stability improvements",
         "marketingUrl": "https://aizakmi08.github.io/woof/",
         "supportUrl": "https://aizakmi08.github.io/woof/support.html",
         "title": "Woof Pet Food Scanner",

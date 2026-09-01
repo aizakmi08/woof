@@ -255,8 +255,8 @@ const storeMetadata = [
 if (storeConfig.configVersion !== 0) {
   fail("store.config.json: expected configVersion 0");
 }
-if (storeApple.version !== "1.2.3") {
-  fail(`store.config.json: expected update version 1.2.3, got ${storeApple.version || "missing"}`);
+if (storeApple.version !== "1.2.4") {
+  fail(`store.config.json: expected update version 1.2.4, got ${storeApple.version || "missing"}`);
 }
 if (storeApple.release?.automaticRelease !== true) {
   fail("store.config.json: automatic release must match the approved App Store release plan");

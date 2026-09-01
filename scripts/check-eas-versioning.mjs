@@ -32,8 +32,8 @@ const projectContext = readText("PROJECT_CONTEXT.md");
 const rootLockVersion = packageLock.packages?.[""]?.version;
 const expoVersion = appJson.expo?.version;
 
-if (packageJson.version !== "1.2.3") {
-  fail(`package.json version should match the approved 1.2.3 release line, got ${packageJson.version}`);
+if (packageJson.version !== "1.2.4") {
+  fail(`package.json version should match the approved 1.2.4 release line, got ${packageJson.version}`);
 }
 
 if (rootLockVersion !== packageJson.version) {
