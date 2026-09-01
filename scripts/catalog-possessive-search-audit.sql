@@ -94,10 +94,13 @@ BEGIN
 
   IF NOT (
     to_tsvector('simple', 'Acme''s Field & Farm')
-      @@ public.catalog_bounded_prefix_tsquery('Acme’s Field-and-Farm')
+      @@ public.catalog_bounded_prefix_tsquery('Acme’s Field-&-Farm')
   ) OR numnode(public.catalog_bounded_prefix_tsquery(
     'token01 token02 token03 token04 token05 token06 token07 token08 token09 token10 token11 token12 token13 token14 token15'
-  )) > 12
+  )) <> 23
+    OR public.catalog_bounded_prefix_tsquery(
+      'token01 token02 token03 token04 token05 token06 token07 token08 token09 token10 token11 token12 token13 token14 token15'
+    )::TEXT LIKE '%token13%'
   THEN
     RAISE EXCEPTION 'Generic punctuation or catalog query bound regression';
   END IF;

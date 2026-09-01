@@ -138,14 +138,17 @@ BEGIN
     AND to_tsvector('simple', 'Nature''s Logic') @@ public.catalog_bounded_prefix_tsquery('Nature''s Logic')
     AND to_tsvector('simple', 'Hill''s Science Diet') @@ public.catalog_bounded_prefix_tsquery('Hill''s Science Diet')
     AND to_tsvector('simple', 'Newman''s Own') @@ public.catalog_bounded_prefix_tsquery('Newman''s Own')
-    AND to_tsvector('simple', 'Acme''s Field & Farm') @@ public.catalog_bounded_prefix_tsquery('Acme’s Field-and-Farm')
+    AND to_tsvector('simple', 'Acme''s Field & Farm') @@ public.catalog_bounded_prefix_tsquery('Acme’s Field-&-Farm')
   ) THEN
     RAISE EXCEPTION 'Possessive/plain brand equivalence regression';
   END IF;
 
   IF numnode(public.catalog_bounded_prefix_tsquery(
     'token01 token02 token03 token04 token05 token06 token07 token08 token09 token10 token11 token12 token13 token14 token15'
-  )) > 12
+  )) <> 23
+    OR public.catalog_bounded_prefix_tsquery(
+      'token01 token02 token03 token04 token05 token06 token07 token08 token09 token10 token11 token12 token13 token14 token15'
+    )::TEXT LIKE '%token13%'
     OR public.catalog_bounded_prefix_tsquery(repeat('x', 600)) IS NOT NULL
   THEN
     RAISE EXCEPTION 'Catalog prefix-query resource bounds regressed';
