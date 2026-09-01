@@ -180,3 +180,20 @@ supabase_execute_sql(
 ```
 
 These connected actions avoid the known local/remote CLI history drift and keep the DDL recorded as a Supabase migration.
+
+## 2026-09-01 live recheck
+
+Production now contains `20260901042021_accelerate_typed_search_retailer_filter`, a separate index migration that bounds the promoted-retailer exclusion lookup. A fresh read-only `EXPLAIN (ANALYZE, BUFFERS)` measured Eric's exact `Nature's Logic` query at **649.9 ms**, returning ten Nature's Logic rows. This fixes Eric's observed timeout through a downstream index improvement.
+
+It does not repair the root prefix-query shape. The bounded-prefix helper is still absent and none of the three unsafe search functions uses it. Current correctness results are:
+
+| Query | Live result |
+| --- | --- |
+| `Nature's Logic` | 10 Nature's Logic rows |
+| `natures logic` | 0 rows |
+| `Hill's Science Diet` | 10 rows |
+| `hills science diet` | 1 row |
+| `Newman's Own` | 0 rows |
+| `newmans own` | 0 rows |
+
+Therefore the index migration is preserved in this branch, but it is not a substitute for the pending bounded-prefix migration or its six-query post-apply audit.
