@@ -47,6 +47,7 @@ describe("auth refresh resilience", () => {
   });
 
   test("a network failure in the production label request keeps the local session", async () => {
+    mockSignOut.mockResolvedValue({ error: null });
     mockGetSession.mockResolvedValue({ data: { session: expiringSession }, error: null });
     mockRefreshSession.mockResolvedValue({
       data: { session: null },
