@@ -21,13 +21,14 @@ describe("analytics privacy execution", () => {
   test("redacts PII and secrets before the database insert", async () => {
     const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.signature_value";
     const opaque = "A".repeat(100);
+    const sampleApiKey = ["sk", "proj", "abcdefghijklmnop123456"].join("-");
     await trackEvent("privacy_probe", {
       email: "person@example.com",
       web: "https://example.com/private?email=person@example.com",
       file: "/Users/person/Documents/secret.jpg",
       androidFile: "/storage/emulated/0/DCIM/private.jpg",
       jwt,
-      apiKey: "sk-proj-abcdefghijklmnop123456",
+      apiKey: sampleApiKey,
       image: opaque,
       nested: { value: `Bearer ${jwt}` },
     });
@@ -44,6 +45,7 @@ describe("analytics privacy execution", () => {
     expect(serialized).not.toContain("/Users/person");
     expect(serialized).not.toContain(jwt);
     expect(serialized).not.toContain(opaque);
+    expect(inserted.properties.app_environment).toBe("development");
   });
 
   test("analytics session identifiers do not persist across accounts", async () => {

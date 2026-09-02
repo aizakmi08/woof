@@ -90,6 +90,7 @@ function releaseContext() {
   const expoConfig = Constants.expoConfig || {};
 
   return {
+    app_environment: __DEV__ ? "development" : "production",
     platform: Platform.OS,
     platform_version: stringOrNull(Platform.Version, 40),
     app_version: stringOrNull(expoConfig.version || Constants.nativeAppVersion),

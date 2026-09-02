@@ -149,6 +149,12 @@ assert(
   !webBundleText.includes("EXPO_PUBLIC_SENTRY_AUTH_TOKEN"),
   "Expo web bundle includes the forbidden public Sentry auth token alias"
 );
+assert(
+  !webBundleText.includes("Development QA ErrorBoundary fixture") &&
+    !webBundleText.includes("dev-history-human-") &&
+    !webBundleText.includes("QA Fixture"),
+  "Expo release bundle includes development QA fixtures"
+);
 
 console.log(
   `Expo export check passed: ${nativeExportedFiles.length} native files in ${nativeExportDir}; ` +

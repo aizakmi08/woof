@@ -22,6 +22,7 @@ jest.mock("../../services/logger", () => ({
 jest.mock("expo/fetch", () => ({}));
 
 import { analyzeHumanFood } from "../../services/claude";
+import { DEV_QA_HUMAN_RESULTS } from "../../services/devQaFixtures";
 
 function apiResponse(overrides = {}) {
   return {
@@ -74,5 +75,10 @@ describe("human-food trust boundary", () => {
 
     expect(result.safetyLevel).toBe("caution");
     expect(result).not.toHaveProperty("overallScore");
+  });
+
+  test("the development unidentified fixture obeys the same caution boundary", () => {
+    expect(DEV_QA_HUMAN_RESULTS.unidentified.safetyLevel).toBe("caution");
+    expect(DEV_QA_HUMAN_RESULTS.unidentified).not.toHaveProperty("overallScore");
   });
 });

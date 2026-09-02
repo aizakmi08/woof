@@ -74,7 +74,8 @@ function humanFoodResult(safetyLevel) {
   return {
     ...item,
     petType: "dog",
-    safetyLevel: safetyLevel === "unidentified" ? "unknown" : safetyLevel,
+    // Unknown identity is a caution state at every boundary, including QA fixtures.
+    safetyLevel: safetyLevel === "unidentified" ? "caution" : safetyLevel,
     preparation: safetyLevel === "safe" ? "Plain" : "N/A",
     ageGuidance: {
       note: safetyLevel === "safe" ? "All ages" : "Ask a veterinarian",
