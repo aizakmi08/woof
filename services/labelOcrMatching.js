@@ -137,8 +137,6 @@ const PAGE_CHROME_BOUNDARY_PATTERNS = [
   /\b(?:see|view)\s+full\s+(?:image|size|view)\b/i,
 ];
 const PAGE_CHROME_LINE_PATTERNS = [
-  /\btestflight(?:\s+build)?\b/i,
-  /\byc\s+application(?:\s+audit)?\b/i,
   /^\s*amazon\s*$/i,
   /\bsearch\s+amazon\b/i,
   /\b(?:join\s+prime|today['’]?s\s+deals|deliver\s+to)\b/i,
@@ -150,7 +148,6 @@ const MARKETING_BENEFIT_PATTERNS = [
   /\bfor\s+digestion\s+immune\s+system\s+(?:&|and)\s+organ\s+health\b/gi,
   /\bcalcium\s+(?:&|and)\s+phosphorus\s+for\s+strong\s+bones\b/gi,
   /\bformulated\s+to\s+support\s+whole\s+body\s+health\s+(?:&|and)\s+vitality\b/gi,
-  /\bproactive\s*5[\s\S]{0,120}?\bskin\s*(?:&|and)\s*coat\b/gi,
 ];
 const BRAND_NOISE = new Set(["and", "food", "foods", "nutrition", "pet", "pets", "the"]);
 const KNOWN_BRAND_PHRASES = [
@@ -227,7 +224,11 @@ function stripMarketingBenefitClaims(value) {
   for (const pattern of MARKETING_BENEFIT_PATTERNS) {
     identityText = identityText.replace(pattern, " ");
   }
-  return compact(identityText);
+  return identityText
+    .split(/\r?\n/)
+    .map(compact)
+    .filter(Boolean)
+    .join("\n");
 }
 
 function normalizeText(value) {
