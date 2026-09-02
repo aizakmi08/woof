@@ -12,6 +12,10 @@ import {
 } from "../../services/productCatalog";
 import { buildVerifiedPetFoodAnalysis } from "../../services/verifiedScoring";
 import {
+  getCachedCatalogSearch,
+  saveCachedCatalogSearch,
+} from "../../services/catalogSearchCache";
+import {
   MAPPER_FIDELITY_FIELDS,
   rawVerifiedCatalogRow,
 } from "../fixtures/catalogRows";
@@ -34,5 +38,18 @@ describe("catalog mapper regression", () => {
     expect(result.categories.find((category) => category.name === "Nutritional Balance").score)
       .toBeLessThanOrEqual(25);
     expect(result.overallScore).toBeLessThanOrEqual(35);
+  });
+
+  test("every downstream field survives the production search cache", async () => {
+    const product = normalizeCatalogProduct(rawVerifiedCatalogRow());
+
+    await expect(saveCachedCatalogSearch("Nature's Logic", [product], { petType: "dog" }))
+      .resolves.toBe(true);
+    const cached = await getCachedCatalogSearch("Nature's Logic", { petType: "dog" });
+
+    expect(cached.products).toHaveLength(1);
+    for (const field of MAPPER_FIDELITY_FIELDS) {
+      expect(cached.products[0][field]).toEqual(product[field]);
+    }
   });
 });
