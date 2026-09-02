@@ -1,12 +1,14 @@
 export const fullEnvironmentLabels = new Set([
   "Edge Function type check",
   "production dependency audit",
+  "production dependency licenses",
   "Expo SDK package versions",
   "Expo config resolution",
   "Expo native bundle export",
   "Expo native prebuild",
   "catalog completeness",
   "behavioral test suite",
+  "Edge request-boundary tests",
 ]);
 
 export const steps = [
@@ -113,6 +115,11 @@ export const steps = [
     script: "scripts/check-edge-typecheck.mjs",
   },
   {
+    label: "Edge request-boundary tests",
+    command: "npm",
+    args: ["run", "test:edge-requests"],
+  },
+  {
     label: "Edge Function fingerprints",
     script: "scripts/fingerprint-edge-functions.mjs",
   },
@@ -129,6 +136,10 @@ export const steps = [
   {
     label: "production dependency audit",
     script: "scripts/check-dependency-audit.mjs",
+  },
+  {
+    label: "production dependency licenses",
+    script: "scripts/check-dependency-licenses.mjs",
   },
   {
     label: "catalog completeness",

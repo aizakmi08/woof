@@ -1,0 +1,17 @@
+appId: io.woof.app
+name: Development QA product rows open
+---
+- launchApp:
+    clearState: false
+- assertVisible: "Woof"
+- tapOn: "Development QA fixtures"
+- assertVisible: "Development QA"
+- scrollUntilVisible:
+    element:
+      text: "Typed results"
+    direction: DOWN
+- tapOn: "Typed results"
+- assertVisible: "QA Small Breed Chicken Recipe"
+- tapOn: "QA Small Breed Chicken Recipe"
+- assertVisible: "QA Small Breed Chicken Recipe"
+- assertNotVisible: "Development QA"

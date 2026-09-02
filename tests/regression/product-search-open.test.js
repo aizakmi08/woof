@@ -1,6 +1,7 @@
 const mockResolveProduct = jest.fn();
 const mockTrackEvent = jest.fn();
 const mockReconcileLabelOutcomes = jest.fn();
+let mockSavedPetType = "";
 
 jest.mock("../../components/AppText", () => {
   const ReactNative = require("react-native");
@@ -85,7 +86,7 @@ jest.mock("../../services/auth", () => ({
   useAuth: () => ({ profile: null, canScan: () => true, remainingScans: () => 3 }),
 }));
 jest.mock("../../services/petProfile", () => ({
-  normalizePetProfile: () => ({ petType: "" }),
+  normalizePetProfile: () => ({ petType: mockSavedPetType }),
 }));
 jest.mock("../../services/performanceTimings", () => ({
   logCaptureToResult: jest.fn(),
@@ -130,6 +131,10 @@ const catalogProduct = {
 };
 
 describe("typed catalog search", () => {
+  beforeEach(() => {
+    mockSavedPetType = "";
+  });
+
   test("pressing a result navigates for free and Pro users", async () => {
     const navigation = {
       goBack: jest.fn(),
@@ -228,6 +233,65 @@ describe("typed catalog search", () => {
         }}
       />
     );
+
+    await screen.findByRole("button", {
+      name: /Nature's Logic.*Verified/i,
+    }, { timeout: 2000 });
+    expect(screen.queryByText("Searching products...")).toBeNull();
+    expect(mockResolveProduct).toHaveBeenCalledTimes(2);
+  });
+
+  test("a saved-species change mid-flight restarts label work instead of leaving a spinner", async () => {
+    const navigation = {
+      goBack: jest.fn(),
+      navigate: jest.fn(),
+      replace: jest.fn(),
+    };
+    mockResolveProduct
+      .mockReturnValueOnce(new Promise(() => {}))
+      .mockResolvedValueOnce({ products: [catalogProduct] });
+    mockReconcileLabelOutcomes.mockReturnValue({
+      products: [catalogProduct],
+      selectedProduct: null,
+      confirmedProduct: null,
+      status: "candidates",
+      confidence: 0.7,
+      decision: "recognizers_disagree",
+      verificationState: { state: "verified_ready" },
+      identification: {
+        found: true,
+        labelRead: true,
+        brand: "Nature's Logic",
+        productName: "Canine Rabbit Meal Feast",
+        searchQuery: "Nature's Logic Rabbit",
+      },
+      resolutionEvidence: {
+        pathsAvailable: ["cloud_image"],
+        agreementFields: [],
+        disagreementFields: ["variant"],
+        reasonCodes: ["no_exact_variant"],
+        visualConfirmation: false,
+        recognizedIdentity: { cloudImage: null, onDeviceOcr: null },
+        confirmedCandidate: null,
+        autoOpenFired: false,
+        resultMode: "candidate_list",
+      },
+    });
+
+    const props = {
+      navigation,
+      route: {
+        params: {
+          labelImageBase64: "same-image",
+          labelCaptureId: "same-capture",
+        },
+      },
+    };
+    const screen = await render(<ProductSearchScreen {...props} />);
+    expect(await screen.findByText("Reading product label...")).toBeTruthy();
+
+    mockSavedPetType = "dog";
+    await screen.rerender(<ProductSearchScreen {...props} />);
 
     await screen.findByRole("button", {
       name: /Nature's Logic.*Verified/i,

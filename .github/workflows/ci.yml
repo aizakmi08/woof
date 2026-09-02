@@ -104,6 +104,9 @@ jobs:
       - name: Check Edge Function types
         run: npm run check:edge-types
 
+      - name: Run Edge request-boundary tests
+        run: npm run test:edge-requests
+
       - name: Fingerprint Edge Functions
         run: npm run edge:fingerprint
 
@@ -115,6 +118,9 @@ jobs:
 
       - name: Check production dependency audit threshold
         run: npm run check:audit
+
+      - name: Check production dependency licenses
+        run: npm run check:licenses
 
       - name: Detect live catalog credentials
         id: catalog_credentials
