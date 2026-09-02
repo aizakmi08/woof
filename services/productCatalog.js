@@ -1365,7 +1365,7 @@ function strongImageMatch(catalogProduct, imageProduct) {
   return strongProductMatch(catalogProduct, imageProduct);
 }
 
-function normalizeCatalogProduct(raw = {}, sourceKind = "catalog") {
+export function normalizeCatalogProduct(raw = {}, sourceKind = "catalog") {
   const row = raw.product || raw;
   const productName = compact(row.productName || row.product_name || row.product_name_en || row.product_name);
   const brand = compact(row.brand || row.brands);

@@ -6,6 +6,7 @@ export const fullEnvironmentLabels = new Set([
   "Expo native bundle export",
   "Expo native prebuild",
   "catalog completeness",
+  "behavioral test suite",
 ]);
 
 export const steps = [
@@ -25,6 +26,11 @@ export const steps = [
   {
     label: "product resolver contract",
     script: "scripts/check-product-resolver-contract.mjs",
+  },
+  {
+    label: "behavioral test suite",
+    command: "npm",
+    args: ["run", "test:coverage"],
   },
   {
     label: "catalog quality",

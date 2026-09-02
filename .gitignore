@@ -10,7 +10,13 @@ dist/
 web-build/
 expo-env.d.ts
 /outputs/
+/output/
+/inputs/
 /store/
+/tmp/
+/audit/
+/.agent-preflight/
+/coverage/
 
 # Native
 .kotlin/
