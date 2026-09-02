@@ -248,6 +248,7 @@ function scoreSafety(names) {
 }
 
 function numeric(value) {
+  if (value == null || (typeof value === "string" && !value.trim())) return null;
   const parsed = typeof value === "string"
     ? Number.parseFloat(value.replace(/[% ,]/g, ""))
     : Number(value);

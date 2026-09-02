@@ -747,7 +747,12 @@ function ingredientTextFromProduct(product = {}) {
 }
 
 function normalizeNutriments(product = {}) {
-  const root = product.nutriments || product.nutritionalInfo || product.nutrient_panel || {};
+  const root = product.nutriments
+    || product.nutritionalInfo
+    || product.nutritional_info
+    || product.nutrientPanel
+    || product.nutrient_panel
+    || {};
   const typical = root.typicalAnalysis || root.typical_analysis || root.actualAnalysis || root.actual_analysis;
   const dryMatter = root.dryMatter || root.dry_matter;
   const guaranteed = root.guaranteedAnalysis || root.guaranteed_analysis;
@@ -2689,6 +2694,7 @@ export function catalogProductToVerifiedProduct(product = {}) {
     : [];
 
   const verifiedProduct = {
+    cacheKey: product.cacheKey || product.cache_key || "",
     productName: product.productName,
     brand: product.brand,
     gtin: product.gtin || product.barcode || "",
@@ -2702,6 +2708,11 @@ export function catalogProductToVerifiedProduct(product = {}) {
     ingredientsText: product.ingredientsText || product.ingredientText || product.ingredients?.join(", ") || "",
     ingredients,
     nutriments: product.nutriments || normalizeNutriments(product),
+    nutritionalInfo: product.nutritionalInfo || product.nutritional_info || null,
+    nutrientPanel: product.nutrientPanel || product.nutrient_panel || null,
+    hasPublishedNutrients:
+      product.hasPublishedNutrients === true
+      || product.has_published_nutrients === true,
     nutriscoreGrade: product.nutriscoreGrade || null,
     novaGroup: product.novaGroup || null,
     imageUrl: product.imageUrl || null,
@@ -2711,6 +2722,23 @@ export function catalogProductToVerifiedProduct(product = {}) {
     imageVerificationStatus: product.imageVerificationStatus || null,
     verifiedAt: product.verifiedAt || null,
     sourceUrl: product.sourceUrl || null,
+    formulaEvidenceTier:
+      product.formulaEvidenceTier
+      || product.formula_evidence_tier
+      || product.nutritionalInfo?.formula_evidence_tier
+      || product.nutritional_info?.formula_evidence_tier
+      || null,
+    formulaVersionProvenance:
+      product.formulaVersionProvenance
+      || product.formula_version_provenance
+      || product.nutritionalInfo?.formula_version_provenance
+      || product.nutritional_info?.formula_version_provenance
+      || null,
+    availablePackageSizes: Array.isArray(product.availablePackageSizes)
+      ? product.availablePackageSizes
+      : [],
+    ingredientCount: Number(product.ingredientCount) || ingredients.length,
+    rank: Number(product.rank) || 0,
     sourceKind: product.sourceKind || "catalog",
   };
 

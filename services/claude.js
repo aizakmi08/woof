@@ -337,6 +337,7 @@ function normalizeHumanFoodPetType(value) {
 function normalizeSafetyLevel(value) {
   const normalized = typeof value === "string" ? value.toLowerCase().trim() : "";
   if (["safe", "caution", "dangerous"].includes(normalized)) return normalized;
+  if (["unknown", "unidentified"].includes(normalized)) return "caution";
   throw new Error("Analysis response missing safety level. Please try again.");
 }
 
@@ -446,7 +447,6 @@ function validateHumanFoodAnalysis(result) {
   }
 
   return {
-    ...result,
     foodName: requiredString(result.foodName, "food name"),
     petType: normalizeHumanFoodPetType(result.petType),
     safetyLevel: normalizeSafetyLevel(result.safetyLevel),

@@ -353,6 +353,50 @@ function presentTerms(value, terms) {
   return [...terms].filter((term) => phrasePresent(text, term));
 }
 
+function explicitIdentityValue(value, keys) {
+  for (const key of keys) {
+    const normalized = normalizeIdentityText(value?.[key]);
+    if (normalized && normalized !== "unknown") return normalized;
+  }
+  return "";
+}
+
+function inferredBreedSize(value = {}) {
+  const explicit = explicitIdentityValue(value, ["breedSize", "breed_size"]);
+  if (explicit) return explicit;
+  const text = normalizeIdentityText(labelIdentityText(value));
+  return text.match(/\b(toy|small|medium|large|giant)\s+breed\b/)?.[0] || "";
+}
+
+function inferredGrainBoundary(value = {}) {
+  if (value.grainFree === true || value.grain_free === true) return "grain_free";
+  if (value.grainFree === false || value.grain_free === false) return "contains_grain";
+  return phrasePresent(normalizeIdentityText(labelIdentityText(value)), "grain free")
+    ? "grain_free"
+    : "";
+}
+
+function protectedBoundaryValues(value = {}) {
+  const lifeStage = matchingLifeStageGroup(value);
+  const foodForm = foodFormEvidenceGroup(value);
+  const packageForm = packageFormEvidenceGroup(value);
+  const explicitCondition = explicitIdentityValue(value, ["dietCondition", "diet_condition"]);
+  const inferredConditions = presentTerms(value, CONDITION_TERMS);
+
+  return [
+    ["pet_type", "candidate_species_not_visible", "cross_species", normalizedPetType(value)],
+    ["consumer_brand", "candidate_brand_not_visible", "cross_brand_line", consumerBrandForIdentity(value)],
+    ["product_line", "candidate_product_line_not_visible", "product_line_conflict", explicitIdentityValue(value, ["productLine", "product_line"])],
+    ["life_stage", "candidate_life_stage_not_visible", "life_stage_conflict", lifeStage >= 0 ? String(lifeStage) : ""],
+    ["age_band", "candidate_age_band_not_visible", "age_band_conflict", adultAgeBand(value)],
+    ["food_form", "candidate_food_form_not_visible", "food_form_conflict", foodForm >= 0 ? String(foodForm) : ""],
+    ["condition", "candidate_diet_condition_not_visible", "diet_condition_conflict", explicitCondition || inferredConditions.join("|")],
+    ["breed_size", "candidate_breed_size_not_visible", "breed_size_conflict", inferredBreedSize(value)],
+    ["grain_free", "candidate_grain_free_not_visible", "grain_free_conflict", inferredGrainBoundary(value)],
+    ["package_size_form", "candidate_package_form_not_visible", "package_size_form_conflict", packageForm >= 0 ? String(packageForm) : ""],
+  ];
+}
+
 function identityFormulaKey(product = {}) {
   const identity = normalizeIdentityText(labelIdentityText(product));
   const lifeStageGroup = matchingLifeStageGroup(product);
@@ -395,6 +439,21 @@ export function compareLabelIdentities(left = {}, right = {}, {
   const agreementFields = [];
   const disagreementFields = [];
   const reasonCodes = [];
+
+  if (requireVisibleCandidateVariants) {
+    const visibleBoundaries = new Map(protectedBoundaryValues(left).map(([field, , , value]) => [field, value]));
+    protectedBoundaryValues(right).forEach(([field, hiddenReason, conflictReason, candidateValue]) => {
+      const visibleValue = visibleBoundaries.get(field);
+      if (candidateValue && !visibleValue) {
+        disagreementFields.push(field);
+        reasonCodes.push(hiddenReason);
+      } else if (candidateValue && visibleValue !== candidateValue) {
+        disagreementFields.push(field);
+        reasonCodes.push(conflictReason);
+      }
+    });
+  }
+
   const leftPetType = normalizedPetType(left);
   const rightPetType = normalizedPetType(right);
 

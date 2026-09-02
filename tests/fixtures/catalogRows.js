@@ -55,6 +55,7 @@ export function rawVerifiedCatalogRow(overrides = {}) {
 }
 
 export const MAPPER_FIDELITY_FIELDS = Object.freeze([
+  "cacheKey",
   "productName",
   "brand",
   "gtin",
@@ -79,5 +80,8 @@ export const MAPPER_FIDELITY_FIELDS = Object.freeze([
   "sourceUrl",
   "formulaEvidenceTier",
   "formulaVersionProvenance",
+  "availablePackageSizes",
+  "ingredientCount",
+  "rank",
   "sourceKind",
 ]);

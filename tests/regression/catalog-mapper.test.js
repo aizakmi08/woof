@@ -30,7 +30,7 @@ describe("catalog mapper regression", () => {
     }
     expect(verifiedProduct.ingredients.map((ingredient) => ingredient.text))
       .toEqual(catalogProduct.ingredients);
-    expect(result.dataQuality.hasPublishedNutrients).toBe(true);
+    expect(result.nutritionAnalysis.hasPublishedNutrients).toBe(true);
     expect(result.categories.find((category) => category.name === "Nutritional Balance").score)
       .toBeLessThanOrEqual(25);
     expect(result.overallScore).toBeLessThanOrEqual(35);

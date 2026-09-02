@@ -3,7 +3,8 @@ import { Platform } from "react-native";
 import Constants from "expo-constants";
 import { supabase } from "./supabase";
 
-const SESSION_ID_KEY = "@woof_analytics_session_id";
+const LEGACY_SESSION_ID_KEY = "@woof_analytics_session_id";
+const SESSION_ID_KEY_PREFIX = "@woof_analytics_session_id:";
 const QUEUE_KEY = "@woof_analytics_queue";
 const MAX_QUEUE_SIZE = 100;
 const MAX_PROPERTY_KEYS = 40;
@@ -17,7 +18,7 @@ function redactString(value) {
     .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[email]")
     .replace(/https?:\/\/\S+/gi, "[url]")
     .replace(/file:\/\/\S+/gi, "[file]")
-    .replace(/\b(?:\/(?:private\/)?var|\/tmp|\/Users|\/data\/user|\/storage\/emulated|[A-Z]:\\)[^\s)]+/gi, "[file]")
+    .replace(/(?:\/(?:private\/)?var|\/tmp|\/Users|\/data\/user|\/storage\/emulated|[A-Z]:\\)[^\s)]+/gi, "[file]")
     .replace(/(?:Bearer\s+)?eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[jwt]")
     .replace(/\b(?:sk-ant|sk-proj|sk|rk_live|rk_test|appl|goog)[-_][A-Za-z0-9_-]{16,}\b/g, "[secret]")
     .replace(/\b[A-Za-z0-9+/=]{80,}\b/g, "[redacted]");
@@ -27,12 +28,18 @@ function makeId() {
   return `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
-async function getSessionId() {
-  const existing = await AsyncStorage.getItem(SESSION_ID_KEY);
+function sessionStorageKey(userId) {
+  const identity = userId ? String(userId).replace(/[^a-zA-Z0-9_-]/g, "_") : "anonymous";
+  return `${SESSION_ID_KEY_PREFIX}${identity}`;
+}
+
+async function getSessionId(userId = null) {
+  const storageKey = sessionStorageKey(userId);
+  const existing = await AsyncStorage.getItem(storageKey);
   if (existing) return existing;
 
   const next = makeId();
-  await AsyncStorage.setItem(SESSION_ID_KEY, next);
+  await AsyncStorage.setItem(storageKey, next);
   return next;
 }
 
@@ -128,7 +135,7 @@ export async function trackEvent(name, properties = {}, options = {}) {
   try {
     const { queueWhenSignedOut = true } = options;
     const session = await getSession();
-    const sessionId = await getSessionId();
+    const sessionId = await getSessionId(session?.user?.id);
     const clientCreatedAt = new Date().toISOString();
     const event = {
       name: eventName,
@@ -182,6 +189,7 @@ export async function flushAnalyticsQueue({ source = "unknown" } = {}) {
       }
 
       const safeSource = stringOrNull(source, 80) || "unknown";
+      const currentSessionId = await getSessionId(session.user.id);
       const flushableQueue = queue.filter((event) => eventCapturedForCurrentUser(event, session.user.id));
       const droppedEventCount = queue.length - flushableQueue.length;
 
@@ -189,7 +197,7 @@ export async function flushAnalyticsQueue({ source = "unknown" } = {}) {
         await AsyncStorage.removeItem(QUEUE_KEY);
         await supabase.from("analytics_events").insert({
           user_id: session.user.id,
-          session_id: await getSessionId(),
+          session_id: currentSessionId,
           name: "analytics_queue_dropped",
           properties: {
             ...releaseContext(),
@@ -210,7 +218,7 @@ export async function flushAnalyticsQueue({ source = "unknown" } = {}) {
 
       const rows = flushableQueue.map((event) => ({
         user_id: session.user.id,
-        session_id: event.sessionId,
+        session_id: currentSessionId,
         name: event.name,
         properties: {
           ...normalizeProperties(event.properties),
@@ -235,7 +243,7 @@ export async function flushAnalyticsQueue({ source = "unknown" } = {}) {
       await supabase.from("analytics_events").insert([
         {
           user_id: session.user.id,
-          session_id: await getSessionId(),
+          session_id: currentSessionId,
           name: "analytics_queue_flushed",
           properties: {
             ...releaseContext(),
@@ -247,7 +255,7 @@ export async function flushAnalyticsQueue({ source = "unknown" } = {}) {
         },
         ...(droppedEventCount > 0 ? [{
           user_id: session.user.id,
-          session_id: await getSessionId(),
+          session_id: currentSessionId,
           name: "analytics_queue_dropped",
           properties: {
             ...releaseContext(),
@@ -277,5 +285,7 @@ export async function flushAnalyticsQueue({ source = "unknown" } = {}) {
 }
 
 export async function clearAnalyticsStorage() {
-  await AsyncStorage.multiRemove([SESSION_ID_KEY, QUEUE_KEY]);
+  const keys = await AsyncStorage.getAllKeys();
+  const sessionKeys = keys.filter((key) => key.startsWith(SESSION_ID_KEY_PREFIX));
+  await AsyncStorage.multiRemove([LEGACY_SESSION_ID_KEY, QUEUE_KEY, ...sessionKeys]);
 }
