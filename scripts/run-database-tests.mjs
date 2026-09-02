@@ -172,6 +172,78 @@ async function testRlsAndCatalog(admin) {
   const unchanged = await admin.query("SELECT product_name FROM public.scan_history WHERE id = 'b-row'");
   assert(crossWriteFailed || unchanged.rows[0].product_name === "B", "RLS must block cross-user history writes");
 
+  const visibleProfiles = await asRole("authenticated", userA, (client) => client.query(
+    "SELECT id FROM public.profiles ORDER BY id"
+  ));
+  assert(visibleProfiles.rows.map((row) => row.id).join(",") === userA,
+    "RLS must hide user B profile from user A");
+
+  await admin.query(
+    "INSERT INTO public.analytics_events (user_id, session_id, event_name) VALUES ($1, 'b-session', 'private-b')",
+    [userB]
+  );
+  let analyticsReadFailed = false;
+  try {
+    await asRole("authenticated", userA, (client) => client.query(
+      "SELECT * FROM public.analytics_events WHERE user_id = $1",
+      [userB]
+    ));
+  } catch {
+    analyticsReadFailed = true;
+  }
+  assert(analyticsReadFailed, "authenticated users must not read analytics event rows");
+
+  let analyticsCrossWriteFailed = false;
+  try {
+    await asRole("authenticated", userA, (client) => client.query(
+      "INSERT INTO public.analytics_events (user_id, session_id, event_name) VALUES ($1, 'spoof', 'spoof')",
+      [userB]
+    ));
+  } catch {
+    analyticsCrossWriteFailed = true;
+  }
+  assert(analyticsCrossWriteFailed, "analytics RLS must reject rows attributed to another user");
+
+  const ownUsage = await asRole("authenticated", userA, (client) => client.query(
+    "SELECT DISTINCT user_id FROM public.scan_usage_events"
+  ));
+  assert(ownUsage.rows.every((row) => row.user_id === userA),
+    "scan usage RLS must hide other users' rows");
+
+  let usageWriteFailed = false;
+  try {
+    await asRole("authenticated", userA, (client) => client.query(
+      "UPDATE public.scan_usage_events SET free_limit = 999 WHERE user_id = $1",
+      [userA]
+    ));
+  } catch {
+    usageWriteFailed = true;
+  }
+  assert(usageWriteFailed, "authenticated users must not mutate scan usage rows directly");
+
+  await admin.query(
+    "INSERT INTO public.product_events (user_id, event_name, session_id) VALUES ($1, 'private-b', 'b-product-session')",
+    [userB]
+  );
+  let productEventReadFailed = false;
+  try {
+    await asRole("authenticated", userA, (client) => client.query("SELECT * FROM public.product_events"));
+  } catch {
+    productEventReadFailed = true;
+  }
+  assert(productEventReadFailed, "authenticated users must not read product event rows");
+
+  let productEventWriteFailed = false;
+  try {
+    await asRole("authenticated", userA, (client) => client.query(
+      "INSERT INTO public.product_events (user_id, event_name, session_id) VALUES ($1, 'injected', 'injected')",
+      [userA]
+    ));
+  } catch {
+    productEventWriteFailed = true;
+  }
+  assert(productEventWriteFailed, "authenticated users must not write product event rows directly");
+
   let entitlementWriteFailed = false;
   try {
     await asRole("authenticated", userA, (client) => client.query(
@@ -261,9 +333,10 @@ async function testQuerySafety(admin) {
   assert(durationMs < 500, `query-shape corpus exceeded 500 ms: ${durationMs.toFixed(1)} ms`);
   const bounded = await admin.query(
     "SELECT numnode(public.catalog_bounded_prefix_tsquery($1)) AS nodes",
-    ["one two three four five six seven eight nine ten eleven twelve thirteen fourteen"]
+    ["token01 token02 token03 token04 token05 token06 token07 token08 token09 token10 token11 token12 token13 token14"]
   );
-  assert(Number(bounded.rows[0].nodes) <= 12, "prefix query must cap term count at 12");
+  // numnode counts the 12 lexemes plus the 11 AND operators.
+  assert(Number(bounded.rows[0].nodes) <= 23, "prefix query must cap term count at 12");
 }
 
 async function main() {
