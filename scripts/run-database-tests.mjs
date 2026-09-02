@@ -300,11 +300,31 @@ async function testDeletion(admin) {
     "INSERT INTO public.product_events (user_id, event_name, session_id, metadata) VALUES ($1, 'search_result_tapped', 'session-user-a', '{\"query\":\"private search\"}')",
     [userA]
   );
+  await admin.query(
+    `INSERT INTO public.revenuecat_events
+      (event_id, app_user_id, original_app_user_id, subscriber_app_user_id, processed_user_ids, aliases, payload)
+     VALUES
+      ('rc-app-user', $1, NULL, NULL, '{}', '{}', '{}'),
+      ('rc-original-user', NULL, $1, NULL, '{}', '{}', '{}'),
+      ('rc-subscriber-user', NULL, NULL, $1, '{}', '{}', '{}'),
+      ('rc-processed-user', NULL, NULL, NULL, ARRAY[$1::UUID], '{}', '{}'),
+      ('rc-alias-user', NULL, NULL, NULL, '{}', ARRAY[$1], '{}'),
+      ('rc-payload-user', NULL, NULL, NULL, '{}', '{}', jsonb_build_object('subscriber', $1)),
+      ('rc-unrelated', $2, NULL, NULL, '{}', '{}', '{}')`,
+    [userA, userB]
+  );
   await asRole("authenticated", userA, (client) => client.query("SELECT public.delete_own_account()"));
   const retained = await admin.query(
     "SELECT count(*)::INTEGER AS count FROM public.product_events WHERE session_id = 'session-user-a'"
   );
   assert(retained.rows[0].count === 0, "account deletion must remove product_events instead of anonymizing typed queries");
+  const retainedRevenueCat = await admin.query(
+    "SELECT event_id FROM public.revenuecat_events WHERE event_id LIKE 'rc-%' ORDER BY event_id"
+  );
+  assert(
+    retainedRevenueCat.rows.map((row) => row.event_id).join(",") === "rc-unrelated",
+    "account deletion must remove every stored RevenueCat identifier shape and retain unrelated events"
+  );
 }
 
 async function testQuerySafety(admin) {
@@ -337,6 +357,7 @@ async function testQuerySafety(admin) {
   );
   // numnode counts the 12 lexemes plus the 11 AND operators.
   assert(Number(bounded.rows[0].nodes) <= 23, "prefix query must cap term count at 12");
+  return durationMs;
 }
 
 async function main() {
@@ -356,8 +377,11 @@ async function main() {
     await testRlsAndCatalog(admin);
     await testLegacyRpcAuthorization(admin);
     await testDeletion(admin);
-    await testQuerySafety(admin);
-    console.log(`Database integration tests passed (${assertions} assertions).`);
+    const queryCorpusDurationMs = await testQuerySafety(admin);
+    console.log(
+      `Database integration tests passed (${assertions} assertions; ` +
+      `query-shape corpus ${queryCorpusDurationMs.toFixed(1)} ms / 500 ms budget).`
+    );
   } finally {
     await admin.end();
   }
