@@ -4,6 +4,7 @@ import { createLogger } from "./logger";
 const logger = createLogger("PERFORMANCE");
 const jsBootStartedAt = Date.now();
 let interactiveMarked = false;
+const loggedNavigationStarts = new Set();
 const loggedCaptureStarts = new Set();
 const loggedLabelStageStarts = new Set();
 const latestTimings = {
@@ -51,6 +52,11 @@ export function navigationTimingParams(sourceSurface) {
 export function logTapToCamera({ navigationStartedAt, sourceSurface, mode }) {
   const startedAt = Number(navigationStartedAt);
   if (!Number.isFinite(startedAt) || startedAt <= 0) return null;
+  if (loggedNavigationStarts.has(startedAt)) return null;
+  loggedNavigationStarts.add(startedAt);
+  if (loggedNavigationStarts.size > 50) {
+    loggedNavigationStarts.delete(loggedNavigationStarts.values().next().value);
+  }
   const durationMs = Math.max(0, Date.now() - startedAt);
   latestTimings.tapToCameraMs = durationMs;
   latestTimings.tapToCameraMode = mode || "unknown";
