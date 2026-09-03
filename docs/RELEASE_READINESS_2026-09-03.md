@@ -3,6 +3,7 @@
 Date: 2026-09-03 (America/Los_Angeles)
 
 Release branch: `codex/production-release-20260716`
+Tested source commit: `eca2f28f` ([CI run 33817219070](https://github.com/aizakmi08/woof/actions/runs/33817219070))
 
 Requested local marketing version: `1.2.2`
 Decision: **BLOCKED — do not build or submit yet**
@@ -11,7 +12,7 @@ This report records what was actually tested. It does not claim that the app has
 
 ## Executive decision
 
-The release line is consolidated and the most important nutrition-scoring path is proved against a real production row. The quota boundary, deletion durability, GTIN index, and first-day KPI view are implemented and pass a disposable PostgreSQL test suite, but they are not deployed. Four independent release blockers remain:
+The release line is consolidated and the most important nutrition-scoring path is proved against a real production row. Smoke, disposable PostgreSQL, and native StoreKit CI are green on the tested source commit. The quota boundary, deletion durability, GTIN index, and first-day KPI view are implemented and pass a disposable PostgreSQL test suite, but they are not deployed. Four independent release blockers remain:
 
 1. Apple reports live version `1.2.4`; every local release file intentionally remains `1.2.2`. Apple will not accept a lower marketing version. The owner must authorize a new version greater than `1.2.4`; no version was changed here.
 2. The four production boundary migrations and two changed Edge Functions are not deployed. The current live grants still permit the catalog quota bypass, the deletion tombstone is absent, and the normalized GTIN index and release KPI view do not exist.
@@ -54,7 +55,7 @@ This proves that the old hard-wired balance score of 52 is no longer the product
 | Full-catalog quota bypass | PASS | OPEN until migration + new binary | Teaser RPCs expose identity fields only. `consume_verified_catalog_product` atomically binds the scan ID to the product hash, consumes quota, and returns full ingredients/nutrients only on allowance. Direct ingredient/nutrient column grants and seven full-row RPC grants are revoked. |
 | CI service-role secret scope | PASS | Applies when CI runs | The key is no longer job-scoped. A Boolean-only detection step selects the catalog check; the service key is injected only into that step. |
 | Account deletion | PASS | OPEN until migration + webhook deploy | Deletion removes `analytics_events`, typed-query/submitted-ingredient `product_events`, scan/rate state, auth state, and every RevenueCat identifier location. A private SHA-256 tombstone rejects delayed RevenueCat inserts at both the webhook and database-trigger boundaries. |
-| Repo/build hygiene | PASS | N/A | `.gitignore` covers `inputs/`, `output/`, `outputs/`, `tmp/`, `audit/`, and `.agent-preflight/`. `.easignore` excludes local data, docs, scripts, Supabase sources, secrets, and generated native folders. No tracked contract PDF, key, token capture, signing file, or provisioning profile was found. Secret scan passed 1,280 tracked/source files. |
+| Repo/build hygiene | PASS | N/A | `.gitignore` covers `inputs/`, `output/`, `outputs/`, `tmp/`, `audit/`, and `.agent-preflight/`. `.easignore` excludes local data, docs, scripts, Supabase sources, secrets, and generated native folders. No tracked contract PDF, key, token capture, signing file, or provisioning profile was found. Final secret scan passed 1,282 tracked/source files. |
 
 Live read-only verification on 2026-09-03 showed `authenticated` still has full `product_data` and ingredient-column SELECT, all three dead counter RPCs remain executable, and none of the new atomic consumer, deletion-tombstone table, normalized-GTIN index, or release-monitoring view exists. This is why deployment is mandatory before a public binary.
 
@@ -129,7 +130,7 @@ The fail-fast preflight stopped at the first failure. Suites after that point we
 | # | Suite | Result | Observed time | Evidence |
 | ---: | --- | --- | ---: | --- |
 | 1 | Git whitespace | PASS | 0.05s | `git diff --check` |
-| 2 | Secret scan | PASS | 0.22s | 1,280 files |
+| 2 | Secret scan | PASS | 0.22s | 1,282 files in final rerun |
 | 3 | JS syntax/product guards | PASS | 7.11s | 197 files |
 | 4 | Nullable default-parameter safety | PASS | 0.59s | 52 app files; bad fixture detected |
 | 5 | Product resolver contract | PASS | 1.14s | 6 tests |
@@ -172,8 +173,8 @@ The fail-fast preflight stopped at the first failure. Suites after that point we
 | — | Live catalog RPC performance | BLOCKED(migrations not deployed) | 11.29s | Refused to grade missing teaser/index boundary |
 | — | Hosted StoreKit app/test compilation | PASS | local cold build | Generated app host and test bundle compiled under Xcode 26.6 before test execution |
 | — | Local StoreKit transaction execution | BLOCKED(Apple iOS 26.5 CLI defect) | 41.47s full test operation; strengthened Ask to Buy test interrupted after 90s | Product-catalog assertion passed in the full run; the strengthened test compiled, then the local StoreKit daemon returned `SKInternalErrorDomain Code=3` while resetting the session and hung while loading products |
-| — | CI StoreKit execution on pinned iOS 26.1 | FAIL | 17m33s job; 3.63s tests | Run `33815809027`: 3 passed, 1 skipped by explicit expiry opt-in, and the strengthened Ask to Buy path proved both pending purchases, approval, and that decline clears the pending flag. Its only failure showed Apple retains the declined test-history record as `SKPaymentTransactionState.deferred` (raw value 4), not `.failed` (raw value 2). The replacement now asserts that exact observed contract and awaits a new CI run. |
-| — | Maestro matrix | BLOCKED(Maestro absent; no simulator booted) | — | Only the product-row regression flow exists; the full matrix was not executed |
+| — | CI StoreKit execution on pinned iOS 26.1 | PASS | 16m17s job; 4.01s tests | Run `33817219070`: 4 passed, 1 skipped by the explicit monthly-expiry opt-in, 0 failures. Covered product/catalog parity, purchase persistence, cancellation/expiry, and in-app Ask to Buy pending/approve/decline behavior. |
+| — | Maestro matrix | BLOCKED(Maestro absent; matrix not executed) | — | Only the product-row regression flow exists; the full matrix was not executed |
 | — | Clean checkout: clone → `npm ci` → Expo export | PASS | final verification | Run from the committed release candidate with no untracked source dependency |
 
 `npm run verify` was not used as a coverage claim; it remains a thin existence/configuration check.
@@ -214,7 +215,7 @@ The product-row null regression is fixed at the callee boundary. `labelSummaryTi
 
 Required device cells are 2 appearances × 2 Dynamic Type sizes × 2 device classes = 8 cells: light/dark; default/maximum text; SE-class/large iPhone. Each cell must cover onboarding, guest auth success/failures, every scan mode, every resolver decision, apostrophe/typo/timeout search, candidate confirmation and “None of these,” ingredient capture with both consent choices, all Results states, quota/reversal copy, all paywall entries/failures, four restore outcomes, review-prompt cadence, pet profile/AVOID banner, history search/filter/compare/recovery, and per-screen offline behavior.
 
-Status for all eight cells: **BLOCKED(Maestro is not installed and no iOS Simulator was booted)**. The repository contains one repeatable development-only product-row flow, but that is not the requested matrix. Camera packages, memory/low-storage pressure, real StoreKit/RevenueCat state, and VoiceOver would remain physical-device work even if the simulator matrix ran.
+Status for all eight cells: **BLOCKED(Maestro is not installed and the E2E matrix was not executed)**. CI booted an iOS 26.1 simulator only for the native StoreKit contract suite; that is not a substitute for the requested UI matrix. The repository contains one repeatable development-only product-row flow, but camera packages, memory/low-storage pressure, real RevenueCat state, and VoiceOver remain physical-device work even if the simulator matrix runs.
 
 ## 9. One-page real-iPhone owner checklist
 
