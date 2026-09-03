@@ -92,7 +92,10 @@ final class WoofConfigurationTests: XCTestCase {
       session.allTransactions().first { $0.identifier == decline.identifier }
     )
     XCTAssertFalse(declined.pendingAskToBuyConfirmation)
-    XCTAssertEqual(declined.state, .failed)
+    // StoreKit keeps the transaction-manager history record in the deferred
+    // state after a decline, but clears its pending approval flag. The app
+    // receives no successful transaction or entitlement for that record.
+    XCTAssertEqual(declined.state, .deferred)
   }
 
   func testExpireMonthlySubscriptionWhenExplicitlyEnabled() throws {
