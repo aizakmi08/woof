@@ -125,6 +125,35 @@ order by metric_date desc
 limit 14;
 ```
 
+## First 24 Hours After Release
+
+This service-role-only view puts the five release guardrails in one query. Review it at launch, +1 hour, +4 hours, and +24 hours. A resolver abstention is a safe outcome when exact identity cannot be confirmed; investigate a sharp increase, but never lower the exact-match boundary to improve this rate.
+
+```sql
+select
+  metric_date,
+  scan_starts,
+  scan_completions,
+  scan_success_rate,
+  resolver_completions,
+  resolver_exact_confirmations,
+  resolver_abstentions,
+  resolver_abstention_rate,
+  catalog_lookup_outcomes,
+  catalog_misses,
+  catalog_lookup_failures,
+  catalog_miss_rate,
+  paywall_views,
+  purchase_completions,
+  paywall_purchase_conversion_rate,
+  restore_starts,
+  restore_failures,
+  restore_failure_rate
+from public.kpi_release_monitoring_daily
+order by metric_date desc
+limit 2;
+```
+
 ## Drilldowns
 
 Activation cohorts:

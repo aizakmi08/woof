@@ -28,13 +28,6 @@ import * as FileSystem from "expo-file-system/legacy";
 import { getCachedAnalysis } from "../../services/cache";
 import * as analysisService from "../../services/analysisService";
 import { getHistoryResultSnapshot } from "../../services/history";
-import {
-  catalogProductToVerifiedProduct,
-  findVerifiedCatalogProductByBarcode,
-  findVerifiedCatalogProductForLookup,
-  getCatalogProduct,
-} from "../../services/productCatalog";
-import { buildVerifiedPetFoodAnalysis } from "../../services/verifiedScoring";
 import { useAuth } from "../../services/auth";
 import { trackEvent } from "../../services/analytics";
 import { submitCatalogIngredientCapture } from "../../services/catalogCoverage";
@@ -97,6 +90,7 @@ import {
 import {
   logCaptureToResult,
   logLabelScanStageTimings,
+  logResultsFirstPaint,
   navigationTimingParams,
 } from "../../services/performanceTimings";
 
@@ -308,6 +302,7 @@ export default function ResultsScreen({ route, navigation }) {
     captureStartedAt,
     captureTimingMode,
     labelStageTimings,
+    resultsNavigationStartedAt,
     devFixtureResult,
     devFixtureError,
     devFixtureLoadingStatus,
@@ -361,6 +356,12 @@ export default function ResultsScreen({ route, navigation }) {
   const isDevFixture = __DEV__ && Boolean(
     devFixtureResult || devFixtureError || devFixtureLoadingStatus || devFixtureHoldStreaming
   );
+  const handleFirstLayout = useCallback(() => {
+    logResultsFirstPaint({
+      navigationStartedAt: resultsNavigationStartedAt,
+      mode: captureTimingMode || (isHumanFood ? "human_food" : mode),
+    });
+  }, [captureTimingMode, isHumanFood, mode, resultsNavigationStartedAt]);
 
   // Reanimated scroll
   const scrollY = useSharedValue(0);
@@ -649,30 +650,6 @@ export default function ResultsScreen({ route, navigation }) {
               source: "supabase_history_snapshot",
               nextDataSource: "ai",
             })) return;
-          }
-
-          if (!isHumanFood) {
-            let catalogMatch = await getCatalogProduct(cacheKey);
-            if (!catalogMatch && /^\d{8,14}$/.test(String(cacheKey || ""))) {
-              catalogMatch = await findVerifiedCatalogProductByBarcode(cacheKey);
-            }
-            if (!catalogMatch && historyProductName) {
-              catalogMatch = await findVerifiedCatalogProductForLookup({
-                productName: historyProductName,
-                petType,
-              });
-            }
-
-            if (catalogMatch) {
-              const verifiedProduct = catalogProductToVerifiedProduct(catalogMatch);
-              const rebuilt = buildVerifiedPetFoodAnalysis(verifiedProduct);
-              if (applyHistoryResult({
-                analysis: rebuilt,
-                source: "verified_catalog_rebuild",
-                nextDataSource: "verified",
-                nextOpffData: verifiedProduct,
-              })) return;
-            }
           }
 
           // Fall back to Supabase
@@ -1590,7 +1567,7 @@ export default function ResultsScreen({ route, navigation }) {
   // --- Loading (skeleton layout matching results page) ---
   if (isLoading) {
     return (
-      <View style={[styles.container, { paddingTop: insets.top }]}>
+      <View style={[styles.container, { paddingTop: insets.top }]} onLayout={handleFirstLayout}>
         {/* Header: back arrow + grayed share */}
         <View style={styles.header}>
           <TouchableOpacity
@@ -1618,7 +1595,7 @@ export default function ResultsScreen({ route, navigation }) {
   // --- Error (no meaningful result) ---
   if (error && (!result || !result.productName)) {
     return (
-      <View style={[styles.container, { paddingTop: insets.top }]}>
+      <View style={[styles.container, { paddingTop: insets.top }]} onLayout={handleFirstLayout}>
         {/* Header: back arrow */}
         <View style={styles.header}>
           <TouchableOpacity
@@ -1735,7 +1712,7 @@ export default function ResultsScreen({ route, navigation }) {
 
   // --- Success — unified scrollable page ---
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
+    <View style={[styles.container, { paddingTop: insets.top }]} onLayout={handleFirstLayout}>
       {/* Header: back + mini score (fades in on scroll) + share */}
       <Animated.View style={[styles.header, headerBorderStyle]}>
         <TouchableOpacity

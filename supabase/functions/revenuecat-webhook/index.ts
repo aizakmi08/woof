@@ -24,7 +24,7 @@ const CORS_HEADERS = {
 };
 
 const FUNCTION_NAME = "revenuecat-webhook";
-const FUNCTION_AUDIT_VERSION = "2026-06-17-edge-reconcile-v1";
+const FUNCTION_AUDIT_VERSION = "2026-09-03-edge-deletion-tombstone-v1";
 const DEPLOYMENT_HEADERS = {
   "X-Woof-Function-Name": FUNCTION_NAME,
   "X-Woof-Function-Audit-Version": FUNCTION_AUDIT_VERSION,
@@ -182,6 +182,14 @@ function uniqueUuidIds(values: Array<unknown>): string[] {
     if (typeof value === "string" && isUuid(value)) ids.add(value);
   }
   return [...ids];
+}
+
+function deletionIdentityCandidates(payload: Record<string, unknown>): string[] {
+  const serialized = JSON.stringify(payload);
+  const embeddedUuids = serialized.match(
+    /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi,
+  ) || [];
+  return uniqueUuidIds(embeddedUuids.map((value) => value.toLowerCase()));
 }
 
 function candidateUserIds(event: Record<string, unknown>): string[] {
@@ -535,6 +543,21 @@ Deno.serve(async (req) => {
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
   const revenueCatApiKey = optionalEnv("REVENUECAT_REST_API_KEY");
 
+  const deletionCandidates = deletionIdentityCandidates(body);
+  if (deletionCandidates.length > 0) {
+    const { data: wasDeleted, error: deletionCheckError } = await supabase.rpc(
+      "is_deleted_revenuecat_identity",
+      { p_identities: deletionCandidates },
+    );
+    if (deletionCheckError) {
+      console.error("[REVENUECAT] Deletion tombstone check failed:", deletionCheckError.message);
+      return json({ error: "Failed to verify deletion state" }, 500);
+    }
+    if (wasDeleted === true) {
+      return json({ ok: true, ignored_reason: "deleted_user_tombstone" });
+    }
+  }
+
   const eventType = String(event.type || "UNKNOWN");
   const eventId =
     typeof event.id === "string" && event.id
@@ -696,6 +719,9 @@ Deno.serve(async (req) => {
     );
 
   if (eventError) {
+    if (eventError.message.includes("deleted_revenuecat_identity")) {
+      return json({ ok: true, ignored_reason: "deleted_user_tombstone" });
+    }
     console.error("[REVENUECAT] Event log write failed:", eventError.message);
     return json({ error: "Failed to log webhook event" }, 500);
   }

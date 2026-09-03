@@ -35,11 +35,7 @@ const DEFAULT_LIMIT = 16;
 // normally completes far earlier, but retains enough cold-start/network margin.
 const CATALOG_RPC_TIMEOUT_MS = 6_000;
 const LABEL_RPC_TIMEOUT_MS = 4_500;
-const CATALOG_PRODUCT_CACHE_TTL_MS = 10 * 60 * 1000;
-const CATALOG_PRODUCT_CACHE_MAX_ENTRIES = 24;
-const catalogProductCache = new Map();
 const LABEL_IDENTITY_RPC = "search_verified_product_identities_for_label";
-const LEGACY_LABEL_RPC = "search_verified_products_for_label_fast";
 const MIN_SCORABLE_CATALOG_RANK = 3;
 const LABEL_AUTO_OPEN_CONFIDENCE = 0.78;
 const LABEL_AUTO_OPEN_CANDIDATE_COUNT = 5;
@@ -1902,13 +1898,12 @@ async function runCatalogRpc(functionName, args, {
 
 async function searchWoofCatalog(query, limit, {
   signal,
-  allowLegacyFallback = true,
   timeoutMs = CATALOG_RPC_TIMEOUT_MS,
 } = {}) {
   const normalizedQuery = compact(query);
   if (/^[0-9]{8,14}$/.test(normalizedQuery)) {
     const { data: skuData, error: skuError } = await runCatalogRpc(
-      "resolve_verified_product_by_gtin",
+      "resolve_verified_product_teaser_by_gtin",
       {
         q: normalizedQuery,
         max_results: limit,
@@ -1933,7 +1928,7 @@ async function searchWoofCatalog(query, limit, {
   };
 
   const { data, error } = await runCatalogRpc(
-    "search_verified_products",
+    "search_verified_product_teasers",
     params,
     { signal, timeoutMs }
   );
@@ -1944,27 +1939,12 @@ async function searchWoofCatalog(query, limit, {
     );
   }
 
-  if (!allowLegacyFallback || !rpcFunctionUnavailable(error)) throw error;
-
-  logger.debug("[CATALOG] Verified search RPC unavailable; using legacy search:", error.message);
-  const { data: fallbackData, error: fallbackError } = await runCatalogRpc(
-    "search_products",
-    params,
-    { signal, timeoutMs }
-  );
-
-  if (fallbackError) {
-    throw fallbackError;
-  }
-
-  return sortCatalogSearchProducts(
-    (fallbackData || []).map((row) => normalizeCatalogProduct(row, "catalog"))
-  );
+  throw error;
 }
 
 async function searchWoofCatalogFuzzy(query, limit, { signal } = {}) {
   const { data, error } = await runCatalogRpc(
-    "search_products",
+    "search_verified_product_teasers",
     { q: compact(query), max_results: limit },
     { signal, timeoutMs: CATALOG_RPC_TIMEOUT_MS }
   );
@@ -2170,17 +2150,7 @@ async function searchWoofCatalogLabelIdentities(queries, limit, signal) {
   if (!identityResponse.error) return identityResponse;
   if (!rpcFunctionUnavailable(identityResponse.error)) return identityResponse;
 
-  // Backward-compatible only while the new migration propagates. This remains
-  // one request, never the previous multi-query fan-out.
-  logger.debug(
-    "[CATALOG] Lightweight label identity RPC unavailable; using legacy label RPC:",
-    identityResponse.error.message
-  );
-  return runCatalogRpc(
-    LEGACY_LABEL_RPC,
-    args,
-    { signal, timeoutMs: LABEL_RPC_TIMEOUT_MS }
-  );
+  return identityResponse;
 }
 
 export async function searchCatalogProducts(query, {
@@ -2512,56 +2482,48 @@ export async function resolveProduct({
   });
 }
 
-export async function getCatalogProduct(cacheKey, { signal } = {}) {
+export async function consumeCatalogProduct({
+  cacheKey,
+  scanId,
+  scanMode = "catalog",
+  signal,
+} = {}) {
   const key = compact(cacheKey);
-  if (!key) return null;
-  if (signal?.aborted) return null;
+  if (!key) throw catalogRequestError("Catalog product key is required");
 
-  const cached = catalogProductCache.get(key);
-  if (cached) {
-    if ((Date.now() - cached.cachedAt) <= CATALOG_PRODUCT_CACHE_TTL_MS) {
-      // Refresh insertion order so the bounded map behaves as an LRU cache.
-      catalogProductCache.delete(key);
-      catalogProductCache.set(key, cached);
-      return cached.product;
-    }
-    catalogProductCache.delete(key);
+  const { data, error } = await runCatalogRpc(
+    "consume_verified_catalog_product",
+    {
+      p_cache_key: key,
+      p_scan_id: scanId || null,
+      p_scan_mode: scanMode || "catalog",
+    },
+    { signal, timeoutMs: CATALOG_RPC_TIMEOUT_MS }
+  );
+
+  if (error) throw error;
+  if (!data?.allowed) {
+    const requestError = catalogRequestError(
+      data?.reason === "free_limit_reached"
+        ? "You've used your free scans. Upgrade to keep scanning."
+        : "This verified product is not available right now."
+    );
+    requestError.code = data?.reason === "free_limit_reached"
+      ? "SCAN_LIMIT_REACHED"
+      : "CATALOG_VERIFICATION_REQUIRED";
+    requestError.reason = data?.reason || "catalog_product_unavailable";
+    requestError.scanUsage = data?.scan_usage || null;
+    throw requestError;
   }
 
-  const controller = new AbortController();
-  const onAbort = () => controller.abort();
-  signal?.addEventListener?.("abort", onAbort, { once: true });
-  const timeout = setTimeout(() => controller.abort(), CATALOG_RPC_TIMEOUT_MS);
-  let data;
-  let error;
-  try {
-    ({ data, error } = await supabase
-      .from("product_data")
-      .select("cache_key, product_name, brand, gtin, product_line, flavor, life_stage, food_form, package_size, pet_type, ingredients, ingredient_text, ingredient_count, nutritional_info, nutrient_panel, has_published_nutrients, source, source_quality, ingredient_verification_status, image_verification_status, verified_at, source_url, image_url, formula_evidence_tier, formula_version_provenance")
-      .eq("cache_key", key)
-      .abortSignal(controller.signal)
-      .maybeSingle());
-  } catch (requestError) {
-    logger.debug("[CATALOG] getCatalogProduct request failed:", requestError?.message || requestError);
-    return null;
-  } finally {
-    clearTimeout(timeout);
-    signal?.removeEventListener?.("abort", onAbort);
+  if (!data.product) {
+    throw catalogRequestError("Verified product details were not returned");
   }
 
-  if (error) {
-    logger.debug("[CATALOG] getCatalogProduct error:", error.message);
-    return null;
-  }
-
-  if (!data) return null;
-
-  const product = normalizeCatalogProduct(data, "catalog");
-  catalogProductCache.set(key, { product, cachedAt: Date.now() });
-  while (catalogProductCache.size > CATALOG_PRODUCT_CACHE_MAX_ENTRIES) {
-    catalogProductCache.delete(catalogProductCache.keys().next().value);
-  }
-  return product;
+  return {
+    product: normalizeCatalogProduct(data.product, "catalog"),
+    scanUsage: data.scan_usage || null,
+  };
 }
 
 export async function findVerifiedCatalogProductByBarcode(barcode, { signal } = {}) {

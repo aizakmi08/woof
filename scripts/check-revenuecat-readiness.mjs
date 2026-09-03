@@ -116,7 +116,13 @@ for (const expected of expectedStoreKitSubscriptions) {
 }
 
 requireSnippets(storeKitTestPath, storeKitTest, [
+  "import StoreKit",
   "import StoreKitTest",
+  "testPurchasePersistsAcrossStoreKitSessionRecreation",
+  "testCancellationAndExpiryRemoveActiveRenewal",
+  "testAskToBuyCanBeApprovedAndDeclined",
+  "approveAskToBuyTransaction",
+  "declineAskToBuyTransaction",
   "testExpireMonthlySubscriptionWhenExplicitlyEnabled",
   'environment["WOOF_STOREKIT_EXPIRE_MONTHLY"] == "1"',
   'SKTestSession(configurationFileNamed: "Woof")',
@@ -128,6 +134,14 @@ requireSnippets(storeKitTestPath, storeKitTest, [
   '"woof_pro_annual": ("29.99", "P1Y")',
   'XCTAssertEqual(introductoryOffer["subscriptionPeriod"] as? String, "P3D")',
 ], "native StoreKit catalog test");
+requireSnippets(".github/workflows/ci.yml", workflow, [
+  "ios-storekit:",
+  "runs-on: macos-15",
+  "xcodebuild test",
+  'scheme "woof StoreKit"',
+  "only-testing:woofTests/WoofConfigurationTests",
+  'SENTRY_DISABLE_AUTO_UPLOAD: "true"',
+], "CI native StoreKit execution");
 requireSnippets(storeKitPluginPath, storeKitPlugin, [
   "withDangerousMod",
   "withXcodeProject",

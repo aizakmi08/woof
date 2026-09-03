@@ -31,36 +31,6 @@ const OPFF_BASE = "https://world.openpetfoodfacts.org";
 const REQUEST_TIMEOUT_MS = 4_000;
 const USER_AGENT = "Woof App - pet food scanner";
 const MIN_SCORABLE_CATALOG_RANK = 3;
-const CATALOG_SELECT = [
-  "cache_key",
-  "product_name",
-  "brand",
-  "gtin",
-  "product_line",
-  "flavor",
-  "life_stage",
-  "food_form",
-  "package_size",
-  "pet_type",
-  "ingredients",
-  "ingredient_text",
-  "ingredient_count",
-  "nutritional_info",
-  "nutrient_panel",
-  "has_published_nutrients",
-  "source",
-  "source_quality",
-  "ingredient_verification_status",
-  "image_verification_status",
-  "verified_at",
-  "source_url",
-  "image_url",
-  "expires_at",
-  "is_complete_food",
-  "catalog_exclusion_reason",
-  "formula_evidence_tier",
-  "formula_version_provenance",
-].join(", ");
 const VERIFIED_INGREDIENT_STATUSES = new Set([
   "gdsn",
   "official",
@@ -618,13 +588,13 @@ async function searchVerifiedCatalog(
   query: string,
   limit = 8,
 ): Promise<Record<string, unknown>[]> {
-  const { data, error } = await supabase.rpc("search_verified_products", {
+  const { data, error } = await supabase.rpc("search_verified_product_teasers", {
     q: query,
     max_results: Math.max(1, Math.min(limit, 25)),
   });
 
   if (error) {
-    console.log("[PRODUCT_LOOKUP] search_verified_products error:", error.message);
+    console.log("[PRODUCT_LOOKUP] search_verified_product_teasers error:", error.message);
     return [];
   }
 
@@ -645,7 +615,7 @@ async function findCatalogByBarcode(
   const products: Record<string, unknown>[] = [];
   for (const variant of variants) {
     const { data: skuData, error: skuError } = await supabase.rpc(
-      "resolve_verified_product_by_gtin",
+      "resolve_verified_product_teaser_by_gtin",
       {
         q: variant,
         max_results: 8,
@@ -653,7 +623,7 @@ async function findCatalogByBarcode(
     );
     if (skuError) {
       console.log(
-        "[PRODUCT_LOOKUP] resolve_verified_product_by_gtin error:",
+        "[PRODUCT_LOOKUP] resolve_verified_product_teaser_by_gtin error:",
         skuError.message,
       );
       break;
@@ -666,20 +636,6 @@ async function findCatalogByBarcode(
 
   if (products.length > 0) {
     return pickExactBarcodeVersion(products);
-  }
-
-  const { data, error } = await supabase
-    .from("product_data")
-    .select(CATALOG_SELECT)
-    .in("gtin", variants)
-    .limit(12);
-
-  if (error) {
-    console.log("[PRODUCT_LOOKUP] product_data barcode lookup error:", error.message);
-  } else {
-    for (const row of Array.isArray(data) ? data : []) {
-      products.push({ ...normalizeCatalogProduct(row), rank: 100 });
-    }
   }
 
   if (products.length === 0) {

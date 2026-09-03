@@ -29,6 +29,9 @@ Use `WEEKLY_REVIEW_RUNBOOK.md` as the paste-ready weekly operating review. This 
 
 ## Driver Metrics
 
+- **First-day release health**: scan success, resolver abstention, catalog miss, paywall purchase conversion, and restore failure rates in one service-role-only daily row. Resolver abstention is an intentional safety behavior when exact product identity cannot be proved; alert on regressions without weakening the matching boundary.
+  Source: `public.kpi_release_monitoring_daily` from `supabase/migrations/20260903204349_release_monitoring_kpis.sql`.
+
 - **Scan success rate**: `scan_completions / scan_starts`.
   Source: `public.kpi_daily_funnel.scan_success_rate`.
 

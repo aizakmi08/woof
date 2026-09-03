@@ -118,40 +118,55 @@ function contrastRatio(foreground, background) {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
-function checkDarkPaletteContrast() {
+function checkPaletteContrast() {
   const themeSource = fs.readFileSync("theme.js", "utf8");
-  const darkPalette = themeSource.match(/dark:\s*\{([\s\S]*?)\n\s*\},/);
-  if (!darkPalette) {
-    failures.push("theme.js dark palette could not be inspected");
-    return;
-  }
-
-  const color = (name) => {
-    const match = darkPalette[1].match(new RegExp(`${name}:\\s*\"(#[0-9A-Fa-f]{6})\"`));
-    return match?.[1] || null;
-  };
-  const surfaces = ["bg", "card", "surface"];
-  const textColors = ["textSecondary", "textTertiary"];
-
-  for (const textName of textColors) {
-    const foreground = color(textName);
-    if (!foreground) {
-      failures.push(`theme.js dark.${textName} must be a six-digit hex color`);
+  for (const paletteName of ["light", "dark"]) {
+    const palette = themeSource.match(new RegExp(`${paletteName}:\\s*\\{([\\s\\S]*?)\\n\\s*\\},`));
+    if (!palette) {
+      failures.push(`theme.js ${paletteName} palette could not be inspected`);
       continue;
     }
 
-    for (const surfaceName of surfaces) {
-      const background = color(surfaceName);
-      if (!background) {
-        failures.push(`theme.js dark.${surfaceName} must be a six-digit hex color`);
+    const color = (name) => {
+      const match = palette[1].match(new RegExp(`${name}:\\s*\"(#[0-9A-Fa-f]{6})\"`));
+      return match?.[1] || null;
+    };
+
+    for (const textName of ["textPrimary", "textSecondary", "textTertiary"]) {
+      const foreground = color(textName);
+      if (!foreground) {
+        failures.push(`theme.js ${paletteName}.${textName} must be a six-digit hex color`);
         continue;
       }
-      const ratio = contrastRatio(foreground, background);
-      if (ratio < 4.5) {
-        failures.push(
-          `theme.js dark.${textName} contrast on ${surfaceName} is ${ratio.toFixed(2)}:1; expected at least 4.5:1`
-        );
+
+      for (const surfaceName of ["bg", "card", "surface"]) {
+        const background = color(surfaceName);
+        if (!background) {
+          failures.push(`theme.js ${paletteName}.${surfaceName} must be a six-digit hex color`);
+          continue;
+        }
+        const ratio = contrastRatio(foreground, background);
+        if (ratio < 4.5) {
+          failures.push(
+            `theme.js ${paletteName}.${textName} contrast on ${surfaceName} is ${ratio.toFixed(2)}:1; expected at least 4.5:1`
+          );
+        }
       }
+    }
+  }
+}
+
+function checkModalFocusAndReducedMotion() {
+  const homeSource = fs.readFileSync("screens/HomeScreen.js", "utf8");
+  for (const marker of [
+    "accessibilityViewIsModal",
+    "petPickerTitleRef",
+    "AccessibilityInfo.setAccessibilityFocus",
+    'accessibilityLabel="Close pet picker"',
+    "useReducedMotion",
+  ]) {
+    if (!homeSource.includes(marker)) {
+      failures.push(`screens/HomeScreen.js missing modal/reduced-motion marker: ${marker}`);
     }
   }
 }
@@ -167,7 +182,8 @@ for (const filePath of filesToCheck) {
   checkFile(filePath);
 }
 
-checkDarkPaletteContrast();
+checkPaletteContrast();
+checkModalFocusAndReducedMotion();
 
 if (failures.length > 0) {
   console.error("Accessibility check failed:");

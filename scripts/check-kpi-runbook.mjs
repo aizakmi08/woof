@@ -15,13 +15,15 @@ const kpiFrameworkPath = "KPI_FRAMEWORK.md";
 const projectContextPath = "PROJECT_CONTEXT.md";
 const migrationPath = "supabase/migrations/065_kpi_reporting_views.sql";
 const attributionMigrationPath = "supabase/migrations/265_apple_search_ads_attribution_reporting.sql";
+const releaseMonitoringMigrationPath = "supabase/migrations/20260903204349_release_monitoring_kpis.sql";
 
 const runbook = readText(runbookPath);
 const kpiFramework = readText(kpiFrameworkPath);
 const projectContext = readText(projectContextPath);
 const migration = readText(migrationPath);
 const attributionMigration = readText(attributionMigrationPath);
-const allKpiSql = `${migration}\n${attributionMigration}`;
+const releaseMonitoringMigration = readText(releaseMonitoringMigrationPath);
+const allKpiSql = `${migration}\n${attributionMigration}\n${releaseMonitoringMigration}`;
 
 for (const [path, source] of [
   [runbookPath, runbook],
@@ -51,6 +53,7 @@ const requiredViews = [
   "public.kpi_app_review_daily",
   "public.kpi_support_daily",
   "public.kpi_retention_daily",
+  "public.kpi_release_monitoring_daily",
 ];
 
 for (const view of requiredViews) {

@@ -41,8 +41,9 @@ requireSnippet(productCatalogPath, productCatalog, "function formulaDedupeKey", 
 requireSnippet(productCatalogPath, productCatalog, "verifiedIngredientSignature", "package merging requires an exact verified ingredient statement");
 requireSnippet(productCatalogPath, productCatalog, "function mergeFormulaPackageSizes", "formula matches retain their available package sizes");
 requireSnippet(productCatalogPath, productCatalog, "availablePackageSizes", "merged formula results expose package-size choices");
-requireRegex(productCatalogPath, productCatalog, /runCatalogRpc\(\s*"search_verified_products"/, "app search uses strict verified RPC");
-requireSnippet(productCatalogPath, productCatalog, "Verified search RPC unavailable; using legacy search:", "strict verified RPC fallback logging");
+requireRegex(productCatalogPath, productCatalog, /runCatalogRpc\(\s*"search_verified_product_teasers"/, "app search uses quota-safe teaser RPC");
+requireSnippet(productCatalogPath, productCatalog, "consume_verified_catalog_product", "full catalog rows require atomic quota consumption");
+forbidSnippet(productCatalogPath, productCatalog, "Verified search RPC unavailable; using legacy search:", "legacy full-row search fallback");
 requireSnippet(productCatalogPath, productCatalog, "productHasVerifiedIngredients(product)", "catalog search requires verified ingredients");
 requireSnippet(productCatalogPath, productCatalog, "productHasVerifiedImage(product)", "catalog search requires verified product image");
 requireSnippet(productCatalogPath, productCatalog, "Number(product.rank || 0) >= MIN_SCORABLE_CATALOG_RANK", "catalog search rejects weak verified siblings");
@@ -115,7 +116,7 @@ requireSnippet(analysisPath, analysis, "findVerifiedCatalogProductByBarcode", "b
 requireRegex(analysisPath, analysis, /const directCatalogMatch = await findVerifiedCatalogProductByBarcode\(barcode,[\s\S]+const lookup = await lookupBarcode\(barcode\)/, "barcode checks verified catalog before OPFF");
 requireRegex(analysisPath, analysis, /const catalogMatch = await findVerifiedCatalogProductForLookup\(lookup\.product/, "barcode catalog match before AI fallback");
 requireSnippet(analysisPath, analysis, "Barcode not found in OPFF or verified catalog", "barcode miss message includes verified catalog lookup");
-requireRegex(analysisPath, analysis, /await _consumeScanForState\(state,\s*\"barcode\"\)[\s\S]+buildVerifiedPetFoodAnalysis\(verifiedProduct\)/, "barcode deterministic verified scoring");
+requireRegex(analysisPath, analysis, /consumeCatalogProduct\([\s\S]+scanMode:\s*\"barcode\"[\s\S]+buildVerifiedPetFoodAnalysis\(verifiedProduct\)/, "barcode atomically consumes quota before deterministic verified scoring");
 requireSnippet(analysisPath, analysis, "hasVerifiedProductImageData", "analysis service checks verified image provenance");
 requireSnippet(analysisPath, analysis, "function _hasVerifiedResultProvenance", "analysis service shared verified result provenance helper");
 requireSnippet(analysisPath, analysis, "Ignoring barcode cache without verified ingredient/image provenance", "barcode rejects stale unverified cache");
@@ -145,7 +146,7 @@ requireSnippet(labelLookupFunctionPath, labelLookupFunction, "packageSize", "lab
 
 const productLookupFunctionPath = "supabase/functions/product-lookup/index.ts";
 const productLookupFunction = read(productLookupFunctionPath);
-requireSnippet(productLookupFunctionPath, productLookupFunction, "search_verified_products", "product lookup edge function uses verified catalog RPC");
+requireSnippet(productLookupFunctionPath, productLookupFunction, "search_verified_product_teasers", "product lookup edge function uses quota-safe verified teaser RPC");
 requireSnippet(productLookupFunctionPath, productLookupFunction, "findCatalogByBarcode", "product lookup edge function checks verified GTIN matches");
 requireSnippet(productLookupFunctionPath, productLookupFunction, "dedupeCatalogFormulaProducts", "product lookup edge function collapses package variants by formula");
 requireSnippet(productLookupFunctionPath, productLookupFunction, "verifiedIngredientSignature", "edge formula merging requires exact verified ingredients");

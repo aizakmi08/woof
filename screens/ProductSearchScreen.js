@@ -18,7 +18,6 @@ import * as Haptics from "expo-haptics";
 import {
   catalogProductToVerifiedProduct,
   collapseRepeatedIdentityText,
-  getCatalogProduct,
   labelOcrSearchQueries,
   resolveProduct,
 } from "../services/productCatalog";
@@ -52,6 +51,7 @@ import { normalizePetProfile } from "../services/petProfile";
 import {
   logCaptureToResult,
   logLabelScanStageTimings,
+  logTypedSearchComplete,
   navigationTimingParams,
 } from "../services/performanceTimings";
 import {
@@ -221,15 +221,6 @@ function productMatchesQueryTerms(product, queryText = "") {
 
 function productIsReady(product) {
   return productIsVerifiedReady(product);
-}
-
-function catalogProductNeedsHydration(product) {
-  return Boolean(
-    product?.cacheKey
-    && Number(product?.ingredientCount || 0) >= 5
-    && !String(product?.ingredientsText || "").trim()
-    && (!Array.isArray(product?.ingredients) || product.ingredients.length === 0)
-  );
 }
 
 function ingredientStatusLabel({
@@ -853,7 +844,6 @@ export default function ProductSearchScreen({ navigation, route }) {
   const searchAbortRef = useRef(null);
   const labelRunRef = useRef({ key: "", runId: 0 });
   const labelAbortRef = useRef(null);
-  const hydrationPrefetchRef = useRef(new Map());
   const recognizedOcrRef = useRef({
     text: labelOcrText,
     lines: labelOcrLines,
@@ -866,27 +856,6 @@ export default function ProductSearchScreen({ navigation, route }) {
 
   const trimmedQuery = query.trim();
   const title = labelLoading ? "Reading label" : "Find Product";
-
-  const prefetchCatalogHydration = useCallback((product, signal) => {
-    if (!catalogProductNeedsHydration(product)) return null;
-    const key = String(product.cacheKey || "").trim();
-    if (!key) return null;
-    const existing = hydrationPrefetchRef.current.get(key);
-    if (existing) return existing;
-    if (hydrationPrefetchRef.current.size >= 2) return null;
-
-    const startedAt = Date.now();
-    const promise = getCatalogProduct(key, { signal });
-    const entry = { key, startedAt, promise };
-    hydrationPrefetchRef.current.set(key, entry);
-    promise.then((hydrated) => {
-      trackEvent("catalog_product_hydration_prefetch_completed", {
-        success: Boolean(hydrated),
-        latency_ms: Date.now() - startedAt,
-      });
-    }).catch(() => {});
-    return entry;
-  }, []);
 
   useEffect(() => {
     if (petTypeFilterTouchedRef.current) return;
@@ -973,6 +942,7 @@ export default function ProductSearchScreen({ navigation, route }) {
         navigation.replace("Results", {
           mode: "catalog",
           devFixtureResult: DEV_QA_PET_RESULT,
+          resultsNavigationStartedAt: Date.now(),
         });
       }, 450);
       return () => clearTimeout(timer);
@@ -1074,42 +1044,8 @@ export default function ProductSearchScreen({ navigation, route }) {
       Haptics.selectionAsync();
     }
 
-    let resolvedProduct = product;
-    let completedLabelStageTimings = labelScanStageTimings;
-    const needsHydration = catalogProductNeedsHydration(product);
-    if (needsHydration) {
-      const prefetched = hydrationPrefetchRef.current.get(product.cacheKey);
-      const hydrationStartedAt = prefetched?.startedAt || Date.now();
-      const hydrationWaitStartedAt = Date.now();
-      const hydrated = await (prefetched?.promise || getCatalogProduct(product.cacheKey));
-      const hydrationTotalMs = Date.now() - hydrationStartedAt;
-      const hydrationWaitMs = Date.now() - hydrationWaitStartedAt;
-      completedLabelStageTimings = labelScanStageTimings ? {
-        ...labelScanStageTimings,
-        hydrationTotalMs,
-        hydrationWaitMs,
-        hydrationPrefetched: Boolean(prefetched),
-        hydrationOverlapMs: prefetched
-          ? Math.max(0, hydrationWaitStartedAt - hydrationStartedAt)
-          : 0,
-      } : null;
-      trackEvent("catalog_product_hydration_completed", {
-        source_surface: sourceSurface,
-        success: Boolean(hydrated),
-        latency_ms: hydrationTotalMs,
-        wait_latency_ms: hydrationWaitMs,
-        prefetched: Boolean(prefetched),
-        overlap_ms: completedLabelStageTimings?.hydrationOverlapMs || 0,
-      });
-      if (!hydrated) {
-        Alert.alert(
-          "Product details are still loading",
-          "The exact formula was identified, but its verified ingredients could not be loaded. Please try again."
-        );
-        return;
-      }
-      resolvedProduct = hydrated;
-    }
+    const resolvedProduct = product;
+    const completedLabelStageTimings = labelScanStageTimings;
 
     const recognizedEvidence = labelResolutionEvidence?.recognizedIdentity?.cloudImage?.productName
       ? labelResolutionEvidence.recognizedIdentity.cloudImage
@@ -1208,6 +1144,7 @@ export default function ProductSearchScreen({ navigation, route }) {
       captureStartedAt: labelCaptureStartedAt,
       captureTimingMode: labelCaptureStartedAt ? "label_lookup" : null,
       labelStageTimings: completedLabelStageTimings,
+      resultsNavigationStartedAt: Date.now(),
       ...(devFixtureResult ? { devFixtureResult } : {}),
     });
   }, [
@@ -1222,7 +1159,6 @@ export default function ProductSearchScreen({ navigation, route }) {
     remainingScans,
     resolutionDecision,
     resolutionEvidence,
-    prefetchCatalogHydration,
   ]);
   const openProductResultRef = useRef(openProductResult);
 
@@ -1327,6 +1263,11 @@ export default function ProductSearchScreen({ navigation, route }) {
         image_result_count: result.products.filter((product) => !!product.imageUrl).length,
         served_cached_before_refresh: servedCached,
       });
+      logTypedSearchComplete({
+        searchStartedAt: startedAt,
+        outcome: "success",
+        resultCount: result.products.length,
+      });
     } catch (err) {
       if (searchRunRef.current !== runId) return;
       if (
@@ -1338,6 +1279,11 @@ export default function ProductSearchScreen({ navigation, route }) {
           : "The catalog is taking longer than expected. Please try again.");
         setSearchFailureKind("timeout");
         if (!servedCached) setProducts([]);
+        logTypedSearchComplete({
+          searchStartedAt: startedAt,
+          outcome: "timeout",
+          resultCount: servedCached ? 1 : 0,
+        });
         return;
       }
       logger.debug("[PRODUCT_SEARCH] Search failed:", err.message);
@@ -1361,6 +1307,11 @@ export default function ProductSearchScreen({ navigation, route }) {
         query_length: term.length,
         served_cached_before_failure: servedCached,
         message: err.message,
+      });
+      logTypedSearchComplete({
+        searchStartedAt: startedAt,
+        outcome: "error",
+        resultCount: servedCached ? 1 : 0,
       });
     } finally {
       clearTimeout(searchTimeout);
@@ -1391,7 +1342,6 @@ export default function ProductSearchScreen({ navigation, route }) {
       setProducts([]);
       setShowingCached(false);
       setSearchCorrection("");
-      hydrationPrefetchRef.current.clear();
       recognizedOcrRef.current = {
         text: labelOcrText,
         lines: labelOcrLines,
@@ -1433,7 +1383,6 @@ export default function ProductSearchScreen({ navigation, route }) {
           })
             .then((result) => {
               prefetchResolutionImages(result);
-              prefetchCatalogHydration(result?.selectedProduct, lifecycleController.signal);
               return {
                 result,
                 path: "cloud_image",
@@ -1478,7 +1427,6 @@ export default function ProductSearchScreen({ navigation, route }) {
             .then((outcome) => {
               if (outcome?.result) {
                 prefetchResolutionImages(outcome.result);
-                prefetchCatalogHydration(outcome.result.selectedProduct, lifecycleController.signal);
               }
               return outcome ? {
                 ...outcome,
@@ -1526,7 +1474,6 @@ export default function ProductSearchScreen({ navigation, route }) {
         if (!result) {
           throw new Error("No readable label text was found.");
         }
-        prefetchCatalogHydration(result.selectedProduct, lifecycleController.signal);
         const visualOutcome = outcomes.find((outcome) => outcome.path === "cloud_image");
         const ocrOutcome = outcomes.find((outcome) => outcome.path === "on_device_ocr");
         const catalogStages = ocrOutcome?.result?.stageTimings
@@ -1800,7 +1747,6 @@ export default function ProductSearchScreen({ navigation, route }) {
     labelOcrLines,
     labelOcrText,
     petTypeFilter,
-    prefetchCatalogHydration,
     runSearch,
     scannerLabelStageTimings,
   ]);

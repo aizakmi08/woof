@@ -3,6 +3,7 @@ import { analyzeIngredients, analyzeHumanFood } from "./claude";
 import { lookupBarcode, searchByName } from "./opff";
 import {
   catalogProductToVerifiedProduct,
+  consumeCatalogProduct,
   findVerifiedCatalogProductByBarcode,
   findVerifiedCatalogProductForLookup,
 } from "./productCatalog";
@@ -368,14 +369,20 @@ async function _completeBarcodeWithVerifiedCatalog({
   signal,
   state,
 }) {
+  const consumed = await consumeCatalogProduct({
+    cacheKey: catalogMatch.cacheKey,
+    scanId: state.scanId,
+    scanMode: "barcode",
+    signal,
+  });
+  state.scanUsage = consumed.scanUsage;
+  const hydratedProduct = consumed.product;
   const verifiedProduct = catalogProductToVerifiedProduct({
-    ...catalogMatch,
-    barcode: catalogMatch.barcode || barcode,
+    ...hydratedProduct,
+    barcode: hydratedProduct.barcode || barcode,
   });
 
   if (!hasVerifiedIngredientData(verifiedProduct) || !hasVerifiedProductImageData(verifiedProduct)) return false;
-
-  await _consumeScanForState(state, "barcode");
   if (signal.aborted) return true;
 
   const analysis = buildVerifiedPetFoodAnalysis(verifiedProduct);
@@ -398,7 +405,7 @@ async function _completeBarcodeWithVerifiedCatalog({
   state.result = analysis;
   state.dataSource = "verified";
   state.status = "complete";
-  state.uri = catalogMatch.imageUrl || lookupProduct?.imageUrl || state.uri;
+  state.uri = hydratedProduct.imageUrl || lookupProduct?.imageUrl || state.uri;
   state.opffData = {
     ...verifiedProduct,
     imageUrl: verifiedProduct.imageUrl || lookupProduct?.imageUrl || null,
@@ -528,7 +535,14 @@ async function _runBarcode({ cacheKey, barcode, signal, state }) {
 
 async function _runCatalog({ cacheKey, catalogProduct, signal, state }) {
   try {
-    const verifiedProduct = catalogProductToVerifiedProduct(catalogProduct);
+    const consumed = await consumeCatalogProduct({
+      cacheKey: catalogProduct?.cacheKey || cacheKey,
+      scanId: state.scanId,
+      scanMode: "catalog",
+      signal,
+    });
+    state.scanUsage = consumed.scanUsage;
+    const verifiedProduct = catalogProductToVerifiedProduct(consumed.product);
     const productName = verifiedProduct.productName || catalogProduct?.productName || "";
     const normalizedKey = cacheKey || catalogProduct?.cacheKey || normalizeCacheKey(productName);
 
@@ -550,7 +564,6 @@ async function _runCatalog({ cacheKey, catalogProduct, signal, state }) {
       return;
     }
 
-    await _consumeScanForState(state, "catalog");
     if (signal.aborted) return;
 
     const analysis = buildVerifiedPetFoodAnalysis(verifiedProduct);

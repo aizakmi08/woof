@@ -435,6 +435,7 @@ export default function ScannerScreen({ navigation, route }) {
         barcode: barcodeValue,
         uri: previewUri,
         captureStartedAt,
+        resultsNavigationStartedAt: Date.now(),
       });
       setTimeout(() => {
         scannedRef.current = false;
@@ -690,6 +691,7 @@ export default function ScannerScreen({ navigation, route }) {
           sourceSurface: route.params?.sourceSurface || null,
           catalogEvidenceConsent: route.params?.catalogEvidenceConsent === true,
           captureStartedAt,
+          resultsNavigationStartedAt: Date.now(),
           ...(isHumanFood && { petType, petName }),
         });
       }

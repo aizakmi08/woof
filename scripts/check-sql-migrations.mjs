@@ -91,8 +91,8 @@ function checkSecurityDefiner(migration) {
   const regex = /SECURITY\s+DEFINER/gi;
   for (const match of migration.sql.matchAll(regex)) {
     const following = migration.sql.slice(match.index, match.index + 260);
-    if (!/SET\s+search_path\s*=\s*public\b/i.test(following)) {
-      fail(`${migration.file}: SECURITY DEFINER function must set search_path = public`);
+    if (!/SET\s+search_path\s*=\s*(?:public\b|''|""|pg_catalog\b)/i.test(following)) {
+      fail(`${migration.file}: SECURITY DEFINER function must set an explicit trusted search_path`);
     }
   }
 }

@@ -97,7 +97,7 @@ The hosted privacy policy should continue to say:
 - Typed catalog search terms and pet profile content are associated with the guest profile or signed-in account when collected.
 - Guest/account identifiers, optional name/email, subscription state, operational logs, and support diagnostics are collected for app functionality, reliability, support, and analytics.
 - The app does not track users across other apps or websites and does not sell/share personal data with advertisers. Apple Search Ads attribution is used for Woof campaign analytics through RevenueCat.
-- Users can delete account data from Profile; server-side cleanup includes `profiles`, `scan_history`, `analytics_events`, `scan_usage_events`, `rate_limits`, and linkable `revenuecat_events`.
+- Users can delete account data from Profile; server-side cleanup includes `profiles`, `scan_history`, `analytics_events`, typed-query `product_events`, `scan_usage_events`, `rate_limits`, and linkable `revenuecat_events`. A one-way SHA-256 deletion marker is retained only to prevent delayed RevenueCat webhooks from recreating the deleted identifier.
 
 ## App Store Connect Entry Checklist
 

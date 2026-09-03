@@ -18,7 +18,7 @@ export const Colors = {
   // Text
   textPrimary: "#111111",
   textSecondary: "#51514D",
-  textTertiary: "#7A7A73",
+  textTertiary: "#6B6B65",
 
   // Button
   buttonPrimary: "#111111",
@@ -65,7 +65,7 @@ export const Colors = {
     surface: "#EFEFEB",
     textPrimary: "#111111",
     textSecondary: "#51514D",
-    textTertiary: "#7A7A73",
+    textTertiary: "#6B6B65",
     separator: "#DEDED8",
     fill: "rgba(17,17,17,0.045)",
     fillSecondary: "rgba(17,17,17,0.085)",

@@ -1,15 +1,77 @@
 import Foundation
+import StoreKit
 import StoreKitTest
 import XCTest
 
 final class WoofConfigurationTests: XCTestCase {
+  private func cleanSession() throws -> SKTestSession {
+    let session = try SKTestSession(configurationFileNamed: "Woof")
+    session.disableDialogs = true
+    session.resetToDefaultState()
+    session.clearTransactions()
+    return session
+  }
+
+  func testPurchasePersistsAcrossStoreKitSessionRecreation() throws {
+    let purchaseSession = try cleanSession()
+    try purchaseSession.buyProduct(productIdentifier: "woof_pro_monthly")
+
+    let purchased = try XCTUnwrap(
+      purchaseSession.allTransactions().first {
+        $0.productIdentifier == "woof_pro_monthly" && $0.state == .purchased
+      }
+    )
+    XCTAssertTrue(purchased.autoRenewingEnabled)
+
+    // Recreating the session models a process restart/restore boundary. The
+    // transaction must remain in StoreKit until the user or subscription state
+    // changes; network and auth-token failures cannot erase this local receipt.
+    let restoredSession = try SKTestSession(configurationFileNamed: "Woof")
+    let restored = restoredSession.allTransactions().first {
+      $0.identifier == purchased.identifier
+    }
+    XCTAssertEqual(restored?.productIdentifier, "woof_pro_monthly")
+    restoredSession.clearTransactions()
+  }
+
+  func testCancellationAndExpiryRemoveActiveRenewal() throws {
+    let session = try cleanSession()
+    try session.buyProduct(productIdentifier: "woof_pro_monthly")
+    let transaction = try XCTUnwrap(session.allTransactions().first)
+
+    try session.disableAutoRenewForTransaction(identifier: transaction.identifier)
+    let cancelled = try XCTUnwrap(session.allTransactions().first)
+    XCTAssertFalse(cancelled.autoRenewingEnabled)
+
+    try session.expireSubscription(productIdentifier: "woof_pro_monthly")
+    let expired = try XCTUnwrap(session.allTransactions().first)
+    XCTAssertNotNil(expired.expirationDate)
+    session.clearTransactions()
+  }
+
+  func testAskToBuyCanBeApprovedAndDeclined() throws {
+    let session = try cleanSession()
+    session.askToBuyEnabled = true
+    try session.buyProduct(productIdentifier: "woof_pro_weekly")
+    let approval = try XCTUnwrap(session.allTransactions().first)
+    XCTAssertTrue(approval.pendingAskToBuyConfirmation)
+    try session.approveAskToBuyTransaction(identifier: approval.identifier)
+    XCTAssertFalse(try XCTUnwrap(session.allTransactions().first).pendingAskToBuyConfirmation)
+
+    session.clearTransactions()
+    try session.buyProduct(productIdentifier: "woof_pro_annual")
+    let decline = try XCTUnwrap(session.allTransactions().first)
+    XCTAssertTrue(decline.pendingAskToBuyConfirmation)
+    try session.declineAskToBuyTransaction(identifier: decline.identifier)
+    XCTAssertTrue(session.allTransactions().isEmpty)
+  }
+
   func testExpireMonthlySubscriptionWhenExplicitlyEnabled() throws {
     guard ProcessInfo.processInfo.environment["WOOF_STOREKIT_EXPIRE_MONTHLY"] == "1" else {
       throw XCTSkip("Set WOOF_STOREKIT_EXPIRE_MONTHLY=1 for the explicit local expiry test.")
     }
 
-    let session = try SKTestSession(configurationFileNamed: "Woof")
-    session.disableDialogs = true
+    let session = try cleanSession()
     session.timeRate = .oneSecondIsOneDay
 
     let subscriptionProductIDs: Set<String> = [

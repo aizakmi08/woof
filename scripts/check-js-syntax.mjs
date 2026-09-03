@@ -1167,7 +1167,6 @@ function checkHistoryCompareRetentionLoop() {
     ["screens/HomeScreen.js", homeSource, ["historyEntryId", "historyResultSnapshot"]],
     ["screens/ResultsScreen/index.js", resultsSource, [
       "supabase_history_snapshot",
-      "verified_catalog_rebuild",
       "history_result_rescan_tapped",
       "handleHistoryRecovery",
     ]],
@@ -1251,6 +1250,33 @@ function checkEntitlementEnvironmentParity() {
       file: "services/entitlements.js",
       output: "All builds must enforce cached-scan usage through consume_scan.",
     });
+  }
+
+  const catalogSource = readFileSync("services/productCatalog.js", "utf8");
+  const analysisSource = readFileSync("services/analysisService.js", "utf8");
+  const productLookupSource = readFileSync("supabase/functions/product-lookup/index.ts", "utf8");
+  const resultsSource = readFileSync("screens/ResultsScreen/index.js", "utf8");
+  for (const [file, source, needle] of [
+    ["services/productCatalog.js", catalogSource, '"consume_verified_catalog_product"'],
+    ["services/productCatalog.js", catalogSource, '"search_verified_product_teasers"'],
+    ["services/productCatalog.js", catalogSource, '"resolve_verified_product_teaser_by_gtin"'],
+    ["services/analysisService.js", analysisSource, "consumeCatalogProduct({"],
+    ["supabase/functions/product-lookup/index.ts", productLookupSource, '"search_verified_product_teasers"'],
+    ["supabase/functions/product-lookup/index.ts", productLookupSource, '"resolve_verified_product_teaser_by_gtin"'],
+  ]) {
+    if (!source.includes(needle)) {
+      failures.push({ file, output: `Missing server-enforced catalog quota marker: ${needle}` });
+    }
+  }
+
+  for (const [file, source, forbidden] of [
+    ["services/productCatalog.js", catalogSource, '.from("product_data")'],
+    ["supabase/functions/product-lookup/index.ts", productLookupSource, '.from("product_data")'],
+    ["screens/ResultsScreen/index.js", resultsSource, "verified_catalog_rebuild"],
+  ]) {
+    if (source.includes(forbidden)) {
+      failures.push({ file, output: `Catalog quota bypass must stay removed: ${forbidden}` });
+    }
   }
 }
 

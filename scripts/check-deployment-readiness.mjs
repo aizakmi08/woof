@@ -83,6 +83,7 @@ const resultsComponents = readText("screens/ResultsScreen/components.js");
 const embeddedLegal = readText("legal.js");
 const hostedTerms = readText("docs/terms.html");
 const hostedPrivacy = readText("docs/privacy.html");
+const hostedSupport = readText("docs/support.html");
 const storeConfig = JSON.parse(readText("store.config.json"));
 const packageJson = JSON.parse(readText("package.json"));
 const workflow = readText(workflowPath);
@@ -318,6 +319,11 @@ for (const source of [embeddedLegal, hostedTerms]) {
   requireSnippet(source, "Scan history is included with free use and is not a paid feature.", "Terms must keep history in the free tier");
   requireSnippet(source, "unlimited scans, detailed ingredient explanations, quality breakdown, and nutrition facts", "Terms must describe the actual Pro gates");
   requireSnippet(source, "Current pricing is shown in the app and App Store.", "Terms must defer subscription pricing to current store pricing");
+}
+requireSnippet(hostedSupport, "Scan history and the full ingredient list remain available with free results.", "Hosted Support must keep history and the ingredient list in the free tier");
+requireSnippet(hostedSupport, "detailed ingredient explanations, quality category scores, nutrition facts", "Hosted Support must describe the actual Pro gates");
+if (/Pro include[^<]*saved scan history|full ingredient breakdowns/i.test(hostedSupport)) {
+  fail("Hosted Support must not describe free history or the full ingredient list as Pro-only");
 }
 for (const source of [embeddedLegal, hostedPrivacy]) {
   requireSnippet(source, "human food", "Privacy policy must disclose human-food image processing");

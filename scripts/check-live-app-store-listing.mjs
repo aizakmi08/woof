@@ -1,3 +1,5 @@
+import fs from "node:fs";
+
 const APP_ID = "6760733899";
 const COUNTRY = "us";
 const LOOKUP_URL = `https://itunes.apple.com/lookup?id=${APP_ID}&country=${COUNTRY}`;
@@ -5,6 +7,36 @@ const guestValidated = process.argv.includes("--guest-validated");
 const expectCurrentRisk = process.argv.includes("--expect-current-risk");
 const failures = [];
 const risks = [];
+
+function releaseVersionParts(value) {
+  const normalized = String(value || "").trim();
+  const match = normalized.match(/^(\d+)\.(\d+)\.(\d+)$/);
+  return match ? match.slice(1).map(Number) : null;
+}
+
+function compareReleaseVersions(left, right) {
+  const leftParts = releaseVersionParts(left);
+  const rightParts = releaseVersionParts(right);
+  if (!leftParts || !rightParts) return null;
+  for (let index = 0; index < leftParts.length; index += 1) {
+    if (leftParts[index] !== rightParts[index]) {
+      return leftParts[index] > rightParts[index] ? 1 : -1;
+    }
+  }
+  return 0;
+}
+
+function localReleaseVersion() {
+  const packageVersion = JSON.parse(fs.readFileSync("package.json", "utf8")).version;
+  const appVersion = JSON.parse(fs.readFileSync("app.json", "utf8")).expo?.version;
+  const storeVersion = JSON.parse(fs.readFileSync("store.config.json", "utf8")).apple?.version;
+  const versions = [packageVersion, appVersion, storeVersion];
+  if (new Set(versions).size !== 1 || !releaseVersionParts(packageVersion)) {
+    fail(`Local release versions are inconsistent or invalid: package=${packageVersion}, app=${appVersion}, store=${storeVersion}`);
+    return null;
+  }
+  return packageVersion;
+}
 
 const BLOCKED_PATTERNS = [
   {
@@ -99,6 +131,20 @@ if (!response.ok) {
 
     checkBlockedClaims(description);
     checkNoAccountGate(description);
+
+    const localVersion = localReleaseVersion();
+    const versionOrder = localVersion == null
+      ? null
+      : compareReleaseVersions(localVersion, app.version);
+    if (versionOrder === 1) {
+      console.log(`Version state: LOCAL_AHEAD_PENDING_RELEASE (${localVersion} > live ${app.version}).`);
+    } else if (versionOrder === 0) {
+      console.log(`Version state: ALIGNED (${localVersion}).`);
+    } else if (versionOrder === -1) {
+      fail(`Version state: LOCAL_BEHIND_LIVE (${localVersion} < live ${app.version}); this release line cannot be submitted without an owner-approved version decision.`);
+    } else if (localVersion != null) {
+      fail(`Could not compare local version ${localVersion} with live version ${app.version || "missing"}`);
+    }
 
     console.log(`Live App Store listing snapshot: ${app.trackName}, version ${app.version || "unknown"}, ${app.userRatingCount || 0} rating(s), ${app.trackViewUrl}`);
   }

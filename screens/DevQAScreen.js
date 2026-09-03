@@ -12,7 +12,11 @@ import {
   DEV_QA_PET_AVOID_PROFILE,
   DEV_QA_PET_RESULT,
 } from "../services/devQaFixtures";
-import { getPerformanceTimingSnapshot } from "../services/performanceTimings";
+import {
+  evaluatePerformanceSnapshot,
+  getPerformanceTimingSnapshot,
+  PERFORMANCE_BUDGETS_MS,
+} from "../services/performanceTimings";
 import { entitlementResilienceQaScenario } from "../services/entitlementResilience";
 
 const LABEL_LOADING_STAGES = [
@@ -75,6 +79,7 @@ export default function DevQAScreen({ navigation }) {
   const [triggerError, setTriggerError] = useState(false);
   const [timings, setTimings] = useState(() => getPerformanceTimingSnapshot());
   const labelStages = timings.labelScanStages;
+  const timingChecks = evaluatePerformanceSnapshot(timings);
   if (!__DEV__) return null;
   if (triggerError && devBoundaryErrorArmed) {
     devBoundaryErrorArmed = false;
@@ -85,6 +90,7 @@ export default function DevQAScreen({ navigation }) {
     mode: "catalog",
     devFixtureResult: DEV_QA_PET_RESULT,
     devReturnToQa: true,
+    resultsNavigationStartedAt: Date.now(),
     ...params,
   });
 
@@ -94,6 +100,7 @@ export default function DevQAScreen({ navigation }) {
     petName: "Rex",
     devFixtureResult: DEV_QA_HUMAN_RESULTS[state],
     devReturnToQa: true,
+    resultsNavigationStartedAt: Date.now(),
   });
 
   const runEntitlementScenario = (scenario) => {
@@ -127,6 +134,10 @@ export default function DevQAScreen({ navigation }) {
           <Text style={[styles.metricText, { color: theme.textSecondary }]}>JS boot → interactive: {timings.coldStartInteractiveMs ?? "not captured"} ms</Text>
           <Text style={[styles.metricText, { color: theme.textSecondary }]}>Tap → camera: {timings.tapToCameraMs ?? "not captured"} ms</Text>
           <Text style={[styles.metricText, { color: theme.textSecondary }]}>Capture → result: {timings.captureToResultMs ?? "not captured"} ms</Text>
+          <Text style={[styles.metricText, { color: theme.textSecondary }]}>Typed search p50 / p95: {timings.typedSearchP50Ms ?? "not captured"} / {timings.typedSearchP95Ms ?? "not captured"} ms</Text>
+          <Text style={[styles.metricText, { color: theme.textSecondary }]}>Results first paint: {timings.resultsFirstPaintMs ?? "not captured"} ms</Text>
+          <Text style={[styles.metricText, { color: theme.textSecondary }]}>Budgets: cold {PERFORMANCE_BUDGETS_MS.coldStartInteractive} ms · camera {PERFORMANCE_BUDGETS_MS.tapToCamera} ms · search p95 {PERFORMANCE_BUDGETS_MS.typedSearchP95} ms · paint {PERFORMANCE_BUDGETS_MS.resultsFirstPaint} ms</Text>
+          <Text style={[styles.metricText, { color: theme.textSecondary }]}>Measured checks: {Object.entries(timingChecks).map(([key, value]) => `${key}=${value == null ? "NOT-RUN" : value ? "PASS" : "FAIL"}`).join(" · ")}</Text>
           {labelStages ? (
             <>
               <Text style={[styles.metricText, { color: theme.textSecondary }]}>Label camera / crop / prepare: {labelStages.cameraCaptureMs ?? "—"} / {labelStages.scanFrameCropMs ?? "—"} / {labelStages.imageOptimizationAndOcrWallMs ?? "—"} ms</Text>
@@ -197,6 +208,7 @@ export default function DevQAScreen({ navigation }) {
             devFixtureResult: DEV_QA_PARTIAL_RESULT,
             devFixtureHoldStreaming: true,
             devReturnToQa: true,
+            resultsNavigationStartedAt: Date.now(),
           })} />
           {RESULT_LOADING_STAGES.map((message, index) => (
             <QaButton
@@ -206,6 +218,7 @@ export default function DevQAScreen({ navigation }) {
               onPress={() => navigation.push("Results", {
                 mode: "catalog",
                 devFixtureLoadingStatus: message,
+                resultsNavigationStartedAt: Date.now(),
               })}
             />
           ))}
@@ -213,8 +226,8 @@ export default function DevQAScreen({ navigation }) {
           <QaButton label="Human food — caution" theme={theme} onPress={() => openHumanResult("caution")} />
           <QaButton label="Human food — dangerous" theme={theme} onPress={() => openHumanResult("dangerous")} />
           <QaButton label="Human food — unidentified" theme={theme} onPress={() => openHumanResult("unidentified")} />
-          <QaButton label="Analysis error" theme={theme} onPress={() => navigation.push("Results", { mode: "photo", devFixtureError: "The analysis service could not finish. Check your connection and try again.", devReturnToQa: true })} />
-          <QaButton label="Unrestorable history" theme={theme} onPress={() => navigation.push("Results", { mode: "history", cacheKey: "dev-missing-history", historyProductName: "QA Missing Saved Product", devReturnToQa: true })} />
+          <QaButton label="Analysis error" theme={theme} onPress={() => navigation.push("Results", { mode: "photo", devFixtureError: "The analysis service could not finish. Check your connection and try again.", devReturnToQa: true, resultsNavigationStartedAt: Date.now() })} />
+          <QaButton label="Unrestorable history" theme={theme} onPress={() => navigation.push("Results", { mode: "history", cacheKey: "dev-missing-history", historyProductName: "QA Missing Saved Product", devReturnToQa: true, resultsNavigationStartedAt: Date.now() })} />
         </QaSection>
 
         <QaSection title="Prompts" theme={theme}>

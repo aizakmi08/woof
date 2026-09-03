@@ -26,6 +26,10 @@ export const steps = [
     script: "scripts/check-js-syntax.mjs",
   },
   {
+    label: "nullable default-parameter safety",
+    script: "scripts/check-nullable-default-params.mjs",
+  },
+  {
     label: "product resolver contract",
     script: "scripts/check-product-resolver-contract.mjs",
   },

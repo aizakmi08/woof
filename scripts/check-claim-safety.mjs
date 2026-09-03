@@ -101,8 +101,19 @@ for (const file of files) {
   checkFile(file);
 }
 
+const runtimeBrandFiles = [
+  ...FILES.filter((file) => fs.existsSync(file)),
+  ...["screens", "services", "supabase/functions"].flatMap(walk),
+];
+for (const file of runtimeBrandFiles) {
+  if (/bowlproof/i.test(fs.readFileSync(file, "utf8"))) {
+    failures.push(`${file}: release runtime must use the Woof brand, not Bowlproof`);
+  }
+}
+
 const embeddedLegal = fs.readFileSync("legal.js", "utf8");
 const hostedTerms = fs.readFileSync("docs/terms.html", "utf8");
+const hostedSupport = fs.readFileSync("docs/support.html", "utf8");
 const embeddedAndHostedTerms = [embeddedLegal, hostedTerms];
 for (const source of embeddedAndHostedTerms) {
   for (const requiredCopy of [
@@ -119,6 +130,13 @@ for (const source of embeddedAndHostedTerms) {
 
 if (/first 3 ingredients|saved scan history require|\$4\.99\/week|\$7\.99\/month|\$29\.99\/year/i.test(hostedTerms)) {
   failures.push("docs/terms.html: remove obsolete free-result gates or hard-coded subscription prices");
+}
+
+if (
+  !hostedSupport.includes("Scan history and the full ingredient list remain available with free results.")
+  || /Pro include[^<]*saved scan history|full ingredient breakdowns/i.test(hostedSupport)
+) {
+  failures.push("docs/support.html: support copy must keep history and the full ingredient list in the free tier");
 }
 
 const storeDescription = JSON.parse(fs.readFileSync("store.config.json", "utf8"))

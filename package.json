@@ -12,8 +12,11 @@
     "test:contracts": "jest --runInBand tests/contracts tests/regression tests/property",
     "test:db": "node scripts/run-database-tests.mjs",
     "test:edge-requests": "node scripts/run-edge-request-tests.mjs",
+    "test:live-scoring": "node scripts/prove-live-production-scoring.mjs",
+    "check:live-catalog-performance": "node scripts/check-live-catalog-rpc-performance.mjs",
     "verify": "node scripts/verify-project.js",
     "check:syntax": "node scripts/check-js-syntax.mjs",
+    "check:nullable-defaults": "node scripts/check-nullable-default-params.mjs",
     "check:ci": "node scripts/check-ci-release-alignment.mjs",
     "check:github-release": "node scripts/check-github-release-audit.mjs",
     "check:secrets": "node scripts/check-secrets.mjs",
@@ -179,6 +182,8 @@
   },
   "overrides": {
     "@react-native/virtualized-lists": "0.83.10",
+    "query-string": "9.5.1",
+    "uuid": "11.1.1",
     "react-native": "0.83.10"
   },
   "private": true,

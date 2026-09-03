@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   StyleSheet,
   View,
@@ -9,6 +9,8 @@ import {
   Alert,
   RefreshControl,
   Modal,
+  AccessibilityInfo,
+  findNodeHandle,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AppText as Text, AppTextInput as TextInput } from "../components/AppText";
@@ -581,6 +583,7 @@ function CompareRecentModal({ visible, items, theme, onClose, onOpenItem }) {
         <View
           style={[styles.compareModalCard, { backgroundColor: theme.card }]}
           onStartShouldSetResponder={() => true}
+          accessibilityViewIsModal
         >
           <View style={styles.compareModalHeader}>
             <View style={styles.compareModalTitleBlock}>
@@ -757,6 +760,16 @@ export default function HomeScreen({ navigation, route }) {
   const [refreshing, setRefreshing] = useState(false);
   const [showPetPicker, setShowPetPicker] = useState(false);
   const [showCompareModal, setShowCompareModal] = useState(false);
+  const petPickerTitleRef = useRef(null);
+
+  useEffect(() => {
+    if (!showPetPicker) return undefined;
+    const focusTimer = setTimeout(() => {
+      const node = findNodeHandle(petPickerTitleRef.current);
+      if (node) AccessibilityInfo.setAccessibilityFocus(node);
+    }, 200);
+    return () => clearTimeout(focusTimer);
+  }, [showPetPicker]);
   const [compareSelection, setCompareSelection] = useState([]);
   const [completedContribution, setCompletedContribution] = useState(null);
   const [lastHumanFoodPetType, setLastHumanFoodPetType] = useState(null);
@@ -1170,6 +1183,7 @@ export default function HomeScreen({ navigation, route }) {
       catalogProduct: product,
       petType: product.petType,
       sourceSurface: "catalog_contribution_completed",
+      resultsNavigationStartedAt: Date.now(),
     });
   };
 
@@ -1231,6 +1245,7 @@ export default function HomeScreen({ navigation, route }) {
       historyProductName: historyDisplayName(item),
       ...(item.resultSnapshot && { historyResultSnapshot: item.resultSnapshot }),
       ...(item.scanMode === "human_food" && { scanMode: "human_food", petType: item.petType }),
+      resultsNavigationStartedAt: Date.now(),
     });
   };
 
@@ -1664,10 +1679,29 @@ export default function HomeScreen({ navigation, route }) {
           onPress={() => setShowPetPicker(false)}
           accessible={false}
         >
-          <View style={[styles.petPickerCard, { backgroundColor: theme.card }]} onStartShouldSetResponder={() => true}>
-            <Text style={[styles.petPickerTitle, { color: theme.textPrimary }]}>
-              Who is this for?
-            </Text>
+          <View
+            style={[styles.petPickerCard, { backgroundColor: theme.card }]}
+            onStartShouldSetResponder={() => true}
+            accessibilityViewIsModal
+          >
+            <View style={styles.petPickerHeader}>
+              <Text
+                ref={petPickerTitleRef}
+                style={[styles.petPickerTitle, { color: theme.textPrimary }]}
+                accessibilityRole="header"
+              >
+                Who is this for?
+              </Text>
+              <Pressable
+                onPress={() => setShowPetPicker(false)}
+                hitSlop={12}
+                style={styles.petPickerClose}
+                accessibilityRole="button"
+                accessibilityLabel="Close pet picker"
+              >
+                <X size={20} color={theme.textTertiary} strokeWidth={2} />
+              </Pressable>
+            </View>
             <View style={styles.petPickerRow}>
               <Pressable
                 style={({ pressed }) => [styles.petPickerOption, { backgroundColor: pressed || pendingHumanPetType === "dog" ? theme.surface : theme.bg }]}
@@ -2331,10 +2365,24 @@ const styles = StyleSheet.create({
     boxShadow: "0 8px 24px rgba(0, 0, 0, 0.12)",
   },
   petPickerTitle: {
+    flex: 1,
     fontSize: 20,
     fontWeight: "700",
     textAlign: "center",
-    marginBottom: 20,
+  },
+  petPickerHeader: {
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  petPickerClose: {
+    position: "absolute",
+    right: 0,
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
   },
   petPickerRow: {
     flexDirection: "row",

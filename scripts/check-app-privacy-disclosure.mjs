@@ -80,6 +80,8 @@ for (const snippet of [
   "public.scan_usage_events",
   "public.rate_limits",
   "public.revenuecat_events",
+  "product_events",
+  "one-way SHA-256 deletion marker",
   "public.analysis_cache",
   "delete_own_account",
   "services/analytics.js",
@@ -126,6 +128,7 @@ for (const policySnippet of [
   "Scan History",
   "Guest and Account Information",
   "Pet Profile",
+  "Product Searches",
   "Subscription Information",
   "Apple Search Ads Attribution",
   "We do not use IDFA",
@@ -136,6 +139,8 @@ for (const policySnippet of [
   "RevenueCat",
   "Open Pet Food Facts",
   "You can delete your guest data or account",
+  "typed-search event records",
+  "one-way hashed deletion marker",
 ]) {
   requireSnippet(privacyPolicy, policySnippet, PRIVACY_POLICY_PATH);
 }

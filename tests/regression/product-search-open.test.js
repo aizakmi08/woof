@@ -91,6 +91,7 @@ jest.mock("../../services/petProfile", () => ({
 jest.mock("../../services/performanceTimings", () => ({
   logCaptureToResult: jest.fn(),
   logLabelScanStageTimings: jest.fn(),
+  logTypedSearchComplete: jest.fn(),
   navigationTimingParams: () => ({}),
 }));
 jest.mock("../../services/devQaFixtures", () => ({

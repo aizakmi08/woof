@@ -39,6 +39,7 @@ export const PRIVACY_HTML = `<!DOCTYPE html>
   <li><strong>Guest and account information:</strong> a guest account identifier when you use the app without signing in, plus email address and display name if you later sign in with Apple or Google.</li>
   <li><strong>Camera images:</strong> images of pet food labels or human food items you scan. Images are sent to our servers for analysis, including analysis by Anthropic's Claude, and are not stored permanently by ${APP_NAME} after processing.</li>
   <li><strong>Barcodes:</strong> barcode numbers you scan, used to look up product information.</li>
+  <li><strong>Product searches:</strong> product names and terms you type, used to return catalog results and diagnose search quality.</li>
   <li><strong>Scan history:</strong> product or food names, scores or safety levels, analysis results, scan modes, and scan dates are stored to provide your history.</li>
   <li><strong>Pet Profile:</strong> pet name, species, life stage, and ingredients you choose to avoid are stored with your guest profile or signed-in account to personalize ingredient checks.</li>
   <li><strong>Subscription information:</strong> subscription status and purchase events are processed by RevenueCat and the app stores so we can unlock paid features.</li>
@@ -71,7 +72,7 @@ export const PRIVACY_HTML = `<!DOCTYPE html>
 </ul>
 
 <h2>Data Retention</h2>
-<p>Your scan history and cached analyses are retained while your guest profile or signed-in account is active. You can delete your guest data or account and associated data at any time from the Profile screen in the app. Deletion removes your account, scan history, scan usage records, linkable operational analytics, subscription webhook records associated with your app user ID, and local on-device scan/result caches. App Store or Google Play purchase records may remain with the store for billing and legal reasons.</p>
+<p>Your scan history and cached analyses are retained while your guest profile or signed-in account is active. You can delete your guest data or account and associated data at any time from the Profile screen in the app. Deletion removes your account, scan history, typed-search event records, scan usage records, linkable operational analytics, subscription webhook records associated with your app user ID, and local on-device scan/result caches. We retain only a one-way hashed deletion marker to prevent delayed subscription webhooks from recreating your identifier. App Store or Google Play purchase records may remain with the store for billing and legal reasons.</p>
 
 <h2>Data Security</h2>
 <p>We use industry-standard security measures including encrypted connections (HTTPS), server-side API key management, and row-level security policies on our database.</p>

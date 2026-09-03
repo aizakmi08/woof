@@ -93,8 +93,9 @@ CREATE TABLE public.analytics_events (
   id UUID PRIMARY KEY DEFAULT extensions.gen_random_uuid(),
   user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
   session_id TEXT NOT NULL,
-  event_name TEXT NOT NULL,
-  metadata JSONB NOT NULL DEFAULT '{}'::JSONB
+  name TEXT NOT NULL,
+  properties JSONB NOT NULL DEFAULT '{}'::JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE public.analytics_events ENABLE ROW LEVEL SECURITY;
 CREATE POLICY analytics_insert_own ON public.analytics_events FOR INSERT TO authenticated
@@ -128,17 +129,148 @@ CREATE TABLE public.revenuecat_events (
   aliases TEXT[] NOT NULL DEFAULT '{}',
   payload JSONB NOT NULL DEFAULT '{}'::JSONB
 );
+ALTER TABLE public.revenuecat_events ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.revenuecat_events FROM PUBLIC, anon, authenticated;
+GRANT ALL ON public.revenuecat_events TO service_role;
 
 CREATE TABLE public.product_data (
   cache_key TEXT PRIMARY KEY,
   product_name TEXT NOT NULL,
+  brand TEXT,
+  gtin TEXT,
+  product_line TEXT,
+  flavor TEXT,
+  life_stage TEXT,
+  food_form TEXT,
+  package_size TEXT,
+  pet_type TEXT DEFAULT 'dog',
   ingredients TEXT[] NOT NULL DEFAULT '{}',
-  source_url TEXT
+  ingredient_text TEXT,
+  ingredient_count INTEGER NOT NULL DEFAULT 0,
+  nutritional_info JSONB,
+  nutrient_panel JSONB,
+  has_published_nutrients BOOLEAN NOT NULL DEFAULT false,
+  source TEXT DEFAULT 'manufacturer',
+  source_quality TEXT NOT NULL DEFAULT 'manufacturer',
+  ingredient_verification_status TEXT NOT NULL DEFAULT 'manufacturer',
+  image_verification_status TEXT NOT NULL DEFAULT 'manufacturer',
+  verified_at TIMESTAMPTZ DEFAULT now(),
+  source_url TEXT DEFAULT 'https://example.test/product',
+  image_url TEXT DEFAULT 'https://example.test/product.jpg',
+  expires_at TIMESTAMPTZ NOT NULL DEFAULT (now() + interval '1 year'),
+  is_complete_food BOOLEAN NOT NULL DEFAULT true,
+  catalog_exclusion_reason TEXT,
+  formula_evidence_tier TEXT NOT NULL DEFAULT 'manufacturer_current_exact',
+  formula_version_provenance JSONB NOT NULL DEFAULT '{}'::JSONB
 );
 ALTER TABLE public.product_data ENABLE ROW LEVEL SECURITY;
 CREATE POLICY product_data_read ON public.product_data FOR SELECT TO authenticated USING (true);
 GRANT SELECT ON public.product_data TO authenticated;
 GRANT ALL ON public.product_data TO service_role;
+
+CREATE FUNCTION public.search_verified_products(q TEXT, max_results INTEGER DEFAULT 10)
+RETURNS TABLE(
+  cache_key TEXT,
+  product_name TEXT,
+  brand TEXT,
+  gtin TEXT,
+  product_line TEXT,
+  flavor TEXT,
+  life_stage TEXT,
+  food_form TEXT,
+  package_size TEXT,
+  pet_type TEXT,
+  ingredient_count INTEGER,
+  source TEXT,
+  source_quality TEXT,
+  ingredient_verification_status TEXT,
+  image_verification_status TEXT,
+  verified_at TIMESTAMPTZ,
+  image_url TEXT,
+  ingredients TEXT[],
+  ingredient_text TEXT,
+  nutritional_info JSONB,
+  nutrient_panel JSONB,
+  has_published_nutrients BOOLEAN,
+  source_url TEXT,
+  rank REAL
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $function$
+  SELECT
+    product.cache_key,
+    product.product_name,
+    product.brand,
+    product.gtin,
+    product.product_line,
+    product.flavor,
+    product.life_stage,
+    product.food_form,
+    product.package_size,
+    product.pet_type,
+    product.ingredient_count,
+    product.source,
+    product.source_quality,
+    product.ingredient_verification_status,
+    product.image_verification_status,
+    product.verified_at,
+    product.image_url,
+    product.ingredients,
+    product.ingredient_text,
+    product.nutritional_info,
+    product.nutrient_panel,
+    product.has_published_nutrients,
+    product.source_url,
+    10::REAL
+  FROM public.product_data AS product
+  WHERE lower(product.product_name) LIKE '%' || lower(q) || '%'
+    OR product.cache_key = q
+  ORDER BY product.product_name
+  LIMIT LEAST(GREATEST(COALESCE(max_results, 10), 1), 25);
+$function$;
+
+CREATE FUNCTION public.resolve_verified_product_by_gtin(q TEXT, max_results INTEGER DEFAULT 8)
+RETURNS TABLE(
+  cache_key TEXT,
+  product_name TEXT,
+  brand TEXT,
+  gtin TEXT,
+  product_line TEXT,
+  flavor TEXT,
+  life_stage TEXT,
+  food_form TEXT,
+  package_size TEXT,
+  pet_type TEXT,
+  ingredient_count INTEGER,
+  source TEXT,
+  source_quality TEXT,
+  ingredient_verification_status TEXT,
+  image_verification_status TEXT,
+  verified_at TIMESTAMPTZ,
+  image_url TEXT,
+  ingredients TEXT[],
+  ingredient_text TEXT,
+  nutritional_info JSONB,
+  nutrient_panel JSONB,
+  has_published_nutrients BOOLEAN,
+  source_url TEXT,
+  rank REAL
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $function$
+  SELECT result.*
+  FROM public.search_verified_products(q, max_results) AS result
+  WHERE result.gtin = q;
+$function$;
+
+GRANT EXECUTE ON FUNCTION public.search_verified_products(TEXT, INTEGER) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.resolve_verified_product_by_gtin(TEXT, INTEGER) TO authenticated;
 
 CREATE TABLE public.catalog_private_evidence (
   id UUID PRIMARY KEY DEFAULT extensions.gen_random_uuid(),
