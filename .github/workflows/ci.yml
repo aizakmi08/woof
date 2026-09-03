@@ -259,5 +259,6 @@ jobs:
           -workspace ios/woof.xcworkspace
           -scheme "woof StoreKit"
           -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.id }}"
+          -parallel-testing-enabled NO
           -only-testing:woofTests/WoofConfigurationTests
           CODE_SIGNING_ALLOWED=NO

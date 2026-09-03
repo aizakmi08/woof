@@ -121,6 +121,12 @@ requireSnippets(storeKitTestPath, storeKitTest, [
   "testPurchasePersistsAcrossStoreKitSessionRecreation",
   "testCancellationAndExpiryRemoveActiveRenewal",
   "testAskToBuyCanBeApprovedAndDeclined",
+  "func testAskToBuyCanBeApprovedAndDeclined() async throws",
+  "Product.products(for:",
+  "weekly.purchase()",
+  "annual.purchase()",
+  "guard case .pending = approvalResult",
+  "guard case .pending = declineResult",
   "approveAskToBuyTransaction",
   "declineAskToBuyTransaction",
   "testExpireMonthlySubscriptionWhenExplicitlyEnabled",
@@ -134,6 +140,17 @@ requireSnippets(storeKitTestPath, storeKitTest, [
   '"woof_pro_annual": ("29.99", "P1Y")',
   'XCTAssertEqual(introductoryOffer["subscriptionPeriod"] as? String, "P3D")',
 ], "native StoreKit catalog test");
+const askToBuyTestStart = storeKitTest.indexOf("func testAskToBuyCanBeApprovedAndDeclined");
+const askToBuyTestEnd = storeKitTest.indexOf("func testExpireMonthlySubscriptionWhenExplicitlyEnabled", askToBuyTestStart);
+const askToBuyTest = storeKitTest.slice(askToBuyTestStart, askToBuyTestEnd);
+if (askToBuyTest.includes("buyProduct(productIdentifier:")) {
+  fail(`${storeKitTestPath}: Ask to Buy must exercise the in-app purchase API, not Apple's deprecated out-of-app helper`);
+}
+const resetPosition = storeKitTest.indexOf("session.resetToDefaultState()", storeKitTest.indexOf("private func cleanSession"));
+const disableDialogsPosition = storeKitTest.indexOf("session.disableDialogs = true", resetPosition);
+if (resetPosition < 0 || disableDialogsPosition < resetPosition) {
+  fail(`${storeKitTestPath}: reset defaults before disabling dialogs for unattended execution`);
+}
 requireSnippets(".github/workflows/ci.yml", workflow, [
   "ios-storekit:",
   "runs-on: macos-15",
@@ -142,6 +159,7 @@ requireSnippets(".github/workflows/ci.yml", workflow, [
   'key.end_with?("iOS-#{runtime_token}")',
   "xcodebuild test",
   'scheme "woof StoreKit"',
+  "parallel-testing-enabled NO",
   "only-testing:woofTests/WoofConfigurationTests",
   'SENTRY_DISABLE_AUTO_UPLOAD: "true"',
 ], "CI native StoreKit execution");

@@ -6,9 +6,9 @@ import XCTest
 final class WoofConfigurationTests: XCTestCase {
   private func cleanSession() throws -> SKTestSession {
     let session = try SKTestSession(configurationFileNamed: "Woof")
-    session.disableDialogs = true
     session.resetToDefaultState()
     session.clearTransactions()
+    session.disableDialogs = true
     return session
   }
 
@@ -49,21 +49,48 @@ final class WoofConfigurationTests: XCTestCase {
     session.clearTransactions()
   }
 
-  func testAskToBuyCanBeApprovedAndDeclined() throws {
+  @available(iOS 17.0, *)
+  func testAskToBuyCanBeApprovedAndDeclined() async throws {
     let session = try cleanSession()
     session.askToBuyEnabled = true
-    try session.buyProduct(productIdentifier: "woof_pro_weekly")
-    let approval = try XCTUnwrap(session.allTransactions().first)
+
+    let products = try await Product.products(for: [
+      "woof_pro_weekly",
+      "woof_pro_annual",
+    ])
+    let weekly = try XCTUnwrap(products.first { $0.id == "woof_pro_weekly" })
+    let annual = try XCTUnwrap(products.first { $0.id == "woof_pro_annual" })
+
+    let approvalResult = try await weekly.purchase()
+    guard case .pending = approvalResult else {
+      XCTFail("Ask to Buy must make the in-app weekly purchase pending")
+      return
+    }
+    let approval = try XCTUnwrap(
+      session.allTransactions().first { $0.productIdentifier == weekly.id }
+    )
     XCTAssertTrue(approval.pendingAskToBuyConfirmation)
     try session.approveAskToBuyTransaction(identifier: approval.identifier)
-    XCTAssertFalse(try XCTUnwrap(session.allTransactions().first).pendingAskToBuyConfirmation)
+    let approved = try XCTUnwrap(
+      session.allTransactions().first { $0.productIdentifier == weekly.id }
+    )
+    XCTAssertFalse(approved.pendingAskToBuyConfirmation)
+    XCTAssertEqual(approved.state, .purchased)
 
     session.clearTransactions()
-    try session.buyProduct(productIdentifier: "woof_pro_annual")
-    let decline = try XCTUnwrap(session.allTransactions().first)
+    let declineResult = try await annual.purchase()
+    guard case .pending = declineResult else {
+      XCTFail("Ask to Buy must make the in-app annual purchase pending")
+      return
+    }
+    let decline = try XCTUnwrap(
+      session.allTransactions().first { $0.productIdentifier == annual.id }
+    )
     XCTAssertTrue(decline.pendingAskToBuyConfirmation)
     try session.declineAskToBuyTransaction(identifier: decline.identifier)
-    XCTAssertTrue(session.allTransactions().isEmpty)
+    XCTAssertNil(
+      session.allTransactions().first { $0.productIdentifier == annual.id }
+    )
   }
 
   func testExpireMonthlySubscriptionWhenExplicitlyEnabled() throws {

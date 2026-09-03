@@ -11,12 +11,12 @@ This report records what was actually tested. It does not claim that the app has
 
 ## Executive decision
 
-The release line is consolidated and the most important nutrition-scoring path is proved against a real production row. The quota boundary, deletion durability, GTIN index, and first-day KPI view are implemented and pass a disposable PostgreSQL test suite, but they are not deployed. Two independent release blockers remain:
+The release line is consolidated and the most important nutrition-scoring path is proved against a real production row. The quota boundary, deletion durability, GTIN index, and first-day KPI view are implemented and pass a disposable PostgreSQL test suite, but they are not deployed. Four independent release blockers remain:
 
 1. Apple reports live version `1.2.4`; every local release file intentionally remains `1.2.2`. Apple will not accept a lower marketing version. The owner must authorize a new version greater than `1.2.4`; no version was changed here.
-2. The live catalog fails the existing completeness contract: 395 ready brands versus 750 required, 16,294 of 16,299 ready rows have verified ingredients, and 10,445 open queue rows affect 14,127 products. No assertion or threshold was weakened.
-
-The real-iPhone checklist is also incomplete. Shipping without it would make public users the first people to test physical packages, purchases, offline entitlement persistence, and VoiceOver in this build.
+2. The four production boundary migrations and two changed Edge Functions are not deployed. The current live grants still permit the catalog quota bypass, the deletion tombstone is absent, and the normalized GTIN index and release KPI view do not exist.
+3. The live catalog fails the existing completeness contract: 395 ready brands versus 750 required, 16,294 of 16,299 ready rows have verified ingredients, and 10,445 open queue rows affect 14,127 products. No assertion or threshold was weakened.
+4. The full simulator matrix and real-iPhone checklist are incomplete. Shipping without them would make public users the first people to test physical packages, purchases, offline entitlement persistence, and VoiceOver in this build.
 
 ## 1. Branch consolidation
 
@@ -142,7 +142,7 @@ The fail-fast preflight stopped at the first failure. Suites after that point we
 | 12 | App Privacy disclosure | PASS | 0.04s | Embedded/hosted disclosure alignment |
 | 13 | Accessibility static gate | PASS | 0.08s | 13 files |
 | 14 | Pet-profile safety | PASS | 0.04s | 8 scenarios |
-| 15 | Claim safety and runtime Woof brand | PASS | 0.06s | 61 files at preflight; post-fix rerun required in final verification |
+| 15 | Claim safety and runtime Woof brand | PASS | 0.06s | 61 files at preflight; final dependency-free preflight also passed after the logger correction |
 | 16 | App Store listing package | PASS | 0.04s | Length/claim rules |
 | 17 | App Store screenshots | PASS | 0.05s | 18 assets structurally checked |
 | 18 | EAS versioning contract | PASS | 0.04s | Local metadata consistency only |
@@ -170,12 +170,15 @@ The fail-fast preflight stopped at the first failure. Suites after that point we
 | — | Live production-path scoring | PASS | 7.46s | Real Nature's Logic row |
 | — | Live App Store listing | FAIL | 0.40s | Local 1.2.2 behind live 1.2.4 |
 | — | Live catalog RPC performance | BLOCKED(migrations not deployed) | 11.29s | Refused to grade missing teaser/index boundary |
-| — | StoreKit native test source compilation | PASS | prior local `build-for-testing` | Current test source compiles in generated native project |
-| — | StoreKit native test execution | BLOCKED(no booted simulator; CI job not yet run) | — | CI now selects the newest available iPhone runtime and invokes `xcodebuild test` |
+| — | Hosted StoreKit app/test compilation | PASS | local cold build | Generated app host and test bundle compiled under Xcode 26.6 before test execution |
+| — | Local StoreKit transaction execution | BLOCKED(Apple iOS 26.5 CLI defect) | 41.47s full test operation; strengthened Ask to Buy test interrupted after 90s | Product-catalog assertion passed in the full run; the strengthened test compiled, then the local StoreKit daemon returned `SKInternalErrorDomain Code=3` while resetting the session and hung while loading products |
+| — | CI StoreKit execution on pinned iOS 26.1 | FAIL | 21m49s job; 5.95s tests | Run `33811262298`: 3 passed, 1 skipped by explicit expiry opt-in, and Ask to Buy failed because the deprecated out-of-app purchase helper returned a purchased rather than pending transaction. The replacement exercises `Product.purchase()`, retains both pending-state assertions, fixes dialog-reset ordering, and awaits a new CI run. |
 | — | Maestro matrix | BLOCKED(Maestro absent; no simulator booted) | — | Only the product-row regression flow exists; the full matrix was not executed |
 | — | Clean checkout: clone → `npm ci` → Expo export | PASS | final verification | Run from the committed release candidate with no untracked source dependency |
 
 `npm run verify` was not used as a coverage claim; it remains a thin existence/configuration check.
+
+The local StoreKit mutation failure matches the current [Apple Developer Forums report for headless `xcodebuild` on iOS 26.5](https://developer.apple.com/forums/thread/808030). The CI job is pinned to Xcode 26.1.1 and its matching iOS 26.1 runtime rather than converting that platform failure into a skipped/pass result. StoreKit tests are also forced to execute serially because Apple documents one shared test environment across all `SKTestSession` instances.
 
 ## 6. Performance evidence and budgets
 
