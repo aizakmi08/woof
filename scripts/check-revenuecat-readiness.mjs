@@ -129,6 +129,8 @@ requireSnippets(storeKitTestPath, storeKitTest, [
   "guard case .pending = declineResult",
   "approveAskToBuyTransaction",
   "declineAskToBuyTransaction",
+  "XCTAssertFalse(declined.pendingAskToBuyConfirmation)",
+  "XCTAssertEqual(declined.state, .failed)",
   "testExpireMonthlySubscriptionWhenExplicitlyEnabled",
   'environment["WOOF_STOREKIT_EXPIRE_MONTHLY"] == "1"',
   'SKTestSession(configurationFileNamed: "Woof")',

@@ -88,9 +88,11 @@ final class WoofConfigurationTests: XCTestCase {
     )
     XCTAssertTrue(decline.pendingAskToBuyConfirmation)
     try session.declineAskToBuyTransaction(identifier: decline.identifier)
-    XCTAssertNil(
-      session.allTransactions().first { $0.productIdentifier == annual.id }
+    let declined = try XCTUnwrap(
+      session.allTransactions().first { $0.identifier == decline.identifier }
     )
+    XCTAssertFalse(declined.pendingAskToBuyConfirmation)
+    XCTAssertEqual(declined.state, .failed)
   }
 
   func testExpireMonthlySubscriptionWhenExplicitlyEnabled() throws {
