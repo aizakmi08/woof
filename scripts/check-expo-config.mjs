@@ -71,7 +71,7 @@ assert(
 const expoConfig = parseJsonOutput(successRun.stdout);
 assert(expoConfig.name === "woof", "Expo config name changed unexpectedly");
 assert(expoConfig.slug === "woof", "Expo config slug changed unexpectedly");
-assert(expoConfig.version === "1.2.1", "Expo config version should match the 1.2.1 update release line");
+assert(expoConfig.version === "1.2.2", "Expo config version should match the 1.2.2 update release line");
 assert(expoConfig.ios?.bundleIdentifier === "io.woof.app", "Expo config iOS bundle identifier changed unexpectedly");
 assert(expoConfig.android?.package === "com.app.woof", "Expo config Android package changed unexpectedly");
 

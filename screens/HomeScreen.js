@@ -455,10 +455,22 @@ function HistoryRow({ item, onPress, onCompare, compareSelected, theme, index })
 
 // --- Compare Recent Scans ---
 
-function CompareRecentCard({ items, theme, onPress }) {
+function CompareRecentCard({ items, availableCount, theme, onPress }) {
   const [left, right] = items;
   const ready = items.length === 2;
   const delta = ready ? compareScoreDelta(items) : null;
+  const subtitle = ready
+    ? `${historyDisplayName(left)} vs ${historyDisplayName(right)}`
+    : items.length === 1
+      ? "Select one more scored pet food in Recent Scans."
+      : availableCount >= 2
+        ? "Select two scored pet foods in Recent Scans."
+        : availableCount === 1
+          ? "Scan one more pet food to unlock comparison."
+          : "Scan two pet foods to compare scores side by side.";
+  const accessibilityLabel = ready
+    ? `Compare recent scans. ${historyDisplayName(left)} with ${historyDisplayName(right)}`
+    : `Compare recent scans. ${subtitle}`;
 
   return (
     <Pressable
@@ -469,18 +481,15 @@ function CompareRecentCard({ items, theme, onPress }) {
         {
           backgroundColor: theme.card,
           borderColor: theme.separator,
-          opacity: ready ? (pressed ? 0.8 : 1) : 0.62,
+          opacity: ready && pressed ? 0.8 : 1,
         },
       ]}
       accessibilityRole="button"
-      accessibilityLabel="Compare recent scans"
-      accessibilityHint={ready ? "Opens a side by side comparison" : "Select Compare on two scored pet-food history rows"}
+      accessibilityLabel={accessibilityLabel}
+      accessibilityHint={ready ? "Opens a side by side comparison" : undefined}
       accessibilityState={{ disabled: !ready }}
     >
       <View style={styles.compareCardCopy}>
-        <Text style={[styles.compareEyebrow, { color: theme.textTertiary }]}>
-          Shopping helper
-        </Text>
         <Text style={[styles.compareTitle, { color: theme.textPrimary }]}>
           Compare products
         </Text>
@@ -488,9 +497,7 @@ function CompareRecentCard({ items, theme, onPress }) {
           style={[styles.compareSubtitle, { color: theme.textSecondary }]}
           numberOfLines={2}
         >
-          {ready
-            ? `${historyDisplayName(left)} vs ${historyDisplayName(right)}`
-            : `Choose ${2 - items.length} more scored pet food${items.length === 1 ? "" : "s"} below`}
+          {subtitle}
         </Text>
       </View>
       <View style={[styles.compareDeltaBadge, { backgroundColor: theme.surface }]}>
@@ -1117,6 +1124,10 @@ export default function HomeScreen({ navigation, route }) {
     .filter(Boolean)
     .filter(isComparableHistoryItem)
     .slice(0, 2), [compareSelection, history]);
+  const comparableProductCount = useMemo(
+    () => selectDistinctComparableHistory(history).length,
+    [history]
+  );
 
   const toggleCompareSelection = (item) => {
     if (!isComparableHistoryItem(item)) return;
@@ -1501,7 +1512,19 @@ export default function HomeScreen({ navigation, route }) {
         />
       )}
 
-      {/* Section header */}
+      <View style={styles.shoppingHelperSection}>
+        <Text style={[styles.shoppingHelperLabel, { color: theme.textSecondary }]}>
+          Shopping helper
+        </Text>
+        <CompareRecentCard
+          items={comparableHistory}
+          availableCount={comparableProductCount}
+          theme={theme}
+          onPress={handleCompareOpen}
+        />
+      </View>
+
+      {/* Recent scans section */}
       {history.length > 0 && (
         <>
           <View style={styles.sectionHeader}>
@@ -1535,12 +1558,6 @@ export default function HomeScreen({ navigation, route }) {
           />
         </>
       )}
-
-      <CompareRecentCard
-        items={comparableHistory}
-        theme={theme}
-        onPress={handleCompareOpen}
-      />
     </View>
   );
 
@@ -2119,13 +2136,21 @@ const styles = StyleSheet.create({
   },
 
   // Compare recent scans
+  shoppingHelperSection: {
+    marginTop: Spacing.sectionGap,
+  },
+  shoppingHelperLabel: {
+    fontSize: 13,
+    fontWeight: "600",
+    letterSpacing: 0,
+    marginBottom: 10,
+  },
   compareCard: {
-    minHeight: 82,
-    borderRadius: 14,
+    minHeight: 90,
+    borderRadius: Spacing.cardRadius,
     borderWidth: 1,
     paddingVertical: 14,
-    paddingHorizontal: 16,
-    marginBottom: 12,
+    paddingHorizontal: Spacing.cardPadding,
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
@@ -2134,15 +2159,8 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
-  compareEyebrow: {
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 0,
-    textTransform: "uppercase",
-    marginBottom: 4,
-  },
   compareTitle: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: "700",
     letterSpacing: 0,
     marginBottom: 3,
@@ -2188,7 +2206,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     paddingVertical: 12,
     paddingHorizontal: 14,
-    marginTop: 10,
+    marginTop: Spacing.md,
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
@@ -2222,6 +2240,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 40,
+    paddingTop: Spacing.xxl,
     paddingBottom: 36,
   },
   emptyIconContainer: {

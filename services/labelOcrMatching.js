@@ -206,13 +206,13 @@ const PROTECTED_VARIANT_PHRASES = [
 const EXCLUSIVE_PRODUCT_LINE_PHRASES = ["small bites", "small breed", "small mini"];
 const REQUIRED_OCR_VARIANT_TERMS = new Set([
   "95", "ancient", "coat", "consult", "core", "cravings", "digestive", "digestion", "freshdried", "goodgut",
-  "game", "harvest", "healthy", "indoor", "kitten", "large", "mixers", "peakboost",
+  "game", "harvest", "healthy", "indoor", "kitten", "large", "minichunks", "mixers", "peakboost",
   "mature", "perfect", "prairie", "prescription", "puppy", "rawmix", "reserve", "senior", "sensitive", "skin",
   "small", "toy", "urinary", "wilderness",
 ]);
 const CANDIDATE_ONLY_VARIANT_TERMS = new Set([
-  "95", "healthy", "indoor", "large", "plus", "prescription", "puppy", "senior", "small", "toy",
-  "urinary", "weight",
+  ...REQUIRED_OCR_VARIANT_TERMS,
+  "plus", "weight",
 ]);
 
 function compact(value) {
@@ -301,6 +301,7 @@ function adultAgeBand(value, { product = false } = {}) {
     ].map(compact).filter(Boolean).join(" ")
     : value;
   const text = normalizeText(visibleText);
+  if (/\badult\s+1\s+(?:to\s+)?6\b/.test(text)) return "adult_1_6";
   const adultAge = text.match(/\badult\s+(7|11)(?:\s+plus)?\b/);
   if (adultAge) return `adult_${adultAge[1]}_plus`;
   const seniorAge = text.match(/\b(7|11)(?:\s+plus)?\s+(?:senior|adult)\b/);
@@ -316,6 +317,28 @@ function inferredPetType(value) {
   if (["dog", "dogs", "puppy", "puppies", "canine"].some((token) => tokens.has(token))) return "dog";
   if (["cat", "cats", "kitten", "kittens", "feline"].some((token) => tokens.has(token))) return "cat";
   return "";
+}
+
+function normalizedPackageSizes(value = {}) {
+  const rawSizes = value && typeof value === "object"
+    ? [
+      ...(Array.isArray(value.availablePackageSizes) ? value.availablePackageSizes : []),
+      value.packageSize,
+      value.package_size,
+    ]
+    : [value];
+  const matches = rawSizes.flatMap((rawSize) => (
+    [...String(rawSize || "").toLowerCase().matchAll(/\b(\d+(?:\.\d+)?)\s*(lb|lbs|oz|kg|g)\b/g)]
+      .map((match) => `${Number(match[1])}:${match[2] === "lbs" ? "lb" : match[2]}`)
+  ));
+  return new Set(matches);
+}
+
+function packageSizeConflictsWithOcr(product = {}, ocrText = "") {
+  const visibleSizes = normalizedPackageSizes(ocrText);
+  const candidateSizes = normalizedPackageSizes(product);
+  if (visibleSizes.size === 0 || candidateSizes.size === 0) return false;
+  return ![...visibleSizes].some((size) => candidateSizes.has(size));
 }
 
 function inferredFoodForm(value) {
@@ -454,6 +477,7 @@ function hasCompatibleOcrIdentity(product = {}, ocrText = "", {
   const ocrAgeBand = adultAgeBand(ocrText);
   const productAgeBand = adultAgeBand(product, { product: true });
   if (ocrAgeBand && productAgeBand && ocrAgeBand !== productAgeBand) return false;
+  if (packageSizeConflictsWithOcr(product, ocrText)) return false;
 
   const ocrTokens = normalizedTokens(ocrText);
   const productTokens = normalizedTokens(productIdentityText(product));
@@ -482,8 +506,13 @@ function hasCompatibleOcrIdentity(product = {}, ocrText = "", {
   ) {
     return false;
   }
+  // A catalog title must never supply a recipe that Vision did not read from
+  // the photographed package. A same-brand sibling is a search lead, not a
+  // plausible label match, when its protein is absent from the label evidence.
+  if (productRecipeTerms.some((term) => !ocrTokens.has(term))) return false;
   for (const phrase of PROTECTED_VARIANT_PHRASES) {
     if (normalizedOcrText.includes(phrase) && !normalizedProductText.includes(phrase)) return false;
+    if (normalizedProductText.includes(phrase) && !normalizedOcrText.includes(phrase)) return false;
   }
   const ocrExclusiveLine = EXCLUSIVE_PRODUCT_LINE_PHRASES.find((phrase) => (
     normalizedOcrText.includes(phrase)
@@ -510,6 +539,31 @@ function hasCompatibleOcrIdentity(product = {}, ocrText = "", {
   }
   if (ocrTokens.has("wild") && ocrTokens.has("game") && !productTokens.has("wild")) {
     return false;
+  }
+
+  // When the package text does not say dog or cat, require more than a broad
+  // brand/adult overlap before showing a species-specific catalog candidate.
+  // Cloud image recognition can still corroborate the animal photo; OCR alone
+  // must expose at least two formula anchors.
+  if (!ocrPetType && productPetType) {
+    const visibleFormulaAnchors = new Set();
+    productRecipeTerms.forEach((term) => {
+      if (ocrTokens.has(term)) visibleFormulaAnchors.add(`recipe:${term}`);
+    });
+    [...REQUIRED_OCR_VARIANT_TERMS].forEach((term) => {
+      if (productVisibleIdentityTokens.has(term) && ocrTokens.has(term)) {
+        visibleFormulaAnchors.add(`variant:${term}`);
+      }
+    });
+    PROTECTED_VARIANT_PHRASES.forEach((phrase) => {
+      if (normalizedProductText.includes(phrase) && normalizedOcrText.includes(phrase)) {
+        visibleFormulaAnchors.add(`phrase:${phrase}`);
+      }
+    });
+    if (ocrAgeBand && productAgeBand && ocrAgeBand === productAgeBand) {
+      visibleFormulaAnchors.add(`age:${ocrAgeBand}`);
+    }
+    if (visibleFormulaAnchors.size < 2) return false;
   }
 
   return true;

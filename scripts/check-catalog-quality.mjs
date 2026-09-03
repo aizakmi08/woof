@@ -239,8 +239,8 @@ requireSnippet(searchScreenPath, searchScreen, "catalog_label_auto_opened", "lab
 requireRegex(searchScreenPath, searchScreen, /if \(result\.selectedProduct\) \{[\s\S]+openProductResultRef\.current\(result\.selectedProduct/, "label scan auto-opens recommended product");
 requireSnippet(searchScreenPath, searchScreen, "uri: labelImageUri || resolvedProduct.imageUrl || null", "label scan image handoff");
 requireRegex(searchScreenPath, searchScreen, /function productIsReady[\s\S]+productIsVerifiedReady\(product\)/, "search result readiness fails closed without ingredient provenance");
-requireRegex(searchScreenPath, searchScreen, /function ingredientStatusLabel[\s\S]+return ready \? "Verified" : "Needs ingredients"/, "search result status labels missing ingredient provenance as unverified");
-requireRegex(searchScreenPath, searchScreen, /const statusLabel = ingredientStatusLabel\(\{ exactConfirmed, ready \}\)/, "search result row derives its status from verified readiness");
+requireRegex(searchScreenPath, searchScreen, /function ingredientStatusLabel[\s\S]+if \(!ready\) return "Needs ingredients";[\s\S]+labelCandidate \? "Catalog data verified" : "Verified"/, "search result status labels distinguish verified catalog data from an exact photographed-label match");
+requireRegex(searchScreenPath, searchScreen, /const statusLabel = ingredientStatusLabel\(\{ exactConfirmed, ready, labelCandidate \}\)/, "search result row derives its status from verified readiness and label-match context");
 requireSnippet(searchScreenPath, searchScreen, "Not a complete pet food", "non-complete label results avoid ingredient capture");
 requireSnippet(searchScreenPath, searchScreen, "onError={() => setImageFailed(true)}", "broken catalog images fall back cleanly");
 forbidSnippet(searchScreenPath, searchScreen, "if (!status) return true;", "search result fail-open ingredient readiness");

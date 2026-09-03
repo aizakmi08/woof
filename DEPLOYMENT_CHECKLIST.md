@@ -9,7 +9,7 @@ Use this checklist before shipping the current audit work to TestFlight or produ
 - Confirm the working branch and diff are intentional.
 - Use `GITHUB_RELEASE_AUDIT.md` before publishing. The June 17 read-only check found PR #1 open/draft on `codex/push-woof-app`, with 0 statuses/check runs, no remote smoke CI workflow, and a stale/different diff from the current local audit worktree. It also found a migration-number collision: PR #1 carries `supabase/migrations/007`-`049` files while production already has `007`-`057` migration history. Reconcile or supersede that PR before merging anything to `main`.
 - Confirm `app.json`, `package.json`, and `package-lock.json` are aligned to the release line.
-- Use `EAS_RELEASE_VERSIONING.md` before building or submitting. Because `eas.json` uses `"appVersionSource": "remote"`, run `npx eas-cli@latest build:version:get -p ios`, save the output, and verify the next iOS build number is greater than `31` and not attached to build version `1.1.1`.
+- Use `EAS_RELEASE_VERSIONING.md` before building or submitting. Because `eas.json` uses `"appVersionSource": "remote"`, run `npx eas-cli@latest build:version:get -p ios`, save the output, and verify the next iOS build number is greater than `54` and not attached to build version `1.1.1`.
 - Confirm the App Store Connect listing does not claim DogFoodAdvisor or CatFoodAdvisor support unless those integrations are actually deployed and licensed.
 - Confirm App Store copy, App Review Notes, screenshots, and in-app paywall/result screens do not claim customer reviews, review summaries, recall alerts, or recall history unless those sources are actually deployed and licensed.
 - Confirm camera permission copy remains accurate for both pet-food label scans and human-food safety scans.
@@ -946,7 +946,7 @@ Do not submit the next production build until:
 - `npm run check:live-listing -- --guest-validated` passes after App Store Connect metadata is updated and publicly visible, proving the live US App Store description no longer contains unsupported source, recall, or overbroad safety claims.
 - `APP_STORE_LISTING.md` replacement metadata has been applied or intentionally superseded in App Store Connect.
 - `APP_PRIVACY_DISCLOSURE.md` has been applied or intentionally superseded in App Store Connect, including `Data Used to Track You: No`, No IDFA/no tracking SDKs, linked-data categories, third-party processors, and Sentry Crash Data status.
-- `npm run check:eas-versioning` passes, `npx eas-cli@latest build:version:get -p ios` output is saved, and the submitted App Store Connect/TestFlight build row shows marketing version `1.2.1` with a build number greater than `41`.
+- `npm run check:eas-versioning` passes, `npx eas-cli@latest build:version:get -p ios` output is saved, and the submitted App Store Connect/TestFlight build row shows marketing version `1.2.2` with a build number greater than `54`.
 - `npm run edge:verify-live` passes against the live Supabase functions host, proving OPTIONS responses expose the expected `X-Woof-Function-Name` and `X-Woof-Function-Audit-Version` values for the tracked build.
 - `npm run check:edge-types` passes with Deno, proving the tracked Edge Functions type-check in the Deno runtime before deployment.
 - `npm run check:audit` passes after `npm ci`, proving production dependency advisories have no high/critical findings and have not regressed above the tracked moderate baseline.
