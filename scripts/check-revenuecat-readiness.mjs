@@ -149,6 +149,7 @@ requireSnippets(storeKitPluginPath, storeKitPlugin, [
   "WoofConfigurationTests.swift",
   "com.apple.product-type.bundle.unit-test",
   "StoreKitConfigurationFileReference",
+  "${name}Tests.xctest",
   "buildForArchiving = \"NO\"",
   "ensureNormalSchemeTest",
   "withoutStoreKit",

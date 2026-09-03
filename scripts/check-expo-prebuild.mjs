@@ -159,8 +159,9 @@ assert(
 assert(
   generatedStoreKitScheme.includes("StoreKitConfigurationFileReference")
     && generatedStoreKitScheme.includes('identifier = "../woof/Woof.storekit"')
+    && generatedStoreKitScheme.includes("woofTests.xctest")
     && generatedStoreKitScheme.includes('buildForArchiving = "NO"'),
-  "StoreKit scheme must be simulator-only and reference Woof.storekit"
+  "StoreKit scheme must be simulator-only, reference Woof.storekit, and include its test target"
 );
 assert(
   fs.existsSync(path.join(prebuildDir, "android", "settings.gradle")),

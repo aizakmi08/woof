@@ -87,6 +87,20 @@ function storeKitScheme({ appTargetId, name }) {
                ReferencedContainer = "container:${name}.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "${IDS.testTarget}"
+               BuildableName = "${name}Tests.xctest"
+               BlueprintName = "${name}Tests"
+               ReferencedContainer = "container:${name}.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction
@@ -95,6 +109,7 @@ function storeKitScheme({ appTargetId, name }) {
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES">
       <Testables>
+${testableReference(name)}
       </Testables>
    </TestAction>
    <LaunchAction
