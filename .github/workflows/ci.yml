@@ -197,6 +197,11 @@ jobs:
   ios-storekit:
     name: Native StoreKit contract
     runs-on: macos-15
+    env:
+      # StoreKitTest mutations are broken under headless xcodebuild with the
+      # iOS 26.2+ simulator runtimes (SKInternalErrorDomain Code 3). Keep this
+      # job on the last working runner-provided Xcode/runtime pair.
+      DEVELOPER_DIR: /Applications/Xcode_26.1.1.app/Contents/Developer
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -233,9 +238,13 @@ jobs:
       - name: Select an available iPhone simulator
         id: simulator
         run: |
+          IOS_RUNTIME_VERSION="$(xcrun --sdk iphonesimulator --show-sdk-version)"
+          export IOS_RUNTIME_VERSION
           DEVICE_ID="$(xcrun simctl list devices available -j | ruby -rjson -e '
             devices = JSON.parse(STDIN.read).fetch("devices")
-            runtime = devices.keys.grep(/iOS/).max_by { |key| key.scan(/\d+/).map(&:to_i) }
+            runtime_token = ENV.fetch("IOS_RUNTIME_VERSION").tr(".", "-")
+            runtime = devices.keys.find { |key| key.end_with?("iOS-#{runtime_token}") }
+            abort "No simulator runtime matches iOS #{ENV.fetch("IOS_RUNTIME_VERSION")}" unless runtime
             phone = devices.fetch(runtime).find { |device| device.fetch("name").start_with?("iPhone") }
             abort "No available iPhone simulator" unless phone
             puts phone.fetch("udid")

@@ -19,6 +19,8 @@ const IDS = {
   debugConfig: "00E356F11AD99517003FC87E",
   releaseConfig: "00E356F21AD99517003FC87E",
   configList: "00E356F31AD99517003FC87E",
+  targetDependency: "00E356F41AD99517003FC87E",
+  targetProxy: "00E356F51AD99517003FC87E",
   storeKitRef: "F574F4F46A10000000000001",
 };
 
@@ -208,6 +210,7 @@ function ensureXcodeProject(config) {
     const appGroupEntry = appFileRef ? findGroupContaining(objects, appFileRef) : null;
     const productsGroupEntry = findGroupContaining(objects, appProductRef);
     const rootProject = project.getFirstProject().firstProject;
+    const rootProjectId = project.getFirstProject().uuid;
     const mainGroup = objects.PBXGroup[rootProject.mainGroup];
 
     if (!appGroupEntry || !productsGroupEntry || !mainGroup) {
@@ -281,6 +284,7 @@ function ensureXcodeProject(config) {
     });
 
     const testBuildSettings = {
+      BUNDLE_LOADER: '"$(TEST_HOST)"',
       CODE_SIGNING_ALLOWED: "NO",
       GENERATE_INFOPLIST_FILE: "YES",
       IPHONEOS_DEPLOYMENT_TARGET: "15.1",
@@ -290,6 +294,7 @@ function ensureXcodeProject(config) {
       SKIP_INSTALL: "YES",
       SWIFT_VERSION: "5.0",
       TARGETED_DEVICE_FAMILY: '"1,2"',
+      TEST_HOST: `"$(BUILT_PRODUCTS_DIR)/${name}.app/${name}"`,
     };
     addCommentedObject(objects.XCBuildConfiguration, IDS.debugConfig, "Debug", {
       isa: "XCBuildConfiguration",
@@ -326,19 +331,39 @@ function ensureXcodeProject(config) {
         { value: IDS.resourcesPhase, comment: "Resources" },
       ],
       buildRules: [],
-      dependencies: [],
+      dependencies: [{ value: IDS.targetDependency, comment: `PBXTargetDependency` }],
       name: `${name}Tests`,
       productName: `${name}Tests`,
       productReference: IDS.testProductRef,
       productReference_comment: `${name}Tests.xctest`,
       productType: '"com.apple.product-type.bundle.unit-test"',
     });
+    objects.PBXContainerItemProxy = objects.PBXContainerItemProxy || {};
+    objects.PBXTargetDependency = objects.PBXTargetDependency || {};
+    addCommentedObject(objects.PBXContainerItemProxy, IDS.targetProxy, "PBXContainerItemProxy", {
+      isa: "PBXContainerItemProxy",
+      containerPortal: rootProjectId,
+      containerPortal_comment: "Project object",
+      proxyType: 1,
+      remoteGlobalIDString: appTargetId,
+      remoteInfo: name,
+    });
+    addCommentedObject(objects.PBXTargetDependency, IDS.targetDependency, "PBXTargetDependency", {
+      isa: "PBXTargetDependency",
+      target: appTargetId,
+      target_comment: name,
+      targetProxy: IDS.targetProxy,
+      targetProxy_comment: "PBXContainerItemProxy",
+    });
     if (!rootProject.targets.some((target) => target.value === IDS.testTarget)) {
       rootProject.targets.push({ value: IDS.testTarget, comment: `${name}Tests` });
     }
     rootProject.attributes = rootProject.attributes || {};
     rootProject.attributes.TargetAttributes = rootProject.attributes.TargetAttributes || {};
-    rootProject.attributes.TargetAttributes[IDS.testTarget] = { CreatedOnToolsVersion: "26.0" };
+    rootProject.attributes.TargetAttributes[IDS.testTarget] = {
+      CreatedOnToolsVersion: "26.0",
+      TestTargetID: appTargetId,
+    };
 
     const schemesRoot = path.join(
       config.modRequest.platformProjectRoot,

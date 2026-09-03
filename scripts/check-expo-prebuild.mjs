@@ -129,6 +129,9 @@ const generatedStoreKitScheme = fs.readFileSync(
   path.join(prebuildDir, "ios", "woof.xcodeproj", "xcshareddata", "xcschemes", "woof StoreKit.xcscheme"),
   "utf8"
 );
+const generatedStoreKitBuildAction = generatedStoreKitScheme.match(
+  /<BuildAction[\s\S]*?<\/BuildAction>/
+)?.[0] || "";
 const generatedStoreKitConfig = JSON.parse(fs.readFileSync(
   path.join(prebuildDir, "ios", "woof", "Woof.storekit"),
   "utf8"
@@ -148,8 +151,10 @@ assert(
 assert(
   generatedPbxProject.includes("woofTests.xctest")
     && generatedPbxProject.includes("WoofConfigurationTests.swift in Sources")
-    && generatedPbxProject.includes("Woof.storekit in Resources"),
-  "Expo prebuild did not create the native StoreKit test target"
+    && generatedPbxProject.includes("Woof.storekit in Resources")
+    && generatedPbxProject.includes('TEST_HOST = "$(BUILT_PRODUCTS_DIR)/woof.app/woof"')
+    && generatedPbxProject.includes("PBXTargetDependency"),
+  "Expo prebuild did not create the hosted native StoreKit test target"
 );
 assert(
   !generatedNormalScheme.includes("StoreKitConfigurationFileReference")
@@ -162,6 +167,11 @@ assert(
     && generatedStoreKitScheme.includes("woofTests.xctest")
     && generatedStoreKitScheme.includes('buildForArchiving = "NO"'),
   "StoreKit scheme must be simulator-only, reference Woof.storekit, and include its test target"
+);
+assert(
+  generatedStoreKitBuildAction.includes('BuildableName = "woofTests.xctest"')
+    && generatedStoreKitBuildAction.includes('BuildableName = "woof.app"'),
+  "StoreKit test builds must include the application host and test bundle"
 );
 assert(
   fs.existsSync(path.join(prebuildDir, "android", "settings.gradle")),
