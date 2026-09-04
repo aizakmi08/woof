@@ -1,6 +1,6 @@
 const APP_NAME = "Woof";
 const SUPPORT_EMAIL = "woofapp.help@gmail.com";
-const EFFECTIVE_DATE = "March 16, 2026";
+const EFFECTIVE_DATE = "August 24, 2026";
 
 const baseStyles = `
   <style>
@@ -32,39 +32,47 @@ export const PRIVACY_HTML = `<!DOCTYPE html>
 <h1>Privacy Policy</h1>
 <p class="date">Effective: ${EFFECTIVE_DATE}</p>
 
-<p>${APP_NAME} ("we", "our", "us") is a pet food analysis app. This policy explains how we collect, use, and protect your information.</p>
+<p>${APP_NAME} ("we", "our", "us") is a pet food and pet safety scanning app. This policy explains how we collect, use, and protect your information.</p>
 
 <h2>Information We Collect</h2>
 <ul>
-  <li><strong>Account information:</strong> email address and display name when you sign in with Apple or Google.</li>
-  <li><strong>Photos:</strong> images of pet food labels you scan. Photos are sent to our servers for analysis and are not stored after processing.</li>
+  <li><strong>Guest and account information:</strong> a guest account identifier when you use the app without signing in, plus email address and display name if you later sign in with Apple or Google.</li>
+  <li><strong>Camera images:</strong> images of pet food labels or human food items you scan. Images are sent to our servers for analysis, including analysis by Anthropic's Claude, and are not stored permanently by ${APP_NAME} after processing.</li>
   <li><strong>Barcodes:</strong> barcode numbers you scan, used to look up product information.</li>
-  <li><strong>Scan history:</strong> product names, scores, and analysis results are stored to provide your history.</li>
-  <li><strong>Device information:</strong> device type and OS version for app functionality and troubleshooting.</li>
+  <li><strong>Product searches:</strong> product names and terms you type, used to return catalog results and diagnose search quality.</li>
+  <li><strong>Scan history:</strong> product or food names, scores or safety levels, analysis results, scan modes, and scan dates are stored to provide your history.</li>
+  <li><strong>Pet Profile:</strong> pet name, species, life stage, and ingredients you choose to avoid are stored with your guest profile or signed-in account to personalize ingredient checks.</li>
+  <li><strong>Subscription information:</strong> subscription status and purchase events are processed by RevenueCat and the app stores so we can unlock paid features.</li>
+  <li><strong>Apple Search Ads attribution:</strong> on iOS, RevenueCat may collect Apple Search Ads attribution through Apple's AdServices framework so we can measure whether Apple Search Ads campaigns lead to app use or subscriptions. We do not use IDFA for this.</li>
+  <li><strong>Operational logs and crash reports:</strong> request timing, service usage, app version, device/platform details, errors, and crash diagnostics may be processed for app functionality, abuse prevention, and troubleshooting.</li>
 </ul>
 
 <h2>How We Use Your Information</h2>
 <ul>
-  <li>Analyze pet food ingredients and provide quality scores using AI.</li>
+  <li>Analyze pet food ingredients, check human-food safety for pets, and generate reports using AI.</li>
   <li>Display your scan history.</li>
+  <li>Personalize ingredient checks using the pet profile you provide.</li>
   <li>Cache analysis results to improve performance.</li>
   <li>Process subscription purchases.</li>
+  <li>Measure Apple Search Ads attribution and diagnose crashes, errors, and reliability issues.</li>
 </ul>
 
 <h2>AI-Generated Content</h2>
-<p>${APP_NAME} uses artificial intelligence (Anthropic's Claude) to analyze pet food labels and generate ingredient ratings, quality scores, and recommendations. <strong>AI-generated content may contain errors, inaccuracies, or omissions.</strong> Scores and analysis should be treated as informational estimates, not definitive assessments. We do not guarantee the accuracy, completeness, or reliability of any AI-generated analysis. Always verify important dietary decisions with your veterinarian.</p>
+<p>${APP_NAME} uses artificial intelligence (Anthropic's Claude) to analyze pet food labels and human-food images and generate ingredient ratings, quality scores, pet-safety guidance, and recommendations. <strong>AI-generated content may contain errors, inaccuracies, or omissions.</strong> Scores and analysis should be treated as informational estimates, not definitive assessments. We do not guarantee the accuracy, completeness, or reliability of any AI-generated analysis. Always verify important dietary decisions with your veterinarian.</p>
 
 <h2>Third-Party Services</h2>
 <ul>
   <li><strong>Supabase:</strong> authentication and data storage.</li>
-  <li><strong>Anthropic (Claude):</strong> AI-powered ingredient analysis. Label photos are sent to their API for processing.</li>
+  <li><strong>Anthropic (Claude):</strong> AI-powered ingredient and pet-safety analysis. Pet-food label and human-food images are sent to their API for processing.</li>
   <li><strong>Open Pet Food Facts:</strong> product database lookups by barcode.</li>
-  <li><strong>RevenueCat:</strong> subscription management.</li>
-  <li><strong>Apple / Google:</strong> sign-in authentication.</li>
+  <li><strong>RevenueCat:</strong> subscription management and Apple Search Ads attribution measurement.</li>
+  <li><strong>Apple Ads / AdServices:</strong> Apple Search Ads attribution on iOS without IDFA.</li>
+  <li><strong>Sentry:</strong> crash reporting and error diagnostics.</li>
+  <li><strong>Apple / Google:</strong> optional sign-in authentication.</li>
 </ul>
 
 <h2>Data Retention</h2>
-<p>Your scan history and cached analyses are retained while your account is active. You can delete your account and all associated data at any time from the Profile screen in the app.</p>
+<p>Your scan history and cached analyses are retained while your guest profile or signed-in account is active. You can delete your guest data or account and associated data at any time from the Profile screen in the app. Deletion removes your account, scan history, typed-search event records, scan usage records, linkable operational analytics, subscription webhook records associated with your app user ID, and local on-device scan/result caches. We retain only a one-way hashed deletion marker to prevent delayed subscription webhooks from recreating your identifier. App Store or Google Play purchase records may remain with the store for billing and legal reasons.</p>
 
 <h2>Data Security</h2>
 <p>We use industry-standard security measures including encrypted connections (HTTPS), server-side API key management, and row-level security policies on our database.</p>
@@ -97,12 +105,12 @@ export const TERMS_HTML = `<!DOCTYPE html>
 <p>The information provided by ${APP_NAME} is for informational purposes only. It is not a substitute for professional veterinary advice, diagnosis, or treatment. Always consult your veterinarian with questions about your pet's diet. Do not make feeding decisions based solely on ${APP_NAME}'s AI-generated analysis.</p>
 
 <h2>Account</h2>
-<p>You must sign in with Apple or Google to use the App. You are responsible for maintaining the security of your account.</p>
+<p>You can use the App with a guest profile. Apple or Google sign-in is optional and helps preserve your scan history and subscription access across devices. You are responsible for maintaining the security of your signed-in account.</p>
 
 <h2>Free Scans & Subscriptions</h2>
 <ul>
-  <li>${APP_NAME} provides 3 free scans with limited results. Free scans show the overall score, quick stats, a summary verdict, and the first 3 ingredients. Full ingredient details, quality breakdown, reviews, and recall history require a paid subscription.</li>
-  <li>Some features require a paid subscription (Woof Pro).</li>
+  <li>${APP_NAME} provides 3 free scans. Free results show the overall score, quick stats, a summary verdict, verification details, and the full ingredient list. Scan history is included with free use and is not a paid feature.</li>
+  <li>${APP_NAME} Pro provides unlimited scans, detailed ingredient explanations, quality breakdown, and nutrition facts. Current pricing is shown in the app and App Store.</li>
   <li>Subscriptions are billed through Apple's App Store or Google Play. Some plans include a free trial period. If you cancel before the trial ends, you will not be charged. After the trial, your subscription renews automatically at the plan price until you cancel.</li>
   <li>Payment is charged to your Apple ID or Google Play account at confirmation of purchase, or at the end of the free trial period if applicable.</li>
   <li>You can manage or cancel subscriptions in your device's subscription settings at any time.</li>

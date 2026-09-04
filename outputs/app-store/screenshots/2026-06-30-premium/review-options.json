@@ -1,0 +1,10 @@
+{
+  "title": "Woof premium App Store screenshot pack",
+  "summary": "Premium product-proof App Store composites with deterministic copy, claim-safe UI, exact export sizes, and generated no-text polish layers.",
+  "output": "review-board.html",
+  "preset": "image-wall",
+  "showCaptions": true,
+  "minTileWidth": 220,
+  "contactSheetColumns": 3,
+  "contactSheetThumb": 360
+}

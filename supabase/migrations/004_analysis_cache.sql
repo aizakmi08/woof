@@ -44,9 +44,15 @@ CREATE POLICY "Service role can delete cache"
   USING (auth.role() = 'service_role');
 
 -- Function to increment hit count atomically
-CREATE OR REPLACE FUNCTION increment_cache_hit(p_key TEXT)
-RETURNS void AS $$
-  UPDATE analysis_cache
+CREATE OR REPLACE FUNCTION public.increment_cache_hit(p_key TEXT)
+RETURNS void
+LANGUAGE SQL
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  UPDATE public.analysis_cache
   SET hit_count = hit_count + 1, last_hit_at = NOW()
   WHERE cache_key = p_key;
-$$ LANGUAGE SQL;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.increment_cache_hit(TEXT) TO authenticated;

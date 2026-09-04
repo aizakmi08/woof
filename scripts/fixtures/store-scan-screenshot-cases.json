@@ -1,0 +1,13 @@
+[
+  { "id": "hills-perfect-digestion-dog", "file": "IMG_4089.PNG", "terms": ["hill", "science diet", "perfect digestion"], "petType": "dog", "foodForm": "dry" },
+  { "id": "blue-life-protection-adult", "file": "IMG_4091.PNG", "terms": ["blue buffalo", "life protection", "chicken", "brown rice"], "petType": "dog", "foodForm": "dry" },
+  { "id": "open-farm-wild-salmon", "file": "IMG_4094.PNG", "terms": ["open farm", "wild caught salmon"], "petType": "dog", "foodForm": "dry" },
+  { "id": "honest-kitchen-turkey-broth", "file": "IMG_4096.PNG", "terms": ["honest kitchen", "daily boosters", "turkey", "bone broth"], "petType": "", "foodForm": "", "expectedStatus": "excluded" },
+  { "id": "honest-kitchen-beef-superfoods", "file": "IMG_4098.PNG", "terms": ["honest kitchen", "whole food clusters", "beef", "superfoods"], "petType": "dog", "foodForm": "dry" },
+  { "id": "stella-chewys-salmon-cod-mixer", "file": "IMG_4099.PNG", "terms": ["stella", "chewy", "meal mixers", "salmon", "cod"], "petType": "", "foodForm": "", "expectedStatus": "excluded" },
+  { "id": "instinct-freshdried-chicken-harvest", "file": "IMG_4103.PNG", "terms": ["instinct", "freshdried", "chicken", "harvest"], "petType": "dog", "foodForm": "freeze-dried" },
+  { "id": "instinct-healthy-cravings-chicken", "file": "IMG_4105.PNG", "terms": ["instinct", "healthy cravings", "chicken"], "petType": "", "foodForm": "", "expectedStatus": "excluded" },
+  { "id": "instinct-raw-boost-gut-health", "file": "IMG_4107.PNG", "terms": ["instinct", "raw boost", "mixers", "gut health"], "petType": "", "foodForm": "", "expectedStatus": "excluded" },
+  { "id": "wellness-core-wild-game", "file": "IMG_4108.PNG", "terms": ["wellness", "core", "wild game"], "petType": "dog", "foodForm": "dry" },
+  { "id": "wellness-complete-health-chicken-stew", "file": "IMG_4110.PNG", "terms": ["wellness", "complete health", "chicken stew", "peas", "carrots"], "petType": "dog", "foodForm": "wet" }
+]

@@ -1,7 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   StyleSheet,
-  Text,
   View,
   Pressable,
   Alert,
@@ -9,6 +8,7 @@ import {
   Platform,
   Modal,
 } from "react-native";
+import { AppText as Text, MAX_FONT_SIZE_MULTIPLIER } from "../components/AppText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Animated, {
   useSharedValue,
@@ -17,26 +17,14 @@ import Animated, {
   FadeInDown,
 } from "react-native-reanimated";
 import { WebView } from "react-native-webview";
-import Svg, { Path } from "react-native-svg";
-import { X } from "lucide-react-native";
+import { UserRound, X } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
-import { useAuth } from "../services/auth";
+import { anonymousSignInErrorKind, useAuth } from "../services/auth";
 import { useTheme, Colors, Spacing, Shadows, Typography } from "../theme";
 import { PRIVACY_HTML, TERMS_HTML } from "../legal";
-
-function AppLogo({ size = 48 }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 1024 1024">
-      <Path d="M503.336 454.671C513.775 453.303 528.487 456.332 538.452 459.545C562.736 466.887 583.104 488.258 594.653 510.351C605.092 530.321 607.692 537.7 628.016 549.433C623.093 551.323 617.848 552.825 612.908 554.843C596.003 561.751 581.59 570.297 568.992 583.495C553.892 599.314 545.305 616.66 540.672 637.914C539.318 644.129 537.675 651.946 537.815 658.305C508.944 654.534 492.551 656.384 465.13 666.999C451.055 672.51 439.733 676.433 424.872 678.762C386.3 684.809 355.707 669.364 350.754 628.227C347.659 602.528 354.074 572.475 378.049 557.873C388.219 551.679 399.794 548.695 407.921 539.431C421.226 525.324 425.723 507.914 437.897 492.618C456.132 469.707 474.69 458.41 503.336 454.671Z" fill="#1C1C1E" />
-      <Path d="M645.446 570.243C695.669 566.239 739.617 603.735 743.571 653.962C747.525 704.189 709.986 748.1 659.755 752.004C609.594 755.903 565.758 718.428 561.809 668.271C557.861 618.114 595.293 574.241 645.446 570.243Z" fill="#1C1C1E" />
-      <Path fill="#64D161" d="M685.654 627.076C690.778 626.769 697.132 627.744 700.715 631.541C714.89 646.566 694.777 661.797 685.469 670.956L666.929 689.315C643.227 712.71 637.731 706.417 617.421 684.7C610.037 677.999 599.147 669.823 599.633 658.853C599.877 654.351 601.901 650.129 605.259 647.12C619.365 634.456 635.58 654.955 643.912 664.705C655.464 653.768 672.808 632.747 685.654 627.076Z" />
-      <Path d="M430.039 275.677C440.247 273.906 454.194 278.484 462.724 283.981C509.697 314.249 509.812 408.041 448.083 420.925C435.157 422.777 421.032 418.117 410.639 410.459C367.718 378.834 367.362 284.414 430.039 275.677Z" fill="#1C1C1E" />
-      <Path d="M583.789 275.6C615.436 273.391 635.569 301.136 639.635 330.048C645.08 368.759 625.046 415.489 582.232 421.272C573.643 422.464 561.098 418.345 554.017 413.56C519.463 390.215 517.694 336.201 539.758 303.824C551.184 287.056 564.377 279.332 583.789 275.6Z" fill="#1C1C1E" />
-      <Path d="M682.257 394.627C691.705 393.739 702.144 395.464 709.887 401.097C739.194 422.419 737.537 468.586 718.104 495.882C708.376 509.546 696.757 517.046 680.609 519.898C627.366 522.232 617.919 452.938 643.53 418.512C654.159 404.226 664.927 397.632 682.257 394.627Z" fill="#1C1C1E" />
-      <Path d="M327.359 393.594C377.914 388.979 407.507 460.303 380.078 499.819C373.494 509.341 363.389 515.849 351.996 517.903C346.536 518.801 341.914 518.338 336.432 517.39C288.519 509.102 268.964 429.347 308.82 400.949C314.505 396.899 320.563 395.077 327.359 393.594Z" fill="#1C1C1E" />
-    </Svg>
-  );
-}
+import { trackEvent } from "../services/analytics";
+import { BrandLogo } from "../components/BrandLogo";
+import { BRAND_NAME, BRAND_TAGLINE } from "../config/brand";
 
 function AuthButton({ onPress, onPressIn, onPressOut, style, children, disabled, accessibilityLabel }) {
   return (
@@ -54,32 +42,88 @@ function AuthButton({ onPress, onPressIn, onPressOut, style, children, disabled,
   );
 }
 
+function providerErrorCopy(provider, error) {
+  const code = String(error?.code || "").toLowerCase();
+  const message = String(error?.message || "").toLowerCase();
+
+  if (code === "err_request_canceled" || code === "err_request_cancelled") {
+    return null;
+  }
+
+  if (
+    provider === "apple" &&
+    (
+      code === "err_request_unknown" ||
+      message.includes("unknown reason") ||
+      message.includes("authorizationerror error 1000")
+    )
+  ) {
+    return {
+      title: "Apple Sign-In Unavailable",
+      message: "Apple Sign-In needs an Apple Account on this device. Sign in to iCloud in Settings or continue with Google.",
+    };
+  }
+
+  return {
+    title: "Sign In Failed",
+    message: `We couldn't sign you in with ${provider === "apple" ? "Apple" : "Google"}. Please try again or use another sign-in option.`,
+  };
+}
+
 export default function AuthScreen() {
   const theme = useTheme();
-  const { signInWithApple, signInWithGoogle } = useAuth();
+  const {
+    anonymousUnavailable,
+    signInWithApple,
+    signInWithGoogle,
+    startAnonymousSession,
+  } = useAuth();
   const [loadingApple, setLoadingApple] = useState(false);
   const [loadingGoogle, setLoadingGoogle] = useState(false);
+  const [loadingGuest, setLoadingGuest] = useState(false);
   const [legalModal, setLegalModal] = useState(null); // { title, html } or null
 
   const appleScale = useSharedValue(1);
   const googleScale = useSharedValue(1);
+  const guestScale = useSharedValue(1);
   const appleAnimStyle = useAnimatedStyle(() => ({
     transform: [{ scale: appleScale.value }],
   }));
   const googleAnimStyle = useAnimatedStyle(() => ({
     transform: [{ scale: googleScale.value }],
   }));
+  const guestAnimStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: guestScale.value }],
+  }));
 
   const spring = { damping: 15, stiffness: 150 };
+
+  useEffect(() => {
+    trackEvent("auth_viewed", {
+      guest_option_available: !anonymousUnavailable,
+      apple_available: Platform.OS === "ios",
+      google_available: true,
+    });
+  }, [anonymousUnavailable]);
 
   const handleApple = async () => {
     try {
       setLoadingApple(true);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      trackEvent("auth_sign_in_started", { provider: "apple" });
       await signInWithApple();
+      trackEvent("auth_sign_in_completed_client", { provider: "apple" });
     } catch (err) {
-      if (err.code !== "ERR_REQUEST_CANCELED") {
-        Alert.alert("Sign In Failed", err.message);
+      const errorCopy = providerErrorCopy("apple", err);
+      if (errorCopy) {
+        trackEvent("auth_sign_in_failed", {
+          provider: "apple",
+          code: err.code,
+          message: err.message,
+        });
+        Alert.alert(errorCopy.title, errorCopy.message);
+      } else {
+        trackEvent("auth_sign_in_cancelled", { provider: "apple" });
       }
     } finally {
       setLoadingApple(false);
@@ -90,15 +134,53 @@ export default function AuthScreen() {
     try {
       setLoadingGoogle(true);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      trackEvent("auth_sign_in_started", { provider: "google" });
       await signInWithGoogle();
+      trackEvent("auth_sign_in_completed_client", { provider: "google" });
     } catch (err) {
-      Alert.alert("Sign In Failed", err.message);
+      const errorCopy = providerErrorCopy("google", err);
+      if (!errorCopy) {
+        trackEvent("auth_sign_in_cancelled", { provider: "google" });
+      } else {
+        trackEvent("auth_sign_in_failed", {
+          provider: "google",
+          code: err.code,
+          message: err.message,
+        });
+        Alert.alert(errorCopy.title, errorCopy.message);
+      }
     } finally {
       setLoadingGoogle(false);
     }
   };
 
-  const isLoading = loadingApple || loadingGoogle;
+  const handleGuest = async () => {
+    try {
+      setLoadingGuest(true);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      trackEvent("guest_continue_started", { source: "auth_screen" });
+      await startAnonymousSession({ automatic: false });
+      trackEvent("guest_continue_completed", { source: "auth_screen" });
+    } catch (err) {
+      const failureKind = anonymousSignInErrorKind(err);
+      trackEvent("guest_continue_failed", {
+        source: "auth_screen",
+        code: err.code,
+        failure_kind: failureKind,
+        message: err.message,
+      });
+      Alert.alert(
+        failureKind === "capability" ? "Guest Mode Unavailable" : "Couldn't Start Guest Mode",
+        failureKind === "capability"
+          ? "Guest access is not enabled right now. Continue with Apple or Google."
+          : "Check your connection and try again. You can also continue with Apple or Google."
+      );
+    } finally {
+      setLoadingGuest(false);
+    }
+  };
+
+  const isLoading = loadingApple || loadingGoogle || loadingGuest;
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.bg }]}>
@@ -108,14 +190,15 @@ export default function AuthScreen() {
           entering={FadeInDown.delay(100).duration(500).springify()}
           style={styles.brandRow}
         >
-          <AppLogo size={64} />
-          <Text style={[styles.brand, { color: theme.textPrimary }]}>Woof</Text>
+          <BrandLogo size={64} />
+          <Text style={[styles.brand, { color: theme.textPrimary }]}>{BRAND_NAME}</Text>
         </Animated.View>
         <Animated.Text
+          maxFontSizeMultiplier={MAX_FONT_SIZE_MULTIPLIER}
           entering={FadeInDown.delay(200).duration(500).springify()}
           style={[styles.tagline, { color: theme.textTertiary }]}
         >
-          Know what's in the bowl
+          {BRAND_TAGLINE}
         </Animated.Text>
       </View>
 
@@ -191,9 +274,41 @@ export default function AuthScreen() {
           </AuthButton>
         </Animated.View>
 
+        <Animated.View
+          entering={FadeInDown.delay(Platform.OS === "ios" ? 500 : 400).duration(400).springify()}
+        >
+          <AuthButton
+            onPress={handleGuest}
+            onPressIn={() => { guestScale.value = withSpring(0.97, spring); }}
+            onPressOut={() => { guestScale.value = withSpring(1, spring); }}
+            disabled={isLoading}
+            accessibilityLabel={anonymousUnavailable ? "Retry guest mode" : "Continue as guest"}
+          >
+            <Animated.View
+              style={[
+                styles.button,
+                styles.guestButton,
+                { backgroundColor: theme.surface, borderColor: theme.separator },
+                guestAnimStyle,
+              ]}
+            >
+              {loadingGuest ? (
+                <ActivityIndicator color={theme.textPrimary} />
+              ) : (
+                <>
+                  <UserRound size={19} color={theme.textPrimary} strokeWidth={2} />
+                  <Text style={[styles.buttonText, { color: theme.textPrimary }]}>
+                    {anonymousUnavailable ? "Retry Guest Mode" : "Continue as Guest"}
+                  </Text>
+                </>
+              )}
+            </Animated.View>
+          </AuthButton>
+        </Animated.View>
+
         {/* Legal */}
         <Animated.View
-          entering={FadeInDown.delay(500).duration(400).springify()}
+          entering={FadeInDown.delay(Platform.OS === "ios" ? 600 : 500).duration(400).springify()}
           style={styles.legalContainer}
         >
           <Text style={[styles.legalText, { color: theme.textTertiary }]}>
@@ -205,6 +320,8 @@ export default function AuthScreen() {
               setLegalModal({ title: "Terms of Use", html: TERMS_HTML });
             }}
             style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
+            accessibilityRole="link"
+            accessibilityLabel="Terms of Use"
           >
             <Text style={[styles.legalLink, { color: theme.textTertiary }]}>Terms</Text>
           </Pressable>
@@ -215,6 +332,8 @@ export default function AuthScreen() {
               setLegalModal({ title: "Privacy Policy", html: PRIVACY_HTML });
             }}
             style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
+            accessibilityRole="link"
+            accessibilityLabel="Privacy Policy"
           >
             <Text style={[styles.legalLink, { color: theme.textTertiary }]}>Privacy Policy</Text>
           </Pressable>
@@ -237,6 +356,8 @@ export default function AuthScreen() {
               onPress={() => setLegalModal(null)}
               hitSlop={12}
               style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
+              accessibilityRole="button"
+              accessibilityLabel="Close legal document"
             >
               <View style={[styles.modalClose, { backgroundColor: theme.surface }]}>
                 <X size={16} color={theme.textSecondary} strokeWidth={2} />
@@ -273,7 +394,7 @@ const styles = StyleSheet.create({
   brand: {
     fontSize: 48,
     fontWeight: "700",
-    letterSpacing: -1,
+    letterSpacing: 0,
   },
   tagline: {
     ...Typography.body,
@@ -295,6 +416,31 @@ const styles = StyleSheet.create({
   appleButton: {},
   googleButton: {
     borderWidth: 1,
+  },
+  guestButton: {
+    borderWidth: 1,
+  },
+  guestUnavailable: {
+    minHeight: Spacing.buttonHeight,
+    borderRadius: Spacing.buttonRadius,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
+  guestUnavailableCopy: {
+    flexShrink: 1,
+  },
+  guestUnavailableTitle: {
+    ...Typography.body,
+    fontWeight: "600",
+  },
+  guestUnavailableBody: {
+    ...Typography.caption,
+    marginTop: 2,
   },
   appleIcon: {
     fontSize: 20,

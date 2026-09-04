@@ -1,0 +1,14 @@
+{
+  "id": "review-renderer-materialized",
+  "action": "write_moodboard_widget_payload",
+  "label": "Materialized Creative Production image review",
+  "createdAt": "2026-06-30T00:58:15.921688Z",
+  "timestamp": "2026-06-30T00:58:15.921688Z",
+  "title": "Woof premium App Store screenshot pack",
+  "summary": "Premium product-proof App Store composites with deterministic copy, claim-safe UI, exact export sizes, and generated no-text polish layers.",
+  "itemCount": 18,
+  "runDirectory": "/Users/admin/Documents/woof/outputs/app-store/screenshots/2026-06-30-premium",
+  "streamPath": "/Users/admin/Documents/woof/outputs/app-store/screenshots/2026-06-30-premium/data/stream.json",
+  "runStatePath": "/Users/admin/Documents/woof/outputs/app-store/screenshots/2026-06-30-premium/run-state.json",
+  "latestActionPath": "/Users/admin/Documents/woof/outputs/app-store/screenshots/2026-06-30-premium/latest-action.json"
+}

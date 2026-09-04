@@ -20,7 +20,7 @@ export function createStyles(theme) {
     },
     headerBorder: {
       borderBottomWidth: 0.5,
-      borderBottomColor: Colors.divider,
+      borderBottomColor: theme.separator,
     },
     backButton: {
       width: 40,
@@ -64,7 +64,7 @@ export function createStyles(theme) {
     scrollContent: {
       paddingHorizontal: Spacing.screenPadding,
       paddingBottom: 60,
-      paddingTop: Spacing.sm,
+      paddingTop: Spacing.md,
     },
 
     // --- Loading / Streaming ---
@@ -115,7 +115,7 @@ export function createStyles(theme) {
       width: 7,
       height: 7,
       borderRadius: 3.5,
-      backgroundColor: Colors.textPrimary,
+      backgroundColor: theme.textPrimary,
     },
 
     // Product name preview (barcode loading)
@@ -208,7 +208,7 @@ export function createStyles(theme) {
     dataSourceText: {
       ...Typography.smallLabel,
       textTransform: "uppercase",
-      letterSpacing: 0.5,
+      letterSpacing: 0,
     },
 
     // --- Nutriscore / NOVA badges ---
@@ -275,34 +275,206 @@ export function createStyles(theme) {
     },
     heroScoreNumber: {
       ...Typography.scoreLarge,
+      fontSize: 40,
     },
     heroGradeLabel: {
       ...Typography.scoreLabel,
       marginTop: 4,
     },
 
-    // --- Product name ---
+    // --- Product identity ---
+    productIdentityCard: {
+      minHeight: 132,
+      flexDirection: "row",
+      alignItems: "center",
+      borderRadius: Spacing.cardRadius,
+      borderCurve: "continuous",
+      borderWidth: 1,
+      padding: 14,
+      gap: 14,
+    },
+    productIdentityCopy: {
+      flex: 1,
+      minWidth: 0,
+    },
+    productEyebrow: {
+      fontSize: 10,
+      fontWeight: "700",
+      letterSpacing: 0,
+      marginBottom: 5,
+    },
     productName: {
       color: theme.textPrimary,
-      fontSize: 22,
-      fontWeight: "600",
-      letterSpacing: -0.3,
-      textAlign: "center",
-      paddingHorizontal: 20,
-      marginTop: 16,
+      fontSize: 18,
+      fontWeight: "700",
+      lineHeight: 23,
+      letterSpacing: 0,
+    },
+    productVariant: {
+      color: theme.textSecondary,
+      fontSize: 12,
+      fontWeight: "500",
+      lineHeight: 17,
+      marginTop: 5,
+    },
+    productImageHero: {
+      alignItems: "center",
+      justifyContent: "center",
+      width: 104,
+      height: 104,
+    },
+    productImage: {
+      width: 104,
+      height: 104,
+      borderRadius: 14,
+      borderCurve: "continuous",
+      backgroundColor: "#FFFFFF",
+    },
+    productEvidenceLine: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      marginTop: 8,
+    },
+    productEvidenceText: {
+      flex: 1,
+      minWidth: 0,
+      fontSize: 11,
+      fontWeight: "700",
+      lineHeight: 15,
+    },
+
+    personalizedWarning: {
+      width: "100%",
+      minHeight: 104,
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 12,
+      borderRadius: Spacing.cardRadius,
+      borderCurve: "continuous",
+      borderWidth: 2,
+      padding: Spacing.cardPadding,
+      marginTop: 14,
+    },
+    personalizedWarningIcon: {
+      width: 42,
+      height: 42,
+      borderRadius: 21,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    personalizedWarningCopy: {
+      flex: 1,
+      minWidth: 0,
+    },
+    personalizedWarningEyebrow: {
+      fontSize: 11,
+      lineHeight: 15,
+      fontWeight: "800",
+      letterSpacing: 0,
+      marginBottom: 4,
+    },
+    personalizedWarningTitle: {
+      fontSize: 18,
+      lineHeight: 23,
+      fontWeight: "800",
+    },
+    personalizedWarningSummary: {
+      fontSize: 14,
+      lineHeight: 20,
+      fontWeight: "500",
+      marginTop: 5,
+    },
+
+    // --- Score overview ---
+    scoreOverviewCard: {
+      flexDirection: "row",
+      alignItems: "center",
+      borderRadius: Spacing.cardRadius,
+      borderCurve: "continuous",
+      borderWidth: 1,
+      padding: 14,
+      gap: 16,
+      marginTop: 14,
+      marginBottom: 14,
+    },
+    scoreOverviewCopy: {
+      flex: 1,
+      minWidth: 0,
+    },
+    scoreOverviewEyebrow: {
+      fontSize: 10,
+      fontWeight: "700",
+      letterSpacing: 0,
+      marginBottom: 6,
+    },
+    scoreOverviewTitle: {
+      fontSize: 20,
+      fontWeight: "700",
+      letterSpacing: 0,
+      marginBottom: 5,
+    },
+    scoreOverviewText: {
+      fontSize: 13,
+      fontWeight: "400",
+      lineHeight: 18,
+    },
+    petVerdictHero: {
+      minHeight: 54,
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 8,
+      borderRadius: 10,
+      borderWidth: 1,
+      padding: 10,
+      marginTop: 10,
+    },
+    petVerdictHeroCopy: {
+      flex: 1,
+      minWidth: 0,
+    },
+    petVerdictHeroEyebrow: {
+      fontSize: 9,
+      fontWeight: "800",
+      letterSpacing: 0,
+      marginBottom: 2,
+    },
+    petVerdictHeroTitle: {
+      fontSize: 13,
+      fontWeight: "700",
+      lineHeight: 17,
+    },
+    petVerdictHeroSummary: {
+      fontSize: 11,
+      fontWeight: "400",
+      lineHeight: 15,
+      marginTop: 3,
+    },
+    petVerdictHeroPrompt: {
+      flex: 1,
+      fontSize: 12,
+      fontWeight: "700",
+      lineHeight: 17,
     },
 
     // --- Quick Stats 2x2 Grid ---
     statsGrid: {
       flexDirection: "row",
       flexWrap: "wrap",
-      gap: 10,
+      gap: 8,
+      backgroundColor: theme.card,
+      borderRadius: Spacing.cardRadius,
+      borderCurve: "continuous",
+      borderWidth: 1,
+      borderColor: theme.separator,
+      padding: 8,
     },
     statCell: {
-      backgroundColor: Colors.surface,
-      borderRadius: Spacing.cardRadius,
-      paddingVertical: 14,
-      paddingHorizontal: 14,
+      backgroundColor: theme.surface,
+      borderRadius: 12,
+      borderCurve: "continuous",
+      paddingVertical: 12,
+      paddingHorizontal: 10,
       alignItems: "center",
       flexBasis: "47%",
       flexGrow: 1,
@@ -312,17 +484,19 @@ export function createStyles(theme) {
     },
     statCellLabel: {
       ...Typography.statLabel,
+      color: theme.textTertiary,
       marginBottom: 4,
     },
     statCellValue: {
       ...Typography.statValue,
+      color: theme.textPrimary,
       fontSize: 15,
       textAlign: "center",
     },
 
     // --- Verdict card (colored left border) ---
     verdictCard: {
-      backgroundColor: Colors.verdictBackground,
+      backgroundColor: theme.card,
       borderRadius: Spacing.cardRadius,
       padding: Spacing.cardPadding,
       marginTop: Spacing.subsectionGap,
@@ -379,68 +553,6 @@ export function createStyles(theme) {
       flex: 1,
     },
 
-    // --- Customer Reviews (card with accent border) ---
-    reviewCard: {
-      backgroundColor: theme.card,
-      borderRadius: Spacing.cardRadius,
-      padding: Spacing.cardPadding,
-      marginTop: Spacing.sectionGap,
-      borderLeftWidth: 3,
-      ...Shadows.card,
-    },
-    reviewHeaderRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-    },
-    reviewTitle: {
-      ...Typography.cardTitle,
-      color: theme.textPrimary,
-    },
-    reviewRatingRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 10,
-    },
-    reviewBigScore: {
-      fontSize: 28,
-      fontWeight: "800",
-      color: theme.textPrimary,
-    },
-    reviewCountText: {
-      ...Typography.caption,
-      color: theme.textTertiary,
-      marginTop: 4,
-    },
-    reviewSummary: {
-      fontSize: 15,
-      fontWeight: "400",
-      color: theme.textSecondary,
-      lineHeight: 22,
-      marginTop: Spacing.elementGap,
-    },
-    reviewTagSection: {
-      marginTop: Spacing.cardPadding,
-    },
-    reviewTagLabel: {
-      fontSize: 13,
-      fontWeight: "600",
-      marginBottom: Spacing.sm,
-    },
-    reviewTagsWrap: {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      gap: Spacing.sm,
-    },
-    reviewPill: {
-      paddingVertical: 8,
-      paddingHorizontal: 14,
-      borderRadius: 10,
-    },
-    reviewPillText: {
-      fontSize: 13,
-      fontWeight: "500",
-    },
     bulletRow: {
       flexDirection: "row",
       alignItems: "flex-start",
@@ -469,7 +581,7 @@ export function createStyles(theme) {
     },
     qualityHeaderDivider: {
       height: 0.5,
-      backgroundColor: Colors.divider,
+      backgroundColor: theme.separator,
       marginTop: Spacing.elementGap,
       marginBottom: Spacing.cardPadding,
     },
@@ -495,7 +607,7 @@ export function createStyles(theme) {
     },
     barTrack: {
       height: 6,
-      backgroundColor: Colors.divider,
+      backgroundColor: theme.separator,
       borderRadius: 3,
       overflow: "hidden",
     },
@@ -524,7 +636,7 @@ export function createStyles(theme) {
     },
     categoryDivider: {
       height: 0.5,
-      backgroundColor: Colors.divider,
+      backgroundColor: theme.separator,
       marginTop: 20,
       marginBottom: 20,
       marginLeft: Spacing.dividerIndent,
@@ -539,17 +651,29 @@ export function createStyles(theme) {
       color: theme.textPrimary,
       marginBottom: Spacing.elementGap,
     },
+    nutritionNote: {
+      ...Typography.caption,
+      color: theme.textTertiary,
+      lineHeight: 18,
+      marginTop: Spacing.sm,
+    },
+    nutritionConcern: {
+      ...Typography.captionBold,
+      color: Colors.ingredientBad,
+      lineHeight: 18,
+      marginTop: Spacing.xs,
+    },
     nutRow: {
       flexDirection: "row",
       alignItems: "center",
-      height: 44,
+      minHeight: 44,
     },
     nutCell: {
       flex: 1,
       flexDirection: "row",
       justifyContent: "space-between",
       alignItems: "center",
-      height: 44,
+      minHeight: 44,
       gap: 8,
     },
     nutCellLeft: {
@@ -592,11 +716,11 @@ export function createStyles(theme) {
     nutVertDivider: {
       width: 0.5,
       height: 20,
-      backgroundColor: Colors.divider,
+      backgroundColor: theme.separator,
     },
     nutHorizDivider: {
       height: 0.5,
-      backgroundColor: Colors.divider,
+      backgroundColor: theme.separator,
       marginHorizontal: Spacing.dividerIndent,
     },
     // Legacy NutritionRow (kept for compat)
@@ -616,62 +740,6 @@ export function createStyles(theme) {
       ...Typography.captionBold,
       textAlign: "right",
       flexShrink: 1,
-    },
-
-    // --- Recall Card ---
-    recallCardWarning: {
-      backgroundColor: Colors.recallBackground,
-      borderRadius: Spacing.cardRadius,
-      padding: Spacing.cardPadding,
-      marginTop: Spacing.sectionGap,
-      borderLeftWidth: 3,
-      borderLeftColor: Colors.recallBorder,
-    },
-    recallCardClean: {
-      backgroundColor: Colors.lovedPillBg,
-      borderRadius: Spacing.cardRadius,
-      padding: Spacing.cardPadding,
-      marginTop: Spacing.sectionGap,
-      borderLeftWidth: 3,
-      borderLeftColor: "rgba(52, 199, 89, 0.25)",
-    },
-    recallHeaderRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 6,
-      marginBottom: 6,
-    },
-    recallLabelWarning: {
-      fontSize: 11,
-      fontWeight: "600",
-      letterSpacing: 1.5,
-      textTransform: "uppercase",
-      color: "#EF4444",
-    },
-    recallLabelClean: {
-      fontSize: 11,
-      fontWeight: "600",
-      letterSpacing: 1.5,
-      textTransform: "uppercase",
-      color: "#16A34A",
-    },
-    recallTextWarning: {
-      fontSize: 14,
-      fontWeight: "400",
-      color: "#991B1B",
-      lineHeight: 20,
-    },
-    recallTextClean: {
-      fontSize: 14,
-      fontWeight: "400",
-      color: "#166534",
-      lineHeight: 20,
-    },
-    recallSeeDetails: {
-      fontSize: 14,
-      fontWeight: "600",
-      color: theme.textPrimary,
-      marginTop: Spacing.xs,
     },
 
     // --- Ingredients Section (flat, no card) ---
@@ -758,7 +826,7 @@ export function createStyles(theme) {
       ...Typography.smallLabel,
     },
     ingCatPill: {
-      backgroundColor: Colors.divider,
+      backgroundColor: theme.separator,
       paddingHorizontal: Spacing.sm,
       paddingVertical: Spacing.xs,
       borderRadius: 6,
@@ -766,16 +834,16 @@ export function createStyles(theme) {
     ingCatText: {
       fontSize: 10,
       fontWeight: "600",
-      color: Colors.textSecondary,
+      color: theme.textSecondary,
       textTransform: "uppercase",
-      letterSpacing: 1,
+      letterSpacing: 0,
     },
     ingChevron: {
       marginLeft: Spacing.sm,
     },
     ingDivider: {
       height: StyleSheet.hairlineWidth,
-      backgroundColor: Colors.divider,
+      backgroundColor: theme.separator,
       marginTop: Spacing.md,
       marginLeft: 24,
     },
@@ -786,7 +854,7 @@ export function createStyles(theme) {
       paddingVertical: 14,
       marginTop: 4,
       borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: Colors.divider,
+      borderTopColor: theme.separator,
     },
     ingExpandText: {
       color: theme.textSecondary,
@@ -820,7 +888,7 @@ export function createStyles(theme) {
       width: 36,
       height: 4,
       borderRadius: 2,
-      backgroundColor: Colors.divider,
+      backgroundColor: theme.separator,
     },
     sheetContent: {
       paddingHorizontal: Spacing.screenPadding,
@@ -857,7 +925,7 @@ export function createStyles(theme) {
     },
     sheetDivider: {
       height: 0.5,
-      backgroundColor: Colors.divider,
+      backgroundColor: theme.separator,
       marginVertical: Spacing.cardPadding,
     },
     sheetSection: {
@@ -879,7 +947,7 @@ export function createStyles(theme) {
       gap: Spacing.sm,
     },
     sheetAltPill: {
-      backgroundColor: Colors.surface,
+      backgroundColor: theme.surface,
       borderRadius: 8,
       paddingVertical: 6,
       paddingHorizontal: 10,
@@ -887,7 +955,7 @@ export function createStyles(theme) {
     sheetAltText: {
       fontSize: 12,
       fontWeight: "500",
-      color: Colors.textSecondary,
+      color: theme.textSecondary,
     },
   });
 }

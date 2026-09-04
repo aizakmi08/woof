@@ -1,75 +1,260 @@
 import { useEffect, useState, useCallback, Component } from "react";
-import { View, Text, Pressable } from "react-native";
+import { ActivityIndicator, View, Pressable, LogBox } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { NavigationContainer } from "@react-navigation/native";
+import { DefaultTheme, NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { StatusBar } from "expo-status-bar";
+import Constants from "expo-constants";
+import * as Updates from "expo-updates";
+import * as Sentry from "@sentry/react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useTheme, Colors, Spacing } from "./theme";
+import { useTheme, Spacing } from "./theme";
 import { AuthProvider, useAuth } from "./services/auth";
+import { createLogger } from "./services/logger";
+import { installGlobalErrorHandlers, trackAppError } from "./services/errorReporting";
+import { SENTRY_DSN } from "./config/env";
+import { AppText as Text } from "./components/AppText";
+import { BRAND_NAME } from "./config/brand";
+import { BrandLogo } from "./components/BrandLogo";
+import { markColdStartInteractive } from "./services/performanceTimings";
 
 import OnboardingScreen, { ONBOARDING_KEY } from "./screens/OnboardingScreen";
 import AuthScreen from "./screens/AuthScreen";
 import HomeScreen from "./screens/HomeScreen";
+import ProductSearchScreen from "./screens/ProductSearchScreen";
 import ScannerScreen from "./screens/ScannerScreen";
 import ResultsScreen from "./screens/ResultsScreen";
 import ProfileScreen from "./screens/ProfileScreen";
 import PaywallScreen from "./screens/PaywallScreen";
 import WebViewScreen from "./screens/WebViewScreen";
+import DevQAScreen from "./screens/DevQAScreen";
+
+const logger = createLogger("APP");
+const expoConfig = Constants.expoConfig || {};
+const appVersion = expoConfig.version || Constants.nativeAppVersion || "unknown";
+const nativeBuildVersion = Constants.nativeBuildVersion || "unknown";
+const sentryEnabled = typeof SENTRY_DSN === "string" && /^https?:\/\//i.test(SENTRY_DSN);
+
+if (__DEV__) {
+  // The native SDK reports unavailable local StoreKit offerings as a console
+  // error. Keep it in runtime logs, but do not let LogBox cover simulator QA.
+  LogBox.ignoreLogs(["[RevenueCat]"]);
+}
+
+function redactDiagnosticString(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[email]")
+    .replace(/https?:\/\/\S+/gi, "[url]")
+    .replace(/file:\/\/\S+/gi, "[file]")
+    .replace(/\b(?:\/(?:private\/)?var|\/tmp|\/Users|\/data\/user|\/storage\/emulated|[A-Z]:\\)[^\s)]+/gi, "[file]")
+    .replace(/(?:Bearer\s+)?eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[jwt]")
+    .replace(/\b(?:sk-ant|sk-proj|sk|rk_live|rk_test|appl|goog)[-_][A-Za-z0-9_-]{16,}\b/g, "[secret]")
+    .replace(/\b[A-Za-z0-9+/=]{80,}\b/g, "[redacted]");
+}
+
+function scrubDiagnosticValue(value, depth = 0) {
+  if (value == null || typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "string") return redactDiagnosticString(value);
+  if (Array.isArray(value)) {
+    return depth > 4 ? "[redacted]" : value.map((item) => scrubDiagnosticValue(item, depth + 1));
+  }
+  if (typeof value === "object") {
+    if (depth > 4) return "[redacted]";
+    return Object.entries(value).reduce((acc, [key, item]) => {
+      acc[key] = scrubDiagnosticValue(item, depth + 1);
+      return acc;
+    }, {});
+  }
+  return redactDiagnosticString(value);
+}
+
+function beforeSendSentryEvent(event) {
+  const scrubbed = scrubDiagnosticValue(event);
+  if (scrubbed?.user) {
+    delete scrubbed.user.email;
+    delete scrubbed.user.ip_address;
+    delete scrubbed.user.username;
+  }
+  delete scrubbed?.request;
+  return scrubbed;
+}
+
+Sentry.init({
+  dsn: sentryEnabled ? SENTRY_DSN : undefined,
+  enabled: sentryEnabled,
+  environment: __DEV__ ? "development" : (Constants.executionEnvironment || "production"),
+  release: `woof@${appVersion}`,
+  dist: nativeBuildVersion,
+  sendDefaultPii: false,
+  tracesSampleRate: 0,
+  beforeSend: beforeSendSentryEvent,
+});
+
+const sentryScope = Sentry.getGlobalScope?.();
+sentryScope?.setTag("app.version", appVersion);
+sentryScope?.setTag("app.native_build_version", nativeBuildVersion);
+sentryScope?.setTag("expo.execution_environment", Constants.executionEnvironment || "unknown");
+sentryScope?.setTag("expo.update_id", Updates.updateId || "embedded");
+sentryScope?.setTag("expo.is_embedded_update", Updates.isEmbeddedLaunch ? "true" : "false");
+
+const updatesManifest = Updates.manifest || {};
+const updatesMetadata = updatesManifest && "metadata" in updatesManifest ? updatesManifest.metadata : null;
+const updateGroup = updatesMetadata && typeof updatesMetadata.updateGroup === "string"
+  ? updatesMetadata.updateGroup
+  : null;
+if (updateGroup) {
+  sentryScope?.setTag("expo.update_group_id", updateGroup);
+}
+
+function ErrorFallback({ onRetry }) {
+  const theme = useTheme();
+
+  return (
+    <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: theme.bg, padding: 40 }}>
+      <Text style={{ fontSize: 22, fontWeight: "700", color: theme.textPrimary, marginBottom: 12 }}>
+        Something went wrong
+      </Text>
+      <Text style={{ fontSize: 15, color: theme.textSecondary, textAlign: "center", marginBottom: 32, lineHeight: 22 }}>
+        The app ran into an unexpected error. Try reloading this screen.
+      </Text>
+      <Pressable
+        onPress={onRetry}
+        accessibilityRole="button"
+        accessibilityLabel="Try again"
+        accessibilityHint="Attempts to recover from the error"
+        style={({ pressed }) => ({
+          height: Spacing.buttonHeight,
+          paddingHorizontal: 32,
+          borderRadius: Spacing.buttonRadius,
+          backgroundColor: theme.buttonPrimary,
+          justifyContent: "center",
+          alignItems: "center",
+          opacity: pressed ? 0.85 : 1,
+        })}
+      >
+        <Text style={{ fontSize: 17, fontWeight: "600", color: theme.buttonText }}>
+          Try Again
+        </Text>
+      </Pressable>
+    </View>
+  );
+}
 
 class ErrorBoundary extends Component {
-  state = { hasError: false };
+  state = { hasError: false, retryKey: 0 };
 
   static getDerivedStateFromError() {
     return { hasError: true };
   }
 
   componentDidCatch(error, info) {
-    console.log("[APP] ErrorBoundary caught:", error.message, info.componentStack);
+    logger.debug("[APP] ErrorBoundary caught:", error.message, info.componentStack);
+    trackAppError(error, {
+      source: "error_boundary",
+      fatal: true,
+      component_stack_available: Boolean(info?.componentStack),
+    });
   }
 
   render() {
     if (this.state.hasError) {
       return (
-        <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: Colors.bg, padding: 40 }}>
-          <Text style={{ fontSize: 22, fontWeight: "700", color: Colors.textPrimary, marginBottom: 12 }}>
-            Something went wrong
-          </Text>
-          <Text style={{ fontSize: 15, color: Colors.textSecondary, textAlign: "center", marginBottom: 32, lineHeight: 22 }}>
-            The app ran into an unexpected error. Please restart to continue.
-          </Text>
-          <Pressable
-            onPress={() => this.setState({ hasError: false })}
-            style={({ pressed }) => ({
-              height: Spacing.buttonHeight,
-              paddingHorizontal: 32,
-              borderRadius: Spacing.buttonRadius,
-              backgroundColor: Colors.textPrimary,
-              justifyContent: "center",
-              alignItems: "center",
-              opacity: pressed ? 0.85 : 1,
-            })}
-          >
-            <Text style={{ fontSize: 17, fontWeight: "600", color: Colors.bg }}>
-              Try Again
-            </Text>
-          </Pressable>
-        </View>
+        <ErrorFallback
+          onRetry={() => this.setState((state) => ({ hasError: false, retryKey: state.retryKey + 1 }))}
+        />
       );
     }
-    return this.props.children;
+    return <View key={this.state.retryKey} style={{ flex: 1 }}>{this.props.children}</View>;
   }
 }
 
 const Stack = createNativeStackNavigator();
+const DEV_PAYWALL_PREVIEW_SOURCES = new Set([
+  "results_gate",
+  "scan_limit",
+  "post_scan_prompt",
+  "home_banner",
+  "profile",
+]);
+const DEV_PAYWALL_PREVIEW_NAVIGATION = {
+  addListener: () => () => {},
+  goBack: () => {},
+  navigate: () => {},
+};
 
-function AppNavigator() {
+function getDevPaywallPreviewSource() {
+  if (!__DEV__ || typeof window === "undefined") return null;
+  const search = typeof window.location?.search === "string"
+    ? window.location.search
+    : "";
+  if (!search) return null;
+
+  const params = new URLSearchParams(search);
+  const requested = params.get("woof_paywall_preview");
+  if (!requested) return null;
+  return DEV_PAYWALL_PREVIEW_SOURCES.has(requested) ? requested : "profile";
+}
+
+function AppNavigator({ initialRouteName = "Home", initialRouteParams = null, onInitialRouteConsumed, devPaywallPreviewSource = null }) {
   const theme = useTheme();
   const { user, loading } = useAuth();
 
-  // Show blank screen while checking auth
+  useEffect(() => {
+    if (!loading && user && initialRouteName !== "Home") {
+      onInitialRouteConsumed?.();
+    }
+  }, [loading, user, initialRouteName, onInitialRouteConsumed]);
+
+  useEffect(() => {
+    if (!loading) {
+      markColdStartInteractive(user ? initialRouteName.toLowerCase() : "auth");
+    }
+  }, [initialRouteName, loading, user]);
+
+  if (devPaywallPreviewSource) {
+    return (
+      <>
+        <StatusBar style={theme.statusBar} />
+        <PaywallScreen
+          route={{
+            params: {
+              source: devPaywallPreviewSource,
+              productName: "Preview Chicken Kibble",
+              score: 82,
+            },
+          }}
+          navigation={DEV_PAYWALL_PREVIEW_NAVIGATION}
+        />
+      </>
+    );
+  }
+
+  // Keep the brand visible while the local session is resolved.
   if (loading) {
-    return <View style={{ flex: 1, backgroundColor: theme.bg }} />;
+    return (
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: theme.bg,
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 16,
+        }}
+        accessibilityRole="progressbar"
+        accessibilityLabel={`Opening ${BRAND_NAME}`}
+      >
+        <BrandLogo size={72} />
+        <Text style={{ color: theme.textPrimary, fontSize: 30, fontWeight: "800" }}>
+          {BRAND_NAME}
+        </Text>
+        <ActivityIndicator color={theme.textSecondary} />
+        <Text style={{ color: theme.textSecondary, fontSize: 14 }}>
+          Getting you set up…
+        </Text>
+      </View>
+    );
   }
 
   // Not authenticated — show auth screen
@@ -84,20 +269,38 @@ function AppNavigator() {
 
   // Authenticated — show main app
   return (
-    <NavigationContainer>
+    <NavigationContainer
+      theme={{
+        ...DefaultTheme,
+        dark: theme.statusBar === "light",
+        colors: {
+          ...DefaultTheme.colors,
+          primary: theme.textPrimary,
+          background: theme.bg,
+          card: theme.card,
+          text: theme.textPrimary,
+          border: theme.separator,
+          notification: theme.green,
+        },
+      }}
+    >
       <StatusBar style={theme.statusBar} />
       <Stack.Navigator
-        initialRouteName="Home"
+        initialRouteName={initialRouteName}
         screenOptions={{
           headerShown: false,
           headerShadowVisible: false,
         }}
       >
         <Stack.Screen name="Home" component={HomeScreen} />
+        <Stack.Screen name="ProductSearch" component={ProductSearchScreen} />
         <Stack.Screen
           name="Scanner"
           component={ScannerScreen}
-          options={{ title: "Woof Scanner" }}
+          initialParams={initialRouteName === "Scanner"
+            ? { mode: "label_lookup", ...(initialRouteParams || {}) }
+            : undefined}
+          options={{ title: `${BRAND_NAME} Scanner` }}
         />
         <Stack.Screen name="Results" component={ResultsScreen} />
         <Stack.Screen name="Profile" component={ProfileScreen} />
@@ -107,52 +310,87 @@ function AppNavigator() {
           options={{
             presentation: "modal",
             gestureEnabled: true,
-            contentStyle: { backgroundColor: "#FAFAFA" },
+            contentStyle: { backgroundColor: theme.bg },
           }}
         />
         <Stack.Screen name="WebView" component={WebViewScreen} />
+        {__DEV__ ? <Stack.Screen name="DevQA" component={DevQAScreen} /> : null}
       </Stack.Navigator>
     </NavigationContainer>
   );
 }
 
-export default function App() {
+function App() {
   const theme = useTheme();
   const [isReady, setIsReady] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [initialRouteName, setInitialRouteName] = useState("Home");
+  const [initialRouteParams, setInitialRouteParams] = useState(null);
+  const devPaywallPreviewSource = getDevPaywallPreviewSource();
 
   useEffect(() => {
-    AsyncStorage.getItem(ONBOARDING_KEY).then((value) => {
-      setShowOnboarding(value !== "true");
-      setIsReady(true);
-    });
+    installGlobalErrorHandlers();
   }, []);
 
-  const handleOnboardingComplete = useCallback(() => {
+  useEffect(() => {
+    AsyncStorage.getItem(ONBOARDING_KEY)
+      .then((value) => {
+        setShowOnboarding(value !== "true");
+        setIsReady(true);
+      })
+      .catch((error) => {
+        trackAppError(error, {
+          source: "app_boot_onboarding_state",
+          fatal: false,
+        });
+        setShowOnboarding(true);
+        setIsReady(true);
+      });
+  }, []);
+
+  const handleOnboardingComplete = useCallback(({ nextRoute = "Home", routeParams = null } = {}) => {
+    setInitialRouteName(nextRoute);
+    setInitialRouteParams(routeParams);
     setShowOnboarding(false);
   }, []);
 
-  // Blank screen while checking AsyncStorage (< 1 frame)
-  if (!isReady) {
-    return <View style={{ flex: 1, backgroundColor: theme.bg }} />;
-  }
+  const handleInitialRouteConsumed = useCallback(() => {
+    setInitialRouteName("Home");
+    setInitialRouteParams(null);
+  }, []);
 
-  if (showOnboarding) {
+  // Keep the first painted frame branded while onboarding state loads.
+  if (!isReady) {
     return (
-      <SafeAreaProvider>
-        <StatusBar style={theme.statusBar} />
-        <OnboardingScreen onComplete={handleOnboardingComplete} />
-      </SafeAreaProvider>
+      <View style={{ flex: 1, backgroundColor: theme.bg, alignItems: "center", justifyContent: "center", gap: 14 }}>
+        <BrandLogo size={64} />
+        <Text style={{ color: theme.textPrimary, fontSize: 28, fontWeight: "800" }}>{BRAND_NAME}</Text>
+        <ActivityIndicator color={theme.textSecondary} />
+      </View>
     );
   }
 
   return (
     <ErrorBoundary>
       <SafeAreaProvider>
-        <AuthProvider>
-          <AppNavigator />
+        <AuthProvider skipAutomaticGuestSession={Boolean(devPaywallPreviewSource)}>
+          {showOnboarding && !devPaywallPreviewSource ? (
+            <>
+              <StatusBar style={theme.statusBar} />
+              <OnboardingScreen onComplete={handleOnboardingComplete} />
+            </>
+          ) : (
+            <AppNavigator
+              initialRouteName={initialRouteName}
+              initialRouteParams={initialRouteParams}
+              onInitialRouteConsumed={handleInitialRouteConsumed}
+              devPaywallPreviewSource={devPaywallPreviewSource}
+            />
+          )}
         </AuthProvider>
       </SafeAreaProvider>
     </ErrorBoundary>
   );
 }
+
+export default Sentry.wrap(App);

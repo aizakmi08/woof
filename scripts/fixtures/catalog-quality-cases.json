@@ -1,0 +1,125 @@
+[
+  {
+    "name": "verified ready dog food",
+    "queryText": "Acme Chicken Adult Dog Food",
+    "expectedState": "verified_ready",
+    "expectedReady": true,
+    "product": {
+      "productName": "Chicken Adult Dog Food",
+      "brand": "Acme",
+      "flavor": "Chicken",
+      "lifeStage": "Adult",
+      "petType": "dog",
+      "ingredientsText": "Chicken, chicken meal, rice, oats, chicken fat",
+      "ingredientCount": 5,
+      "ingredientVerificationStatus": "manufacturer",
+      "imageUrl": "https://example.com/acme-dog.jpg",
+      "imageVerificationStatus": "manufacturer",
+      "sourceUrl": "https://example.com/products/acme-dog"
+    }
+  },
+  {
+    "name": "missing verified ingredients",
+    "expectedState": "needs_ingredients",
+    "expectedReady": false,
+    "product": {
+      "productName": "Salmon Cat Pate",
+      "brand": "Acme",
+      "petType": "cat",
+      "ingredientsText": "",
+      "ingredientCount": 0,
+      "ingredientVerificationStatus": "unverified",
+      "imageUrl": "https://example.com/acme-cat.jpg",
+      "imageVerificationStatus": "manufacturer",
+      "sourceUrl": "https://example.com/products/acme-cat"
+    }
+  },
+  {
+    "name": "missing verified image",
+    "expectedState": "needs_image",
+    "expectedReady": false,
+    "product": {
+      "productName": "Turkey Puppy Recipe",
+      "brand": "Acme",
+      "petType": "dog",
+      "ingredientsText": "Turkey, turkey meal, rice, oats, fish oil",
+      "ingredientCount": 5,
+      "ingredientVerificationStatus": "official",
+      "imageUrl": "",
+      "imageVerificationStatus": "unverified",
+      "sourceUrl": "https://example.com/products/turkey-puppy"
+    }
+  },
+  {
+    "name": "unknown pet type stays identity only",
+    "expectedState": "identity_only",
+    "expectedReady": false,
+    "product": {
+      "productName": "Chicken Recipe",
+      "brand": "Acme",
+      "petType": "unknown",
+      "ingredientsText": "Chicken, chicken meal, rice, oats, chicken fat",
+      "ingredientCount": 5,
+      "ingredientVerificationStatus": "manufacturer",
+      "imageUrl": "https://example.com/acme.jpg",
+      "imageVerificationStatus": "manufacturer",
+      "sourceUrl": "https://example.com/products/acme"
+    }
+  },
+  {
+    "name": "excluded row cannot score",
+    "expectedState": "excluded",
+    "expectedReady": false,
+    "product": {
+      "productName": "Chicken Treats",
+      "brand": "Acme",
+      "petType": "dog",
+      "isCompleteFood": false,
+      "catalogExclusionReason": "treat",
+      "ingredientsText": "Chicken, glycerin, salt",
+      "ingredientCount": 3,
+      "ingredientVerificationStatus": "manufacturer",
+      "imageUrl": "https://example.com/treats.jpg",
+      "imageVerificationStatus": "manufacturer",
+      "sourceUrl": "https://example.com/products/treats"
+    }
+  },
+  {
+    "name": "exact recipe term mismatch is ambiguous",
+    "queryText": "Acme Salmon Adult Dog Food",
+    "expectedState": "ambiguous_variant",
+    "expectedReady": false,
+    "product": {
+      "productName": "Chicken Adult Dog Food",
+      "brand": "Acme",
+      "flavor": "Chicken",
+      "lifeStage": "Adult",
+      "petType": "dog",
+      "ingredientsText": "Chicken, chicken meal, rice, oats, chicken fat",
+      "ingredientCount": 5,
+      "ingredientVerificationStatus": "manufacturer",
+      "imageUrl": "https://example.com/acme-dog.jpg",
+      "imageVerificationStatus": "manufacturer",
+      "sourceUrl": "https://example.com/products/acme-dog"
+    }
+  },
+  {
+    "name": "typed pate search accepts verified loaf label terminology",
+    "queryText": "Acme Kitten Pate",
+    "expectedState": "verified_ready",
+    "expectedReady": true,
+    "product": {
+      "productName": "Kitten Loaf in Sauce",
+      "brand": "Acme",
+      "lifeStage": "Kitten",
+      "foodForm": "Wet",
+      "petType": "cat",
+      "ingredientsText": "Chicken, chicken liver, broth, fish oil, taurine",
+      "ingredientCount": 5,
+      "ingredientVerificationStatus": "manufacturer",
+      "imageUrl": "https://example.com/acme-kitten-loaf.jpg",
+      "imageVerificationStatus": "manufacturer",
+      "sourceUrl": "https://example.com/products/acme-kitten-loaf"
+    }
+  }
+]

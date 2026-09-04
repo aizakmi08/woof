@@ -1,0 +1,21 @@
+module.exports = {
+  preset: "jest-expo",
+  clearMocks: true,
+  restoreMocks: true,
+  setupFilesAfterEnv: ["<rootDir>/tests/setup.js"],
+  testMatch: ["<rootDir>/tests/**/*.test.js"],
+  testPathIgnorePatterns: ["/node_modules/", "/tests/e2e/"],
+  collectCoverageFrom: [
+    "services/catalogQuality.js",
+    "services/catalogSearchCache.js",
+    "services/entitlementResilience.js",
+    "services/labelOcrMatching.js",
+    "services/labelResolution.js",
+    "services/productCatalog.js",
+    "services/reviewPromptPolicy.js",
+    "services/verifiedScoring.js",
+    "screens/ProductSearchScreen.js",
+  ],
+  coverageDirectory: "coverage",
+  coverageReporters: ["text", "json-summary", "lcov"],
+};

@@ -1,0 +1,585 @@
+import fs from "node:fs";
+import path from "node:path";
+import process from "node:process";
+import { fileURLToPath } from "node:url";
+import pg from "pg";
+
+const { Client } = pg;
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const connectionString = process.env.TEST_DATABASE_URL
+  || "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
+const userA = "11111111-1111-4111-8111-111111111111";
+const userB = "22222222-2222-4222-8222-222222222222";
+const catalogFreeUser = "44444444-4444-4444-8444-444444444444";
+const catalogProUser = "55555555-5555-4555-8555-555555555555";
+let assertions = 0;
+
+function read(relativePath) {
+  return fs.readFileSync(path.join(root, relativePath), "utf8");
+}
+
+function assert(condition, message) {
+  assertions += 1;
+  if (!condition) throw new Error(message);
+}
+
+async function connect() {
+  const client = new Client({ connectionString });
+  await client.connect();
+  return client;
+}
+
+async function asRole(role, userId, callback) {
+  const client = await connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`SET LOCAL ROLE ${role}`);
+    await client.query("SELECT set_config('request.jwt.claim.role', $1, true)", [role]);
+    await client.query("SELECT set_config('request.jwt.claim.sub', $1, true)", [userId || ""]);
+    const value = await callback(client);
+    await client.query("COMMIT");
+    return value;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    await client.end();
+  }
+}
+
+async function applyFoundation(client) {
+  await client.query(read("tests/database/bootstrap.sql"));
+  for (const migration of [
+    "supabase/migrations/061_scan_entitlements.sql",
+    "supabase/migrations/063_scan_reversal.sql",
+    "supabase/migrations/069_consume_scan_reversed_retry.sql",
+    "supabase/migrations/066_profile_write_security.sql",
+    "supabase/migrations/067_delete_account_privacy.sql",
+    "supabase/migrations/070_security_advisor_hardening.sql",
+  ]) {
+    await client.query(read(migration));
+  }
+
+  const hardeningMigration = fs.readdirSync(path.join(root, "supabase/migrations"))
+    .find((name) => name.endsWith("_quality_regimen_security_hardening.sql"));
+  if (hardeningMigration) {
+    await client.query(read(`supabase/migrations/${hardeningMigration}`));
+  }
+
+  for (const migration of [
+    "supabase/migrations/20260903204346_public_catalog_quota_boundary.sql",
+    "supabase/migrations/20260903204347_durable_revenuecat_deletion_tombstones.sql",
+    "supabase/migrations/20260903204348_catalog_gtin_lookup_indexes.sql",
+    "supabase/migrations/20260903204349_release_monitoring_kpis.sql",
+  ]) {
+    await client.query(read(migration));
+  }
+
+  const queryMigration = read("supabase/migrations/20260831234813_fix_catalog_possessive_prefix_search.sql");
+  const helperEnd = queryMigration.indexOf("REVOKE ALL ON FUNCTION public.catalog_bounded_prefix_tsquery");
+  assert(helperEnd > 0, "query-safety migration must expose the bounded prefix helper");
+  await client.query(queryMigration.slice(0, helperEnd));
+}
+
+async function seedUsers(client) {
+  await client.query(
+    `INSERT INTO auth.users (id, email) VALUES
+      ($1, 'a@example.test'),
+      ($2, 'b@example.test'),
+      ($3, 'catalog-free@example.test'),
+      ($4, 'catalog-pro@example.test')`,
+    [userA, userB, catalogFreeUser, catalogProUser]
+  );
+  await client.query(
+    `INSERT INTO public.profiles (id, scan_count, is_pro) VALUES
+      ($1, 0, false), ($2, 0, false), ($3, 0, false), ($4, 0, true)`,
+    [userA, userB, catalogFreeUser, catalogProUser]
+  );
+}
+
+async function testQuota(admin) {
+  const spoof = await asRole("authenticated", userA, (client) => client.query(
+    "SELECT public.consume_scan($1, 'spoof-one', 'barcode', 999) AS result",
+    [userB]
+  ));
+  assert(spoof.rows[0].result.scan_count === 1, "authenticated scan must count against caller");
+  assert(spoof.rows[0].result.remaining === 2, "authenticated caller must not override free limit");
+  const counts = await admin.query("SELECT id, scan_count FROM public.profiles ORDER BY id");
+  assert(Number(counts.rows[0].scan_count) === 1, "caller profile must be incremented");
+  assert(Number(counts.rows[1].scan_count) === 0, "spoofed profile must not be incremented");
+
+  const duplicate = await asRole("authenticated", userA, (client) => client.query(
+    "SELECT public.consume_scan($1, 'spoof-one', 'photo', 0) AS result",
+    [userB]
+  ));
+  assert(duplicate.rows[0].result.scan_count === 1, "same scan_id must be idempotent");
+
+  await asRole("authenticated", userA, (client) => client.query(
+    "SELECT public.consume_scan(NULL, 'scan-two', 'photo', 3)"
+  ));
+  const third = await asRole("authenticated", userA, (client) => client.query(
+    "SELECT public.consume_scan(NULL, 'scan-three', 'photo', 3) AS result"
+  ));
+  const fourth = await asRole("authenticated", userA, (client) => client.query(
+    "SELECT public.consume_scan(NULL, 'scan-four', 'photo', 3) AS result"
+  ));
+  assert(third.rows[0].result.allowed === true && third.rows[0].result.scan_count === 3,
+    "third free scan must be allowed");
+  assert(fourth.rows[0].result.allowed === false && fourth.rows[0].result.reason === "free_limit_reached",
+    "fourth free scan must be denied");
+
+  const reversed = await asRole("service_role", null, (client) => client.query(
+    "SELECT public.reverse_scan($1, 'scan-three', 'analysis_failed') AS result",
+    [userA]
+  ));
+  assert(reversed.rows[0].result.reversed === true && reversed.rows[0].result.scan_count === 2,
+    "service reversal must restore one free scan");
+  const consumedAgain = await asRole("authenticated", userA, (client) => client.query(
+    "SELECT public.consume_scan(NULL, 'scan-three', 'photo', 3) AS result"
+  ));
+  assert(consumedAgain.rows[0].result.counted === true && consumedAgain.rows[0].result.scan_count === 3,
+    "reusing a reversed scan id must consume again");
+
+  await admin.query("UPDATE public.profiles SET is_pro = true, scan_count = 3 WHERE id = $1", [userB]);
+  const pro = await asRole("authenticated", userB, (client) => client.query(
+    "SELECT public.consume_scan(NULL, 'pro-one', 'barcode', 0) AS result"
+  ));
+  assert(pro.rows[0].result.reason === "pro" && pro.rows[0].result.counted === false,
+    "active Pro scan must bypass quota without incrementing");
+}
+
+async function testConcurrentIdempotency(admin) {
+  const userC = "33333333-3333-4333-8333-333333333333";
+  await admin.query("INSERT INTO auth.users (id) VALUES ($1)", [userC]);
+  await admin.query("INSERT INTO public.profiles (id) VALUES ($1)", [userC]);
+  const results = await Promise.allSettled([
+    asRole("authenticated", userC, (client) => client.query(
+      "SELECT public.consume_scan(NULL, 'same-concurrent-id', 'photo', 3) AS result"
+    )),
+    asRole("authenticated", userC, (client) => client.query(
+      "SELECT public.consume_scan(NULL, 'same-concurrent-id', 'photo', 3) AS result"
+    )),
+  ]);
+  assert(results.every((result) => result.status === "fulfilled"),
+    `concurrent same-id consumption must not error: ${results.map((result) => result.reason?.message || result.status).join(", ")}`);
+  const profile = await admin.query("SELECT scan_count FROM public.profiles WHERE id = $1", [userC]);
+  assert(Number(profile.rows[0].scan_count) === 1, "concurrent same scan_id must count exactly once");
+}
+
+async function testRlsAndCatalog(admin) {
+  await admin.query(
+    "INSERT INTO public.scan_history (id, user_id, product_name) VALUES ('a-row', $1, 'A'), ('b-row', $2, 'B')",
+    [userA, userB]
+  );
+  const visible = await asRole("authenticated", userA, (client) => client.query(
+    "SELECT id FROM public.scan_history ORDER BY id"
+  ));
+  assert(visible.rows.map((row) => row.id).join(",") === "a-row", "RLS must hide user B history from user A");
+
+  let crossWriteFailed = false;
+  try {
+    await asRole("authenticated", userA, (client) => client.query(
+      "UPDATE public.scan_history SET product_name = 'stolen' WHERE user_id = $1",
+      [userB]
+    ));
+  } catch {
+    crossWriteFailed = true;
+  }
+  const unchanged = await admin.query("SELECT product_name FROM public.scan_history WHERE id = 'b-row'");
+  assert(crossWriteFailed || unchanged.rows[0].product_name === "B", "RLS must block cross-user history writes");
+
+  const visibleProfiles = await asRole("authenticated", userA, (client) => client.query(
+    "SELECT id FROM public.profiles ORDER BY id"
+  ));
+  assert(visibleProfiles.rows.map((row) => row.id).join(",") === userA,
+    "RLS must hide user B profile from user A");
+
+  await admin.query(
+    "INSERT INTO public.analytics_events (user_id, session_id, name) VALUES ($1, 'b-session', 'private-b')",
+    [userB]
+  );
+  let analyticsReadFailed = false;
+  try {
+    await asRole("authenticated", userA, (client) => client.query(
+      "SELECT * FROM public.analytics_events WHERE user_id = $1",
+      [userB]
+    ));
+  } catch {
+    analyticsReadFailed = true;
+  }
+  assert(analyticsReadFailed, "authenticated users must not read analytics event rows");
+
+  let analyticsCrossWriteFailed = false;
+  try {
+    await asRole("authenticated", userA, (client) => client.query(
+      "INSERT INTO public.analytics_events (user_id, session_id, name) VALUES ($1, 'spoof', 'spoof')",
+      [userB]
+    ));
+  } catch {
+    analyticsCrossWriteFailed = true;
+  }
+  assert(analyticsCrossWriteFailed, "analytics RLS must reject rows attributed to another user");
+
+  const ownUsage = await asRole("authenticated", userA, (client) => client.query(
+    "SELECT DISTINCT user_id FROM public.scan_usage_events"
+  ));
+  assert(ownUsage.rows.every((row) => row.user_id === userA),
+    "scan usage RLS must hide other users' rows");
+
+  let usageWriteFailed = false;
+  try {
+    await asRole("authenticated", userA, (client) => client.query(
+      "UPDATE public.scan_usage_events SET free_limit = 999 WHERE user_id = $1",
+      [userA]
+    ));
+  } catch {
+    usageWriteFailed = true;
+  }
+  assert(usageWriteFailed, "authenticated users must not mutate scan usage rows directly");
+
+  await admin.query(
+    "INSERT INTO public.product_events (user_id, event_name, session_id) VALUES ($1, 'private-b', 'b-product-session')",
+    [userB]
+  );
+  let productEventReadFailed = false;
+  try {
+    await asRole("authenticated", userA, (client) => client.query("SELECT * FROM public.product_events"));
+  } catch {
+    productEventReadFailed = true;
+  }
+  assert(productEventReadFailed, "authenticated users must not read product event rows");
+
+  let productEventWriteFailed = false;
+  try {
+    await asRole("authenticated", userA, (client) => client.query(
+      "INSERT INTO public.product_events (user_id, event_name, session_id) VALUES ($1, 'injected', 'injected')",
+      [userA]
+    ));
+  } catch {
+    productEventWriteFailed = true;
+  }
+  assert(productEventWriteFailed, "authenticated users must not write product event rows directly");
+
+  let entitlementWriteFailed = false;
+  try {
+    await asRole("authenticated", userA, (client) => client.query(
+      "UPDATE public.profiles SET is_pro = true, scan_count = 0 WHERE id = $1",
+      [userA]
+    ));
+  } catch {
+    entitlementWriteFailed = true;
+  }
+  assert(entitlementWriteFailed, "authenticated users must not write is_pro or scan_count");
+
+  await admin.query(
+    `INSERT INTO public.product_data (
+      cache_key, product_name, gtin, ingredients, ingredient_text,
+      ingredient_count, nutritional_info, has_published_nutrients
+    ) VALUES
+      ('catalog:one', 'Catalog One', '111111111111', ARRAY['Chicken', 'Rice', 'Fat', 'Fiber', 'Vitamins'], 'Chicken, Rice, Fat, Fiber, Vitamins', 5, '{"protein":30}', true),
+      ('catalog:two', 'Catalog Two', '222222222222', ARRAY['Turkey', 'Rice', 'Fat', 'Fiber', 'Vitamins'], 'Turkey, Rice, Fat, Fiber, Vitamins', 5, '{"protein":29}', true),
+      ('catalog:three', 'Catalog Three', '333333333333', ARRAY['Lamb', 'Rice', 'Fat', 'Fiber', 'Vitamins'], 'Lamb, Rice, Fat, Fiber, Vitamins', 5, '{"protein":28}', true),
+      ('catalog:four', 'Catalog Four', '444444444444', ARRAY['Fish', 'Rice', 'Fat', 'Fiber', 'Vitamins'], 'Fish, Rice, Fat, Fiber, Vitamins', 5, '{"protein":27}', true)`
+  );
+  const catalogRead = await asRole("authenticated", catalogFreeUser, (client) => client.query(
+    "SELECT cache_key FROM public.product_data"
+  ));
+  assert(catalogRead.rows.length === 4, "authenticated teaser-column catalog reads must remain available");
+
+  let fullCatalogReadFailed = false;
+  try {
+    await asRole("authenticated", catalogFreeUser, (client) => client.query(
+      "SELECT ingredients, nutritional_info FROM public.product_data"
+    ));
+  } catch {
+    fullCatalogReadFailed = true;
+  }
+  assert(fullCatalogReadFailed, "authenticated users must not read full catalog columns directly");
+
+  const teaser = await asRole("authenticated", catalogFreeUser, (client) => client.query(
+    "SELECT cache_key, product_name, ingredient_count FROM public.search_verified_product_teasers('Catalog', 10)"
+  ));
+  assert(teaser.rows.length === 4, "authenticated teaser search must remain available");
+  assert(!Object.hasOwn(teaser.rows[0], "ingredients"), "teaser search must not expose ingredients");
+
+  for (const signature of [
+    "public.search_products(text,integer)",
+    "public.search_verified_products(text,integer)",
+    "public.search_verified_products_for_label_fast(text[],integer)",
+    "public.search_verified_products_for_label_ocr(text[],integer)",
+    "public.search_verified_products_for_label_ocr_text(text,integer)",
+    "public.search_verified_products_ranked_v1(text,integer)",
+    "public.resolve_verified_product_by_gtin(text,integer)",
+  ]) {
+    const result = await admin.query(
+      `SELECT COALESCE(
+        has_function_privilege('authenticated', to_regprocedure($1), 'EXECUTE'),
+        false
+      ) AS allowed`,
+      [signature]
+    );
+    assert(result.rows[0].allowed === false, `${signature} must not bypass catalog quota`);
+  }
+
+  const consumeCatalog = (userId, cacheKey, scanId) => asRole(
+    "authenticated",
+    userId,
+    (client) => client.query(
+      "SELECT public.consume_verified_catalog_product($1, $2, 'catalog') AS result",
+      [cacheKey, scanId]
+    )
+  );
+  const catalogOne = await consumeCatalog(catalogFreeUser, "catalog:one", "catalog-attempt");
+  assert(catalogOne.rows[0].result.allowed === true, "first catalog product must be allowed");
+  assert(catalogOne.rows[0].result.product.ingredients.length === 5,
+    "allowed catalog consumption must return full ingredients");
+  const sameProductRetry = await consumeCatalog(catalogFreeUser, "catalog:one", "catalog-attempt");
+  assert(sameProductRetry.rows[0].result.scan_usage.scan_count === 1,
+    "same attempt and product must be idempotent");
+  const differentProductSameAttempt = await consumeCatalog(catalogFreeUser, "catalog:two", "catalog-attempt");
+  assert(differentProductSameAttempt.rows[0].result.scan_usage.scan_count === 2,
+    "one client scan id must not retrieve different products for one charge");
+  const thirdCatalog = await consumeCatalog(catalogFreeUser, "catalog:three", "catalog-third");
+  assert(thirdCatalog.rows[0].result.scan_usage.scan_count === 3,
+    "third catalog product must consume the final free scan");
+  const fourthCatalog = await consumeCatalog(catalogFreeUser, "catalog:four", "catalog-fourth");
+  assert(fourthCatalog.rows[0].result.allowed === false && fourthCatalog.rows[0].result.product === null,
+    "fourth catalog product must be denied without returning protected data");
+  const proCatalog = await consumeCatalog(catalogProUser, "catalog:four", "catalog-pro");
+  assert(proCatalog.rows[0].result.allowed === true && proCatalog.rows[0].result.scan_usage.reason === "pro",
+    "Pro catalog access must return full data without consuming a free scan");
+
+  let catalogWriteFailed = false;
+  try {
+    await asRole("authenticated", catalogFreeUser, (client) => client.query(
+      "INSERT INTO public.product_data (cache_key, product_name) VALUES ('catalog:evil', 'Injected')"
+    ));
+  } catch {
+    catalogWriteFailed = true;
+  }
+  assert(catalogWriteFailed, "client roles must not write product_data");
+
+  let privateReadFailed = false;
+  try {
+    await asRole("authenticated", userA, (client) => client.query(
+      "SELECT * FROM public.catalog_private_evidence"
+    ));
+  } catch {
+    privateReadFailed = true;
+  }
+  assert(privateReadFailed, "private catalog evidence must not be readable by authenticated users");
+
+  const gtinIndex = await admin.query(
+    "SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'idx_product_data_normalized_gtin'"
+  );
+  assert(
+    gtinIndex.rows.length === 1 && gtinIndex.rows[0].indexdef.includes("regexp_replace"),
+    "catalog barcode lookup must retain its normalized GTIN expression index"
+  );
+}
+
+async function testLegacyRpcAuthorization(admin) {
+  for (const signature of [
+    "public.get_human_food_count_today(uuid)",
+    "public.increment_human_food_count(uuid)",
+    "public.increment_scan_count(uuid)",
+  ]) {
+    const result = await admin.query(
+      "SELECT has_function_privilege('authenticated', $1, 'EXECUTE') AS allowed",
+      [signature]
+    );
+    assert(result.rows[0].allowed === false, `${signature} must not be callable by authenticated clients`);
+  }
+}
+
+async function testDeletion(admin) {
+  await admin.query(
+    "INSERT INTO public.product_events (user_id, event_name, session_id, metadata) VALUES ($1, 'search_result_tapped', 'session-user-a', '{\"query\":\"private search\"}')",
+    [userA]
+  );
+  await admin.query(
+    `INSERT INTO public.revenuecat_events
+      (event_id, app_user_id, original_app_user_id, subscriber_app_user_id, processed_user_ids, aliases, payload)
+     VALUES
+      ('rc-app-user', $1, NULL, NULL, '{}', '{}', '{}'),
+      ('rc-original-user', NULL, $1, NULL, '{}', '{}', '{}'),
+      ('rc-subscriber-user', NULL, NULL, $1, '{}', '{}', '{}'),
+      ('rc-processed-user', NULL, NULL, NULL, ARRAY[$1::UUID], '{}', '{}'),
+      ('rc-alias-user', NULL, NULL, NULL, '{}', ARRAY[$1], '{}'),
+      ('rc-payload-user', NULL, NULL, NULL, '{}', '{}', jsonb_build_object('subscriber', $1)),
+      ('rc-unrelated', $2, NULL, NULL, '{}', '{}', '{}')`,
+    [userA, userB]
+  );
+  await asRole("authenticated", userA, (client) => client.query("SELECT public.delete_own_account()"));
+  const retained = await admin.query(
+    "SELECT count(*)::INTEGER AS count FROM public.product_events WHERE session_id = 'session-user-a'"
+  );
+  assert(retained.rows[0].count === 0, "account deletion must remove product_events instead of anonymizing typed queries");
+  const retainedRevenueCat = await admin.query(
+    "SELECT event_id FROM public.revenuecat_events WHERE event_id LIKE 'rc-%' ORDER BY event_id"
+  );
+  assert(
+    retainedRevenueCat.rows.map((row) => row.event_id).join(",") === "rc-unrelated",
+    "account deletion must remove every stored RevenueCat identifier shape and retain unrelated events"
+  );
+
+  const tombstoned = await asRole("service_role", null, (client) => client.query(
+    "SELECT public.is_deleted_revenuecat_identity(ARRAY[$1]) AS deleted",
+    [userA]
+  ));
+  assert(tombstoned.rows[0].deleted === true,
+    "account deletion must leave a private RevenueCat identity tombstone");
+
+  let delayedWebhookRejected = false;
+  try {
+    await asRole("service_role", null, (client) => client.query(
+      `INSERT INTO public.revenuecat_events
+        (event_id, app_user_id, processed_user_ids, aliases, payload)
+       VALUES ('rc-delayed', NULL, '{}', '{}', jsonb_build_object('subscriber', $1::TEXT))`,
+      [userA]
+    ));
+  } catch (error) {
+    delayedWebhookRejected = String(error.message).includes("deleted_revenuecat_identity");
+  }
+  assert(delayedWebhookRejected,
+    "delayed RevenueCat events must not reintroduce a deleted account identifier");
+}
+
+async function testQuerySafety(admin) {
+  const corpus = [
+    "Nature's Logic",
+    "Hill’s Science Diet",
+    "Newman's Own",
+    "Stella & Chewy's",
+    "I and Love and You",
+    "Go! Solutions",
+    "Ziwi-Peak",
+    "ACANA 2026",
+    "Élan's Café",
+    "🐕 -- '' & paste junk",
+  ];
+  const startedAt = performance.now();
+  for (const query of corpus) {
+    const result = await admin.query(
+      "SELECT public.catalog_bounded_prefix_tsquery($1)::TEXT AS query",
+      [query]
+    );
+    const built = result.rows[0].query || "";
+    assert(!/\'[a-z0-9]\':\*/i.test(built), `one-character prefix escaped query safety for ${query}: ${built}`);
+  }
+  const durationMs = performance.now() - startedAt;
+  assert(durationMs < 500, `query-shape corpus exceeded 500 ms: ${durationMs.toFixed(1)} ms`);
+  const bounded = await admin.query(
+    "SELECT numnode(public.catalog_bounded_prefix_tsquery($1)) AS nodes",
+    ["token01 token02 token03 token04 token05 token06 token07 token08 token09 token10 token11 token12 token13 token14"]
+  );
+  // numnode counts the 12 lexemes plus the 11 AND operators.
+  assert(Number(bounded.rows[0].nodes) <= 23, "prefix query must cap term count at 12");
+  return durationMs;
+}
+
+async function testReleaseMonitoringKpis(admin) {
+  await admin.query(`
+    INSERT INTO public.analytics_events (user_id, session_id, name, properties, created_at) VALUES
+      ($1, 'release-kpi-session', 'scan_analysis_started', '{}', now()),
+      ($1, 'release-kpi-session', 'scan_analysis_completed', '{}', now()),
+      ($1, 'release-kpi-session', 'label_lookup_completed', '{"resolution_decision":"no_exact_variant"}', now()),
+      ($1, 'release-kpi-session', 'paywall_viewed', '{}', now()),
+      ($1, 'release-kpi-session', 'purchase_completed', '{}', now()),
+      ($1, 'release-kpi-session', 'restore_started', '{}', now()),
+      ($1, 'release-kpi-session', 'restore_failed', '{}', now())
+  `, [catalogProUser]);
+  await admin.query(`
+    INSERT INTO public.product_events (user_id, session_id, event_name, metadata, created_at) VALUES
+      ($1, 'release-kpi-session', 'catalog_lookup_miss', '{}', now())
+  `, [catalogProUser]);
+
+  const kpi = await asRole("service_role", null, (client) => client.query(`
+    SELECT *
+    FROM public.kpi_release_monitoring_daily
+    WHERE metric_date = CURRENT_DATE
+  `));
+  assert(kpi.rows.length === 1, "release monitoring must expose the current day to service_role");
+  assert(Number(kpi.rows[0].scan_success_rate) === 1,
+    "release monitoring must calculate scan success");
+  assert(Number(kpi.rows[0].resolver_abstention_rate) === 1,
+    "release monitoring must calculate resolver abstention");
+  assert(Number(kpi.rows[0].catalog_miss_rate) === 1,
+    "release monitoring must calculate catalog miss rate");
+  assert(Number(kpi.rows[0].paywall_purchase_conversion_rate) === 1,
+    "release monitoring must calculate paywall conversion");
+  assert(Number(kpi.rows[0].restore_failure_rate) === 1,
+    "release monitoring must calculate restore failures");
+
+  for (const role of ["anon", "authenticated"]) {
+    let blocked = false;
+    try {
+      await asRole(role, role === "authenticated" ? catalogProUser : null, (client) => client.query(
+        "SELECT * FROM public.kpi_release_monitoring_daily"
+      ));
+    } catch {
+      blocked = true;
+    }
+    assert(blocked, `${role} must not read release monitoring telemetry`);
+  }
+
+  const validation = await admin.query(
+    read("supabase/validation/20260903_release_hardening_validation.sql")
+  );
+  assert(validation.rows.length === 7,
+    "release hardening validation must retain all seven post-deploy checks");
+  assert(validation.rows.every((row) => row.pass === true),
+    `release hardening validation failed: ${validation.rows.filter((row) => !row.pass).map((row) => row.check_name).join(", ")}`);
+}
+
+async function testEmergencyRollback(admin) {
+  await admin.query(read("supabase/rollback/20260903_release_hardening_rollback.sql"));
+  const state = await admin.query(`
+    SELECT
+      to_regprocedure('public.search_verified_product_teasers(text,integer)') IS NULL AS teaser_removed,
+      to_regclass('public.idx_product_data_normalized_gtin') IS NULL AS gtin_index_removed,
+      has_function_privilege(
+        'authenticated',
+        'public.search_verified_products(text,integer)',
+        'EXECUTE'
+      ) AS legacy_search_restored
+  `);
+  assert(state.rows[0].teaser_removed && state.rows[0].gtin_index_removed,
+    "emergency rollback must remove the release-only catalog surface and index");
+  assert(state.rows[0].legacy_search_restored,
+    "emergency rollback must restore the coordinated old-client search contract");
+}
+
+async function main() {
+  let admin;
+  try {
+    admin = await connect();
+  } catch (error) {
+    console.error(`BLOCKED(database): cannot connect to disposable Postgres at ${connectionString}: ${error.message}`);
+    process.exit(2);
+  }
+
+  try {
+    await applyFoundation(admin);
+    await seedUsers(admin);
+    await testQuota(admin);
+    await testConcurrentIdempotency(admin);
+    await testRlsAndCatalog(admin);
+    await testLegacyRpcAuthorization(admin);
+    await testDeletion(admin);
+    const queryCorpusDurationMs = await testQuerySafety(admin);
+    await testReleaseMonitoringKpis(admin);
+    await testEmergencyRollback(admin);
+    console.log(
+      `Database integration tests passed (${assertions} assertions; ` +
+      `query-shape corpus ${queryCorpusDurationMs.toFixed(1)} ms / 500 ms budget).`
+    );
+  } finally {
+    await admin.end();
+  }
+}
+
+main().catch((error) => {
+  console.error(`Database integration tests failed after ${assertions} assertions: ${error.stack || error.message}`);
+  process.exit(1);
+});

@@ -2,10 +2,10 @@
   "expo": {
     "name": "woof",
     "slug": "woof",
-    "version": "1.0.0",
+    "version": "1.2.2",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "scheme": "woof",
     "runtimeVersion": {
       "policy": "appVersion"
@@ -16,14 +16,14 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#FAFAFA"
+      "backgroundColor": "#F7F7F4"
     },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "io.woof.app",
       "usesAppleSignIn": true,
       "infoPlist": {
-        "NSCameraUsageDescription": "Woof needs camera access to scan pet food ingredient labels.",
+        "NSCameraUsageDescription": "Woof needs camera access to scan pet food labels and food items.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
@@ -46,20 +46,27 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#FFFFFF",
+          "backgroundColor": "#F7F7F4",
           "image": "./assets/splash-icon.png",
-          "imageWidth": 200
+          "imageWidth": 200,
+          "dark": {
+            "backgroundColor": "#0E0E0D",
+            "image": "./assets/splash-icon-dark.png"
+          }
         }
       ],
       [
         "expo-camera",
         {
-          "cameraPermission": "Woof needs camera access to scan pet food ingredient labels."
+          "cameraPermission": "Woof needs camera access to scan pet food labels and food items."
         }
       ],
       "expo-apple-authentication",
+      "expo-asset",
       "expo-web-browser",
-      "expo-sharing"
+      "expo-sharing",
+      "./plugins/withWoofStoreKitTesting",
+      "@sentry/react-native/expo"
     ],
     "extra": {
       "eas": {

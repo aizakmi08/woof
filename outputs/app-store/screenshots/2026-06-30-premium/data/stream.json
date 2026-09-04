@@ -1,0 +1,190 @@
+{
+  "meta": {
+    "title": "Woof premium App Store screenshot pack",
+    "summary": "Premium product-proof App Store composites with deterministic copy, claim-safe UI, exact export sizes, and generated no-text polish layers.",
+    "source": "review_renderer",
+    "itemCount": 18
+  },
+  "items": [
+    {
+      "id": "iphone-69-scan-before-you-buy",
+      "title": "iPhone 6.9 - Scan before you buy",
+      "caption": "iPhone 6.9-inch portrait / 1320 x 2868",
+      "tone": "iPhone 6.9-inch portrait",
+      "prompt": "",
+      "imageUrl": "/generated/mcp-thumbs/iphone-69-scan-before-you-buy.jpg",
+      "previewImageUrl": "/generated/mcp-thumbs/iphone-69-scan-before-you-buy.jpg",
+      "sourceImageUrl": "/generated/iphone-69-scan-before-you-buy.png"
+    },
+    {
+      "id": "iphone-69-food-score-in-seconds",
+      "title": "iPhone 6.9 - Score food in seconds",
+      "caption": "iPhone 6.9-inch portrait / 1320 x 2868",
+      "tone": "iPhone 6.9-inch portrait",
+      "prompt": "",
+      "imageUrl": "/generated/mcp-thumbs/iphone-69-food-score-in-seconds.jpg",
+      "previewImageUrl": "/generated/mcp-thumbs/iphone-69-food-score-in-seconds.jpg",
+      "sourceImageUrl": "/generated/iphone-69-food-score-in-seconds.png"
+    },
+    {
+      "id": "iphone-69-spot-ingredient-flags",
+      "title": "iPhone 6.9 - Spot ingredient flags",
+      "caption": "iPhone 6.9-inch portrait / 1320 x 2868",
+      "tone": "iPhone 6.9-inch portrait",
+      "prompt": "",
+      "imageUrl": "/generated/mcp-thumbs/iphone-69-spot-ingredient-flags.jpg",
+      "previewImageUrl": "/generated/mcp-thumbs/iphone-69-spot-ingredient-flags.jpg",
+      "sourceImageUrl": "/generated/iphone-69-spot-ingredient-flags.png"
+    },
+    {
+      "id": "iphone-69-can-my-dog-eat-this",
+      "title": "iPhone 6.9 - Can my dog eat this?",
+      "caption": "iPhone 6.9-inch portrait / 1320 x 2868",
+      "tone": "iPhone 6.9-inch portrait",
+      "prompt": "",
+      "imageUrl": "/generated/mcp-thumbs/iphone-69-can-my-dog-eat-this.jpg",
+      "previewImageUrl": "/generated/mcp-thumbs/iphone-69-can-my-dog-eat-this.jpg",
+      "sourceImageUrl": "/generated/iphone-69-can-my-dog-eat-this.png"
+    },
+    {
+      "id": "iphone-69-try-three-scans-free",
+      "title": "iPhone 6.9 - Try 3 scans free",
+      "caption": "iPhone 6.9-inch portrait / 1320 x 2868",
+      "tone": "iPhone 6.9-inch portrait",
+      "prompt": "",
+      "imageUrl": "/generated/mcp-thumbs/iphone-69-try-three-scans-free.jpg",
+      "previewImageUrl": "/generated/mcp-thumbs/iphone-69-try-three-scans-free.jpg",
+      "sourceImageUrl": "/generated/iphone-69-try-three-scans-free.png"
+    },
+    {
+      "id": "iphone-69-unlimited-label-checks",
+      "title": "iPhone 6.9 - Unlimited label checks",
+      "caption": "iPhone 6.9-inch portrait / 1320 x 2868",
+      "tone": "iPhone 6.9-inch portrait",
+      "prompt": "",
+      "imageUrl": "/generated/mcp-thumbs/iphone-69-unlimited-label-checks.jpg",
+      "previewImageUrl": "/generated/mcp-thumbs/iphone-69-unlimited-label-checks.jpg",
+      "sourceImageUrl": "/generated/iphone-69-unlimited-label-checks.png"
+    },
+    {
+      "id": "iphone-67-scan-before-you-buy",
+      "title": "iPhone 6.7 - Scan before you buy",
+      "caption": "iPhone 6.7-inch portrait / 1290 x 2796",
+      "tone": "iPhone 6.7-inch portrait",
+      "prompt": "",
+      "imageUrl": "/generated/mcp-thumbs/iphone-67-scan-before-you-buy.jpg",
+      "previewImageUrl": "/generated/mcp-thumbs/iphone-67-scan-before-you-buy.jpg",
+      "sourceImageUrl": "/generated/iphone-67-scan-before-you-buy.png"
+    },
+    {
+      "id": "iphone-67-food-score-in-seconds",
+      "title": "iPhone 6.7 - Score food in seconds",
+      "caption": "iPhone 6.7-inch portrait / 1290 x 2796",
+      "tone": "iPhone 6.7-inch portrait",
+      "prompt": "",
+      "imageUrl": "/generated/mcp-thumbs/iphone-67-food-score-in-seconds.jpg",
+      "previewImageUrl": "/generated/mcp-thumbs/iphone-67-food-score-in-seconds.jpg",
+      "sourceImageUrl": "/generated/iphone-67-food-score-in-seconds.png"
+    },
+    {
+      "id": "iphone-67-spot-ingredient-flags",
+      "title": "iPhone 6.7 - Spot ingredient flags",
+      "caption": "iPhone 6.7-inch portrait / 1290 x 2796",
+      "tone": "iPhone 6.7-inch portrait",
+      "prompt": "",
+      "imageUrl": "/generated/mcp-thumbs/iphone-67-spot-ingredient-flags.jpg",
+      "previewImageUrl": "/generated/mcp-thumbs/iphone-67-spot-ingredient-flags.jpg",
+      "sourceImageUrl": "/generated/iphone-67-spot-ingredient-flags.png"
+    },
+    {
+      "id": "iphone-67-can-my-dog-eat-this",
+      "title": "iPhone 6.7 - Can my dog eat this?",
+      "caption": "iPhone 6.7-inch portrait / 1290 x 2796",
+      "tone": "iPhone 6.7-inch portrait",
+      "prompt": "",
+      "imageUrl": "/generated/mcp-thumbs/iphone-67-can-my-dog-eat-this.jpg",
+      "previewImageUrl": "/generated/mcp-thumbs/iphone-67-can-my-dog-eat-this.jpg",
+      "sourceImageUrl": "/generated/iphone-67-can-my-dog-eat-this.png"
+    },
+    {
+      "id": "iphone-67-try-three-scans-free",
+      "title": "iPhone 6.7 - Try 3 scans free",
+      "caption": "iPhone 6.7-inch portrait / 1290 x 2796",
+      "tone": "iPhone 6.7-inch portrait",
+      "prompt": "",
+      "imageUrl": "/generated/mcp-thumbs/iphone-67-try-three-scans-free.jpg",
+      "previewImageUrl": "/generated/mcp-thumbs/iphone-67-try-three-scans-free.jpg",
+      "sourceImageUrl": "/generated/iphone-67-try-three-scans-free.png"
+    },
+    {
+      "id": "iphone-67-unlimited-label-checks",
+      "title": "iPhone 6.7 - Unlimited label checks",
+      "caption": "iPhone 6.7-inch portrait / 1290 x 2796",
+      "tone": "iPhone 6.7-inch portrait",
+      "prompt": "",
+      "imageUrl": "/generated/mcp-thumbs/iphone-67-unlimited-label-checks.jpg",
+      "previewImageUrl": "/generated/mcp-thumbs/iphone-67-unlimited-label-checks.jpg",
+      "sourceImageUrl": "/generated/iphone-67-unlimited-label-checks.png"
+    },
+    {
+      "id": "ipad-13-scan-before-you-buy",
+      "title": "iPad 13 - Scan before you buy",
+      "caption": "iPad 13-inch portrait / 2064 x 2752",
+      "tone": "iPad 13-inch portrait",
+      "prompt": "",
+      "imageUrl": "/generated/mcp-thumbs/ipad-13-scan-before-you-buy.jpg",
+      "previewImageUrl": "/generated/mcp-thumbs/ipad-13-scan-before-you-buy.jpg",
+      "sourceImageUrl": "/generated/ipad-13-scan-before-you-buy.png"
+    },
+    {
+      "id": "ipad-13-food-score-in-seconds",
+      "title": "iPad 13 - Score food in seconds",
+      "caption": "iPad 13-inch portrait / 2064 x 2752",
+      "tone": "iPad 13-inch portrait",
+      "prompt": "",
+      "imageUrl": "/generated/mcp-thumbs/ipad-13-food-score-in-seconds.jpg",
+      "previewImageUrl": "/generated/mcp-thumbs/ipad-13-food-score-in-seconds.jpg",
+      "sourceImageUrl": "/generated/ipad-13-food-score-in-seconds.png"
+    },
+    {
+      "id": "ipad-13-spot-ingredient-flags",
+      "title": "iPad 13 - Spot ingredient flags",
+      "caption": "iPad 13-inch portrait / 2064 x 2752",
+      "tone": "iPad 13-inch portrait",
+      "prompt": "",
+      "imageUrl": "/generated/mcp-thumbs/ipad-13-spot-ingredient-flags.jpg",
+      "previewImageUrl": "/generated/mcp-thumbs/ipad-13-spot-ingredient-flags.jpg",
+      "sourceImageUrl": "/generated/ipad-13-spot-ingredient-flags.png"
+    },
+    {
+      "id": "ipad-13-can-my-dog-eat-this",
+      "title": "iPad 13 - Can my dog eat this?",
+      "caption": "iPad 13-inch portrait / 2064 x 2752",
+      "tone": "iPad 13-inch portrait",
+      "prompt": "",
+      "imageUrl": "/generated/mcp-thumbs/ipad-13-can-my-dog-eat-this.jpg",
+      "previewImageUrl": "/generated/mcp-thumbs/ipad-13-can-my-dog-eat-this.jpg",
+      "sourceImageUrl": "/generated/ipad-13-can-my-dog-eat-this.png"
+    },
+    {
+      "id": "ipad-13-try-three-scans-free",
+      "title": "iPad 13 - Try 3 scans free",
+      "caption": "iPad 13-inch portrait / 2064 x 2752",
+      "tone": "iPad 13-inch portrait",
+      "prompt": "",
+      "imageUrl": "/generated/mcp-thumbs/ipad-13-try-three-scans-free.jpg",
+      "previewImageUrl": "/generated/mcp-thumbs/ipad-13-try-three-scans-free.jpg",
+      "sourceImageUrl": "/generated/ipad-13-try-three-scans-free.png"
+    },
+    {
+      "id": "ipad-13-unlimited-label-checks",
+      "title": "iPad 13 - Unlimited label checks",
+      "caption": "iPad 13-inch portrait / 2064 x 2752",
+      "tone": "iPad 13-inch portrait",
+      "prompt": "",
+      "imageUrl": "/generated/mcp-thumbs/ipad-13-unlimited-label-checks.jpg",
+      "previewImageUrl": "/generated/mcp-thumbs/ipad-13-unlimited-label-checks.jpg",
+      "sourceImageUrl": "/generated/ipad-13-unlimited-label-checks.png"
+    }
+  ]
+}

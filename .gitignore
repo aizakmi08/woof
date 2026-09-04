@@ -5,9 +5,18 @@ node_modules/
 
 # Expo
 .expo/
+supabase/.temp/
 dist/
 web-build/
 expo-env.d.ts
+/outputs/
+/output/
+/inputs/
+/store/
+/tmp/
+/audit/
+/.agent-preflight/
+/coverage/
 
 # Native
 .kotlin/

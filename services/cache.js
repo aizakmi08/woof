@@ -1,4 +1,8 @@
 import { supabase } from "./supabase";
+import { createLogger } from "./logger";
+import { hasVerifiedIngredientData, hasVerifiedProductImageData } from "./verifiedScoring";
+
+const logger = createLogger("CACHE");
 
 /**
  * Deterministic normalization for cache key matching.
@@ -35,14 +39,22 @@ export async function getCachedAnalysis(cacheKey) {
 
     if (error || !data) {
       if (error && error.code !== "PGRST116") {
-        console.log("[CACHE] MISS for key:", cacheKey, error.message);
+        logger.debug("[CACHE] MISS for key:", cacheKey, error.message);
       } else {
-        console.log("[CACHE] MISS for key:", cacheKey);
+        logger.debug("[CACHE] MISS for key:", cacheKey);
       }
       return { hit: false };
     }
 
-    console.log("[CACHE] HIT for key:", cacheKey);
+    logger.debug("[CACHE] HIT for key:", cacheKey);
+
+    if (
+      data.data_source === "verified" &&
+      (!hasVerifiedIngredientData(data.opff_data || {}) || !hasVerifiedProductImageData(data.opff_data || {}))
+    ) {
+      logger.debug("[CACHE] Ignoring verified cache without ingredient and image provenance:", cacheKey);
+      return { hit: false };
+    }
 
     // Increment hit count (fire-and-forget)
     supabase.rpc("increment_cache_hit", { p_key: cacheKey }).catch(() => {});
@@ -54,7 +66,7 @@ export async function getCachedAnalysis(cacheKey) {
       opffData: data.opff_data || null,
     };
   } catch (err) {
-    console.log("[CACHE] Error during lookup:", err.message);
+    logger.debug("[CACHE] Error during lookup:", err.message);
     return { hit: false };
   }
 }

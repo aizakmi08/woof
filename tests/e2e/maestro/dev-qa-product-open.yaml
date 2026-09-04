@@ -1,0 +1,61 @@
+appId: io.woof.app
+name: Development QA product rows open
+---
+- launchApp:
+    clearState: false
+- runFlow:
+    when:
+      visible: "Open in .*woof.*"
+    commands:
+      - tapOn: "Cancel"
+- extendedWaitUntil:
+    visible: "http://.*:8081|Close|Woof|How Woof works|Sign in to Apple.*Account"
+    timeout: 60000
+- runFlow:
+    when:
+      visible: "http://.*:8081"
+    commands:
+      - tapOn: "http://.*:8081"
+- extendedWaitUntil:
+    visible: "Close|Woof|How Woof works|Sign in to Apple.*Account"
+    timeout: 60000
+- runFlow:
+    when:
+      visible: "This is the developer menu.*"
+    commands:
+      - tapOn: "Close"
+- runFlow:
+    when:
+      visible: "Sign in to Apple.*Account"
+    commands:
+      - tapOn: "Cancel"
+- extendedWaitUntil:
+    visible: "Woof|How Woof works"
+    timeout: 60000
+- runFlow:
+    when:
+      visible: "How Woof works"
+    commands:
+      - tapOn: "How Woof works"
+      - tapOn: "Go to home"
+- assertVisible: "Woof"
+- waitForAnimationToEnd
+- tapOn: "Open development QA fixtures"
+- runFlow:
+    when:
+      notVisible: "Development QA"
+    commands:
+      - tapOn:
+          point: "50%,15%"
+- extendedWaitUntil:
+    visible: "Development QA"
+    timeout: 10000
+- scrollUntilVisible:
+    element:
+      text: "Typed results"
+    direction: DOWN
+- tapOn: "Typed results"
+- assertVisible: "QA Fixture. QA Small Breed Chicken Recipe. 5 lb bag, Dry, Dog. Verified"
+- tapOn: "QA Fixture. QA Small Breed Chicken Recipe. 5 lb bag, Dry, Dog. Verified"
+- assertVisible: "QA Small Breed Chicken Recipe"
+- assertNotVisible: "Development QA"

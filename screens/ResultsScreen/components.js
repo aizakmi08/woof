@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback, forwardRef } from "react";
-import { Text, View, TouchableOpacity, LayoutAnimation, Platform, UIManager, StyleSheet as RNStyleSheet, Modal, PanResponder, Pressable, ScrollView, useWindowDimensions } from "react-native";
+import { View, TouchableOpacity, LayoutAnimation, Platform, UIManager, StyleSheet as RNStyleSheet, Modal, PanResponder, Pressable, ScrollView, useWindowDimensions, ActivityIndicator } from "react-native";
+import { AppText as Text, MAX_FONT_SIZE_MULTIPLIER } from "../../components/AppText";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -14,20 +15,25 @@ import Animated, {
   FadeInUp,
   FadeOut,
   runOnJS,
+  useReducedMotion,
 } from "react-native-reanimated";
 import Svg, { Circle } from "react-native-svg";
 import { LinearGradient } from "expo-linear-gradient";
-import { Check, X, Star, ChevronRight, ChevronDown, Utensils, Wheat, Calendar, Flame, AlertTriangle, AlertCircle, CheckCircle2, PawPrint, Lock, Shield } from "lucide-react-native";
+import { Check, X, Star, ChevronRight, ChevronDown, Utensils, Wheat, Calendar, Flame, AlertTriangle, AlertCircle, CheckCircle2, PawPrint, Lock, Shield, UserPlus } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { useTheme, getScoreConfig, Colors, Animation, Spacing, Shadows, Typography } from "../../theme";
 import { useStyles } from "./styles";
 import { supabase } from "../../services/supabase";
+import { createLogger } from "../../services/logger";
+import { BRAND_NAME, BRAND_PRO_NAME } from "../../config/brand";
+import { BrandLogo } from "../../components/BrandLogo";
 
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+const logger = createLogger("RESULTS");
 
 // --- ProGate (blur overlay for free users) ---
 
@@ -37,19 +43,22 @@ export function ProGate({ isPro, onUpgrade, children }) {
 
   return (
     <View>
-      <View pointerEvents="none" style={{ opacity: 0.15 }}>
+      <View style={{ opacity: 0.15, pointerEvents: "none" }}>
         {children}
       </View>
       <View style={proGateStyles.overlay}>
         <Lock size={20} color={theme.textTertiary} strokeWidth={2} />
         <Text style={[proGateStyles.text, { color: theme.textSecondary }]}>
-          Unlock with Woof Pro
+          Unlock with {BRAND_PRO_NAME}
         </Text>
         <Pressable
           onPress={() => {
             Haptics.selectionAsync();
             onUpgrade();
           }}
+          accessibilityRole="button"
+          accessibilityLabel={`See ${BRAND_PRO_NAME} plans`}
+          accessibilityHint="Opens subscription options"
           style={({ pressed }) => [
             proGateStyles.button,
             { backgroundColor: theme.buttonPrimary, opacity: pressed ? 0.8 : 1 },
@@ -92,59 +101,47 @@ const proGateStyles = RNStyleSheet.create({
 export function ScanLimitBanner({ remaining }) {
   const theme = useTheme();
 
-  if (remaining <= 0) return null;
+  if (!Number.isFinite(remaining) || remaining <= 0) return null;
 
   const message = remaining === 1
     ? "Last free scan"
     : `${remaining} free scans remaining`;
-  const scansUsed = 3 - remaining;
-
   return (
-    <View style={scanBannerStyles.container}>
-      <Text style={[scanBannerStyles.text, { color: theme.textTertiary }]}>
+    <View style={[scanBannerStyles.container, { backgroundColor: theme.surface, borderColor: theme.separator }]}>
+      <Text style={[scanBannerStyles.text, { color: theme.textSecondary }]}>
         {message}
       </Text>
-      <View style={scanBannerStyles.dotsRow}>
-        {[0, 1, 2].map((i) => (
-          <View
-            key={i}
-            style={[
-              scanBannerStyles.dot,
-              { backgroundColor: i < scansUsed ? theme.textTertiary : Colors.divider },
-            ]}
-          />
-        ))}
-      </View>
+      <Text style={[scanBannerStyles.planLabel, { color: theme.textTertiary }]}>Free plan</Text>
     </View>
   );
 }
 
 const scanBannerStyles = RNStyleSheet.create({
   container: {
+    minHeight: 40,
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    paddingVertical: 8,
+    justifyContent: "space-between",
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    marginBottom: 14,
   },
   text: {
     fontSize: 13,
-    fontWeight: "400",
+    fontWeight: "600",
   },
-  dotsRow: {
-    flexDirection: "row",
-    gap: 6,
-  },
-  dot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+  planLabel: {
+    fontSize: 12,
+    fontWeight: "600",
   },
 });
 
 // --- ProGateOverlay (standalone gate block for free users) ---
 
-export function ProGateOverlay({ onUpgrade, remainingScans }) {
+export function ProGateOverlay({ onUpgrade }) {
   const theme = useTheme();
+  const reduceMotion = useReducedMotion();
   const ctaScale = useSharedValue(1);
   const lockOpacity = useSharedValue(0.5);
   const ctaAnimStyle = useAnimatedStyle(() => ({
@@ -155,43 +152,17 @@ export function ProGateOverlay({ onUpgrade, remainingScans }) {
   }));
 
   useEffect(() => {
-    lockOpacity.value = withRepeat(
+    lockOpacity.value = reduceMotion ? 1 : withRepeat(
       withSequence(
         withTiming(1, { duration: 1500 }),
         withTiming(0.5, { duration: 1500 })
       ),
       -1
     );
-  }, []);
-
-  const scanText = remainingScans <= 0
-    ? "No free scans remaining"
-    : `${remainingScans} free scan${remainingScans === 1 ? "" : "s"} remaining`;
+  }, [reduceMotion]);
 
   return (
     <View style={gateStyles.container}>
-      {/* Gradient fade from content above */}
-      <LinearGradient
-        colors={["transparent", theme.bg]}
-        style={gateStyles.gradient}
-        pointerEvents="none"
-      />
-
-      {/* Ghost quality bars (recognizable shapes above gate text) */}
-      <View style={gateStyles.ghostContainer}>
-        {[80, 65, 55, 72, 45].map((w, i) => (
-          <View key={i} style={gateStyles.ghostBarRow}>
-            <View style={[gateStyles.ghostLabel, { backgroundColor: theme.textTertiary }]} />
-            <View style={[gateStyles.ghostTrack, { backgroundColor: Colors.divider }]}>
-              <View style={[gateStyles.ghostFill, { width: `${w}%`, backgroundColor: theme.textTertiary }]} />
-            </View>
-          </View>
-        ))}
-        {/* Ghost card shapes */}
-        <View style={[gateStyles.ghostCard, { backgroundColor: theme.textTertiary }]} />
-        <View style={[gateStyles.ghostCard, { backgroundColor: theme.textTertiary }]} />
-      </View>
-
       {/* Lock icon with pulse */}
       <Animated.View style={lockAnimStyle}>
         <Lock size={24} color={theme.textTertiary} strokeWidth={2} />
@@ -199,17 +170,12 @@ export function ProGateOverlay({ onUpgrade, remainingScans }) {
 
       {/* Title */}
       <Text style={[gateStyles.title, { color: theme.textPrimary }]}>
-        See what's really inside
+        Go deeper with {BRAND_PRO_NAME}
       </Text>
 
       {/* Subtitle */}
       <Text style={[gateStyles.subtitle, { color: theme.textSecondary }]}>
-        {"Unlock ingredient analysis, quality scores,\nreviews, and recall alerts"}
-      </Text>
-
-      {/* Price line */}
-      <Text style={[gateStyles.price, { color: theme.textPrimary }]}>
-        From $3.33/month
+        {"Unlimited scans, ingredient explanations,\nnutrition, and quality breakdowns"}
       </Text>
 
       {/* CTA button */}
@@ -220,6 +186,9 @@ export function ProGateOverlay({ onUpgrade, remainingScans }) {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
           onUpgrade();
         }}
+        accessibilityRole="button"
+        accessibilityLabel="Unlock full report"
+        accessibilityHint={`Opens ${BRAND_PRO_NAME} plans`}
       >
         <Animated.View
           style={[
@@ -236,7 +205,7 @@ export function ProGateOverlay({ onUpgrade, remainingScans }) {
 
       {/* Scan count */}
       <Text style={[gateStyles.scanCount, { color: theme.textTertiary }]}>
-        {scanText}
+        Unlock the quality breakdown and nutrition facts
       </Text>
     </View>
   );
@@ -245,14 +214,7 @@ export function ProGateOverlay({ onUpgrade, remainingScans }) {
 const gateStyles = RNStyleSheet.create({
   container: {
     alignItems: "center",
-    paddingTop: 8,
-  },
-  gradient: {
-    position: "absolute",
-    top: -60,
-    left: 0,
-    right: 0,
-    height: 60,
+    paddingTop: 28,
   },
   title: {
     fontSize: 22,
@@ -267,17 +229,12 @@ const gateStyles = RNStyleSheet.create({
     textAlign: "center",
     marginTop: 6,
   },
-  price: {
-    fontSize: 15,
-    fontWeight: "500",
-    marginTop: 16,
-  },
   cta: {
     height: Spacing.buttonHeight,
     borderRadius: Spacing.buttonRadius,
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 12,
+    marginTop: 16,
     marginHorizontal: 20,
     paddingHorizontal: 32,
     minWidth: 280,
@@ -291,43 +248,9 @@ const gateStyles = RNStyleSheet.create({
     fontWeight: "400",
     marginTop: 10,
   },
-  ghostContainer: {
-    marginBottom: 20,
-    width: "100%",
-    paddingHorizontal: 20,
-    gap: 10,
-  },
-  ghostBarRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  ghostLabel: {
-    width: 60,
-    height: 8,
-    borderRadius: 4,
-    opacity: 0.08,
-  },
-  ghostTrack: {
-    flex: 1,
-    height: 6,
-    borderRadius: 3,
-    opacity: 0.10,
-    overflow: "hidden",
-  },
-  ghostFill: {
-    height: 6,
-    borderRadius: 3,
-  },
-  ghostCard: {
-    height: 56,
-    borderRadius: 14,
-    opacity: 0.08,
-    marginTop: 2,
-  },
 });
 
-// --- PostScanPrompt (shown once after 2nd scan for free users) ---
+// --- PostScanPrompt (shown once after the third free scan) ---
 
 export function PostScanPrompt({ onUpgrade, onDismiss }) {
   const theme = useTheme();
@@ -341,18 +264,20 @@ export function PostScanPrompt({ onUpgrade, onDismiss }) {
       <View style={postScanStyles.headerRow}>
         <Shield size={16} color={Colors.scoreExcellent} strokeWidth={2} />
         <Text style={[postScanStyles.title, { color: theme.textPrimary }]}>
-          Enjoying Woof?
+          Enjoying {BRAND_NAME}?
         </Text>
         <Pressable
           onPress={onDismiss}
           hitSlop={12}
           style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1, marginLeft: "auto" })}
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss Pro prompt"
         >
           <X size={16} color={theme.textTertiary} strokeWidth={2} />
         </Pressable>
       </View>
       <Text style={[postScanStyles.subtitle, { color: theme.textSecondary }]}>
-        Get unlimited scans and full ingredient analysis
+        Get unlimited scans and detailed ingredient explanations
       </Text>
       <Pressable
         onPressIn={() => { ctaScale.value = withSpring(0.97, { damping: 20, stiffness: 300 }); }}
@@ -361,6 +286,9 @@ export function PostScanPrompt({ onUpgrade, onDismiss }) {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           onUpgrade();
         }}
+        accessibilityRole="button"
+        accessibilityLabel={`See ${BRAND_PRO_NAME} plans`}
+        accessibilityHint="Opens subscription options"
       >
         <Animated.View
           style={[
@@ -408,6 +336,245 @@ const postScanStyles = RNStyleSheet.create({
   ctaText: {
     fontSize: 15,
     fontWeight: "600",
+  },
+});
+
+// --- GuestSavePrompt (shown after value for anonymous users) ---
+
+export function GuestSavePrompt({ onSave, onDismiss, savingProvider, showApple }) {
+  const theme = useTheme();
+  const buttonDisabled = Boolean(savingProvider);
+
+  const renderSaveButton = ({ provider, label, primary = false }) => {
+    const isSaving = savingProvider === provider;
+    return (
+      <Pressable
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          onSave(provider);
+        }}
+        disabled={buttonDisabled}
+        style={({ pressed }) => [
+          guestSaveStyles.button,
+          primary
+            ? { backgroundColor: theme.buttonPrimary }
+            : {
+                backgroundColor: theme.card,
+                borderColor: theme.separator,
+                borderWidth: 1,
+              },
+          { opacity: pressed ? 0.85 : buttonDisabled && !isSaving ? 0.6 : 1 },
+        ]}
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        accessibilityHint="Links this guest scan history to a sign-in"
+        accessibilityState={{ disabled: buttonDisabled, busy: isSaving }}
+      >
+        {isSaving ? (
+          <ActivityIndicator color={primary ? theme.buttonText : theme.textPrimary} />
+        ) : (
+          <Text style={[
+            guestSaveStyles.buttonText,
+            { color: primary ? theme.buttonText : theme.textPrimary },
+          ]}>
+            {label}
+          </Text>
+        )}
+      </Pressable>
+    );
+  };
+
+  return (
+    <View style={[guestSaveStyles.container, { backgroundColor: theme.surface, borderColor: theme.separator }]}>
+      <View style={guestSaveStyles.headerRow}>
+        <UserPlus size={17} color={theme.textPrimary} strokeWidth={2} />
+        <Text style={[guestSaveStyles.title, { color: theme.textPrimary }]}>
+          Save this scan history
+        </Text>
+        <Pressable
+          onPress={onDismiss}
+          hitSlop={12}
+          style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1, marginLeft: "auto" })}
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss save account prompt"
+        >
+          <X size={16} color={theme.textTertiary} strokeWidth={2} />
+        </Pressable>
+      </View>
+      <Text style={[guestSaveStyles.subtitle, { color: theme.textSecondary }]}>
+        Add Apple or Google so your scans, Pro access, and product submissions can move with you.
+      </Text>
+      <View style={guestSaveStyles.buttons}>
+        {showApple && renderSaveButton({
+          provider: "apple",
+          label: "Save with Apple",
+          primary: true,
+        })}
+        {renderSaveButton({
+          provider: "google",
+          label: "Save with Google",
+          primary: !showApple,
+        })}
+      </View>
+    </View>
+  );
+}
+
+const guestSaveStyles = RNStyleSheet.create({
+  container: {
+    borderRadius: Spacing.cardRadius,
+    borderWidth: 1,
+    padding: 16,
+    marginTop: 16,
+  },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  title: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  subtitle: {
+    fontSize: 14,
+    fontWeight: "400",
+    lineHeight: 20,
+    marginTop: 8,
+    marginBottom: 12,
+  },
+  buttons: {
+    gap: 10,
+  },
+  button: {
+    height: 42,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  buttonText: {
+    fontSize: 15,
+    fontWeight: "600",
+    letterSpacing: 0,
+  },
+});
+
+// --- ReviewPrompt (shown sparingly after repeat successful scans) ---
+
+export function ReviewPrompt({ onRate, onDismiss, onAlreadyReviewed, onVisible }) {
+  const theme = useTheme();
+  const reduceMotion = useReducedMotion();
+  const visibleRecordedRef = useRef(false);
+  const ctaScale = useSharedValue(1);
+  const ctaAnimStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: ctaScale.value }],
+  }));
+
+  return (
+    <View
+      onLayout={() => {
+        if (visibleRecordedRef.current) return;
+        visibleRecordedRef.current = true;
+        onVisible?.();
+      }}
+      style={[reviewPromptStyles.container, { backgroundColor: theme.surface, borderColor: theme.separator }]}
+    >
+      <View style={reviewPromptStyles.headerRow}>
+        <Star size={16} color={Colors.scoreExcellent} strokeWidth={2} />
+        <Text style={[reviewPromptStyles.title, { color: theme.textPrimary }]}>
+          Help more pet parents find {BRAND_NAME}
+        </Text>
+        <Pressable
+          onPress={onDismiss}
+          hitSlop={12}
+          style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1, marginLeft: "auto" })}
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss rating prompt"
+        >
+          <X size={16} color={theme.textTertiary} strokeWidth={2} />
+        </Pressable>
+      </View>
+      <Text style={[reviewPromptStyles.subtitle, { color: theme.textSecondary }]}>
+        If {BRAND_NAME} helped with this scan, a quick rating supports the app.
+      </Text>
+      <Pressable
+        onPressIn={() => { ctaScale.value = reduceMotion ? 1 : withSpring(0.97, { damping: 20, stiffness: 300 }); }}
+        onPressOut={() => { ctaScale.value = reduceMotion ? 1 : withSpring(1, { damping: 15, stiffness: 150 }); }}
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          onRate();
+        }}
+        accessibilityRole="button"
+        accessibilityLabel={`Rate ${BRAND_NAME}`}
+        accessibilityHint="Opens the store rating page"
+      >
+        <Animated.View
+          style={[
+            reviewPromptStyles.cta,
+            { backgroundColor: theme.buttonPrimary },
+            ctaAnimStyle,
+          ]}
+        >
+          <Text style={[reviewPromptStyles.ctaText, { color: theme.buttonText }]}>
+            Rate {BRAND_NAME}
+          </Text>
+        </Animated.View>
+      </Pressable>
+      <Pressable
+        onPress={onAlreadyReviewed}
+        hitSlop={10}
+        accessibilityRole="button"
+        accessibilityLabel="I already reviewed the app"
+        style={({ pressed }) => ({ opacity: pressed ? 0.55 : 1, alignSelf: "center" })}
+      >
+        <Text style={[reviewPromptStyles.secondaryActionText, { color: theme.textSecondary }]}>
+          I already reviewed {BRAND_NAME}
+        </Text>
+      </Pressable>
+    </View>
+  );
+}
+
+const reviewPromptStyles = RNStyleSheet.create({
+  container: {
+    borderRadius: Spacing.cardRadius,
+    padding: 16,
+    marginTop: 0,
+    borderWidth: 1,
+    borderColor: Colors.divider,
+  },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 8,
+  },
+  title: {
+    fontSize: 15,
+    fontWeight: "700",
+    flexShrink: 1,
+  },
+  subtitle: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+  cta: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 42,
+    borderRadius: Spacing.buttonRadius,
+  },
+  ctaText: {
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  secondaryActionText: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "600",
+    marginTop: 12,
   },
 });
 
@@ -459,6 +626,7 @@ export const NUTRISCORE_COLORS = {
 // --- useStreamingText hook (character-level ChatGPT-like reveal) ---
 
 export function useStreamingText(rawText, isStreaming, done = false) {
+  const reduceMotion = useReducedMotion();
   const [displayText, setDisplayText] = useState("");
   const revealedRef = useRef(0);
   const targetRef = useRef("");
@@ -468,7 +636,7 @@ export function useStreamingText(rawText, isStreaming, done = false) {
 
   // When done, instantly reveal all remaining text
   useEffect(() => {
-    if (done && rawText) {
+    if ((done || reduceMotion) && rawText) {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
@@ -476,10 +644,10 @@ export function useStreamingText(rawText, isStreaming, done = false) {
       setDisplayText(rawText);
       revealedRef.current = rawText.length;
     }
-  }, [done, rawText]);
+  }, [done, rawText, reduceMotion]);
 
   useEffect(() => {
-    if (done) return;
+    if (done || reduceMotion) return;
 
     if (!isStreaming) {
       if (intervalRef.current) {
@@ -514,7 +682,7 @@ export function useStreamingText(rawText, isStreaming, done = false) {
         intervalRef.current = null;
       }
     };
-  }, [isStreaming, done]);
+  }, [isStreaming, done, reduceMotion]);
 
   useEffect(() => () => {
     if (intervalRef.current) clearInterval(intervalRef.current);
@@ -529,10 +697,11 @@ export function useStreamingText(rawText, isStreaming, done = false) {
 // --- StreamSection (Reanimated entering animation) ---
 
 export function StreamSection({ visible, delay = 0, children }) {
+  const reduceMotion = useReducedMotion();
   if (!visible) return null;
 
   return (
-    <Animated.View entering={FadeInUp.delay(delay).duration(350).springify().damping(20).stiffness(300)}>
+    <Animated.View entering={reduceMotion ? undefined : FadeInUp.delay(delay).duration(350).springify().damping(20).stiffness(300)}>
       {children}
     </Animated.View>
   );
@@ -542,24 +711,28 @@ export function StreamSection({ visible, delay = 0, children }) {
 
 export function BlinkingCursor() {
   const theme = useTheme();
+  const reduceMotion = useReducedMotion();
   const opacity = useSharedValue(1);
 
   useEffect(() => {
-    opacity.value = withRepeat(
+    opacity.value = reduceMotion ? 1 : withRepeat(
       withSequence(
         withTiming(0, { duration: 400 }),
         withTiming(1, { duration: 400 })
       ),
       -1
     );
-  }, []);
+  }, [reduceMotion]);
 
   const animStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
   }));
 
   return (
-    <Animated.Text style={[animStyle, { color: Colors.textPrimary, fontWeight: "300" }]}>
+    <Animated.Text
+      maxFontSizeMultiplier={MAX_FONT_SIZE_MULTIPLIER}
+      style={[animStyle, { color: theme.textPrimary, fontWeight: "300" }]}
+    >
       {"\u258C"}
     </Animated.Text>
   );
@@ -650,6 +823,7 @@ export function NovaGroupBadge({ group }) {
 
 export function CircularScore({ score, size = 180, strokeWidth = 12 }) {
   const { styles, theme } = useStyles();
+  const reduceMotion = useReducedMotion();
   const config = getScoreConfig(score);
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
@@ -672,6 +846,13 @@ export function CircularScore({ score, size = 180, strokeWidth = 12 }) {
   };
 
   useEffect(() => {
+    if (reduceMotion) {
+      fill.value = score / 100;
+      counter.value = score;
+      pulseScale.value = 1;
+      setDisplayScore(Math.round(score));
+      return undefined;
+    }
     // Arc fill: 0→score over 1000ms with easeOutCubic
     fill.value = withTiming(score / 100, {
       duration: 1000,
@@ -691,7 +872,7 @@ export function CircularScore({ score, size = 180, strokeWidth = 12 }) {
       runOnJS(fireHaptic)();
     }, 1000);
     return () => clearTimeout(timer);
-  }, [score]);
+  }, [reduceMotion, score]);
 
   const animatedProps = useAnimatedProps(() => ({
     strokeDashoffset: circumference * (1 - fill.value),
@@ -715,7 +896,7 @@ export function CircularScore({ score, size = 180, strokeWidth = 12 }) {
           cx={size / 2}
           cy={size / 2}
           r={radius}
-          stroke={Colors.divider}
+          stroke={theme.separator}
           strokeWidth={strokeWidth}
           fill="none"
         />
@@ -730,8 +911,7 @@ export function CircularScore({ score, size = 180, strokeWidth = 12 }) {
           strokeDasharray={circumference}
           animatedProps={animatedProps}
           strokeLinecap="round"
-          rotation={-90}
-          origin={`${size / 2}, ${size / 2}`}
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
         />
       </Svg>
 
@@ -740,8 +920,8 @@ export function CircularScore({ score, size = 180, strokeWidth = 12 }) {
         <Text style={[styles.heroScoreNumber, { color: config.color }]}>
           {displayScore}
         </Text>
-        <Text style={[styles.heroGradeLabel, { color: config.color }]}>
-          {config.label}
+        <Text style={[styles.heroGradeLabel, { color: theme.textTertiary }]}>
+          / 100
         </Text>
       </View>
     </Animated.View>
@@ -785,8 +965,8 @@ export function QuickStatsGrid({ nutrition }) {
         <View key={i} style={styles.statCell}>
           <s.Icon size={20} color={theme.textTertiary} strokeWidth={1.8} style={styles.statCellIcon} />
           <Text style={styles.statCellLabel}>{s.label.toUpperCase()}</Text>
-          <Text style={styles.statCellValue} numberOfLines={1}>
-            {shortenDisplayValue(s.value)}
+          <Text style={styles.statCellValue} numberOfLines={2}>
+            {String(s.value)}
           </Text>
         </View>
       ))}
@@ -797,38 +977,35 @@ export function QuickStatsGrid({ nutrition }) {
 // --- VerdictCard (colored left border accent) ---
 
 export function VerdictCard({ verdict, score, streaming, done, isPro = true }) {
-  const { styles } = useStyles();
+  const { styles, theme } = useStyles();
   const [expanded, setExpanded] = useState(false);
+  const [needsTruncate, setNeedsTruncate] = useState(false);
   if (!verdict) return null;
   const config = getScoreConfig(score || 0);
 
-  // Free user truncation: show first 2 sentences when done
+  // Line layout, not character counts, determines the visible free preview.
   const isFreeGated = !isPro && !streaming && done;
-  let displayVerdict = verdict;
-  if (isFreeGated) {
-    const sentences = verdict.split(". ");
-    if (sentences.length > 2) {
-      displayVerdict = sentences.slice(0, 2).join(". ") + ".";
-    }
-  }
-
-  const needsTruncate = !isFreeGated && !streaming && verdict.length > 200;
 
   return (
     <View style={[styles.verdictCard, { borderLeftColor: config.color }]}>
       <Text
         style={styles.verdictText}
         numberOfLines={expanded || streaming ? undefined : 4}
+        onTextLayout={(event) => {
+          if (!expanded && !streaming && event.nativeEvent.lines.length > 4) {
+            setNeedsTruncate(true);
+          }
+        }}
       >
         {streaming ? (
           <StreamingText text={verdict} streaming={streaming} done={done} style={styles.verdictText} />
         ) : (
-          displayVerdict
+          verdict
         )}
       </Text>
       {isFreeGated && (
         <LinearGradient
-          colors={[Colors.verdictBackground + "00", Colors.verdictBackground]}
+          colors={[theme.card + "00", theme.card]}
           style={{
             position: "absolute",
             bottom: 0,
@@ -837,12 +1014,17 @@ export function VerdictCard({ verdict, score, streaming, done, isPro = true }) {
             height: 48,
             borderBottomLeftRadius: Spacing.cardRadius,
             borderBottomRightRadius: Spacing.cardRadius,
+            pointerEvents: "none",
           }}
-          pointerEvents="none"
         />
       )}
-      {needsTruncate && !expanded && (
-        <TouchableOpacity onPress={() => setExpanded(true)} hitSlop={8}>
+      {needsTruncate && !isFreeGated && !expanded && !streaming && (
+        <TouchableOpacity
+          onPress={() => setExpanded(true)}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Show more verdict text"
+        >
           <Text style={styles.verdictMoreLink}>more</Text>
         </TouchableOpacity>
       )}
@@ -854,6 +1036,7 @@ export function VerdictCard({ verdict, score, streaming, done, isPro = true }) {
 
 export function CategoryBar({ name, score, detail, index = 0, isLast = false }) {
   const { styles, theme } = useStyles();
+  const reduceMotion = useReducedMotion();
   const config = getScoreConfig(score);
   const animWidth = useSharedValue(0);
   const fadeAnim = useSharedValue(0);
@@ -861,13 +1044,18 @@ export function CategoryBar({ name, score, detail, index = 0, isLast = false }) 
   const [needsTruncation, setNeedsTruncation] = useState(false);
 
   useEffect(() => {
+    if (reduceMotion) {
+      fadeAnim.value = 1;
+      animWidth.value = score;
+      return;
+    }
     const stagger = 200 + index * 150;
     fadeAnim.value = withDelay(stagger, withTiming(1, { duration: 300 }));
     animWidth.value = withDelay(stagger, withTiming(score, {
       duration: 600,
       easing: Easing.out(Easing.cubic),
     }));
-  }, [score]);
+  }, [index, reduceMotion, score]);
 
   const fadeStyle = useAnimatedStyle(() => ({
     opacity: fadeAnim.value,
@@ -879,9 +1067,11 @@ export function CategoryBar({ name, score, detail, index = 0, isLast = false }) 
 
   const toggleExpand = () => {
     Haptics.selectionAsync();
-    LayoutAnimation.configureNext(
-      LayoutAnimation.create(250, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity)
-    );
+    if (!reduceMotion) {
+      LayoutAnimation.configureNext(
+        LayoutAnimation.create(250, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity)
+      );
+    }
     setExpanded(!expanded);
   };
 
@@ -924,7 +1114,12 @@ export function CategoryBar({ name, score, detail, index = 0, isLast = false }) 
               {detail}
             </Text>
             {needsTruncation && (
-              <TouchableOpacity onPress={toggleExpand} hitSlop={8}>
+              <TouchableOpacity
+                onPress={toggleExpand}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={expanded ? `Show less ${name} detail` : `Show more ${name} detail`}
+              >
                 <Text style={styles.categoryMoreLink}>
                   {expanded ? "less" : "more"}
                 </Text>
@@ -991,7 +1186,13 @@ export function CollapsibleSection({ title, accentColor, defaultOpen = true, chi
 
   return (
     <View style={styles.sectionCard}>
-      <TouchableOpacity onPress={toggle} activeOpacity={0.7} style={styles.collapsibleHeader}>
+      <TouchableOpacity
+        onPress={toggle}
+        activeOpacity={0.7}
+        style={styles.collapsibleHeader}
+        accessibilityRole="button"
+        accessibilityLabel={`${expanded ? "Collapse" : "Expand"} ${title}`}
+      >
         <View style={styles.collapsibleHeaderLeft}>
           {accentColor && (
             <View style={[styles.sectionAccent, { backgroundColor: accentColor }]} />
@@ -1049,21 +1250,6 @@ export function NutritionRow({ label, value }) {
 
 // --- NutritionFacts (2-column, 3-row grid — reference data) ---
 
-// Shorten long display values (lifestage, protein source, etc.)
-function shortenDisplayValue(value) {
-  if (!value || typeof value !== "string") return String(value ?? "");
-  if (value.length <= 16) return value;
-  // Remove parenthetical info: "Adult Dogs (1+ years)" → "Adult Dogs"
-  let short = value.replace(/\s*\(.*?\)/g, "").trim();
-  if (short.length <= 16) return short;
-  // 3+ words → first 2 words
-  const words = short.split(/\s+/);
-  if (words.length > 2) return words.slice(0, 2).join(" ");
-  // 2 words still too long → first word only
-  if (short.length > 16 && words.length === 2) return words[0];
-  return short;
-}
-
 const QUALIFIER_DOT_COLORS = {
   high: Colors.ingredientGood,
   moderate: Colors.ingredientNeutral,
@@ -1085,7 +1271,14 @@ function NutritionCell({ label, value, qualifier, isLeft }) {
     <View style={[styles.nutCell, isLeft ? styles.nutCellLeft : styles.nutCellRight]}>
       <Text style={styles.nutLabel}>{label}</Text>
       <View style={styles.nutValueArea}>
-        <Text style={styles.nutValue} numberOfLines={1}>{shortenDisplayValue(String(value))}</Text>
+        <Text
+          style={styles.nutValue}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.72}
+        >
+          {String(value)}
+        </Text>
         {qualifier && (
           <View style={styles.nutQualifierRow}>
             <View style={[styles.nutQualifierDot, { backgroundColor: dotColor }]} />
@@ -1099,38 +1292,41 @@ function NutritionCell({ label, value, qualifier, isLeft }) {
 
 export function NutritionFacts({ nutrition }) {
   const { styles } = useStyles();
-  if (!nutrition) return null;
+  if (!nutrition?.hasPublishedNutrients) return null;
 
   const clean = (v) => (v && v !== "N/A" && v !== "Unknown") ? v : null;
 
-  const rows = [
-    [
-      { label: "Protein", value: clean(nutrition.proteinPercent), qualifier: nutrition.proteinPercent ? nutrition.proteinLevel : null },
-      { label: "Calories", value: clean(nutrition.caloriesPerCup) },
-    ],
-    [
-      { label: "Fat", value: clean(nutrition.fatPercent), qualifier: nutrition.fatPercent ? nutrition.fatLevel : null },
-      { label: "Life Stage", value: clean(nutrition.lifestage) },
-    ],
-    [
-      { label: "Fiber", value: clean(nutrition.fiberPercent) },
-      { label: "Grain Free", value: nutrition.grainFree != null ? (nutrition.grainFree ? "Yes" : "No") : null },
-    ],
-  ];
+  const facts = [
+    { label: "Protein", value: clean(nutrition.proteinPercent), qualifier: nutrition.proteinPercent ? nutrition.proteinLevel : null },
+    { label: "Fat", value: clean(nutrition.fatPercent), qualifier: nutrition.fatPercent ? nutrition.fatLevel : null },
+    { label: "Fiber", value: clean(nutrition.fiberPercent) },
+    { label: "Moisture", value: clean(nutrition.moisturePercent) },
+    { label: "Calcium (DM)", value: clean(nutrition.calciumDryMatterPercent) },
+    { label: "Phosphorus (DM)", value: clean(nutrition.phosphorusDryMatterPercent) },
+    { label: "Ca:P ratio", value: clean(nutrition.calciumPhosphorusRatio) },
+  ].filter((fact) => fact.value != null);
+
+  if (facts.length === 0) return null;
 
   return (
     <View style={styles.nutritionSection}>
-      <Text style={styles.nutritionTitle}>Nutrition Facts</Text>
-      {rows.map((row, ri) => (
-        <View key={ri}>
+      <Text style={styles.nutritionTitle}>
+        {nutrition.analysisTypeLabel || "Nutrient Analysis"} · {nutrition.analysisBasisLabel || "Basis not stated"}
+      </Text>
+      {facts.map((fact, index) => (
+        <View key={fact.label}>
           <View style={styles.nutRow}>
-            <NutritionCell {...row[0]} isLeft />
-            <View style={styles.nutVertDivider} />
-            <NutritionCell {...row[1]} isLeft={false} />
+            <NutritionCell {...fact} isLeft />
           </View>
-          {ri < rows.length - 1 && <View style={styles.nutHorizDivider} />}
+          {index < facts.length - 1 && <View style={styles.nutHorizDivider} />}
         </View>
       ))}
+      {!!nutrition.transparencyNote && (
+        <Text style={styles.nutritionNote}>{nutrition.transparencyNote}</Text>
+      )}
+      {!!nutrition.nutrientConcern?.summary && (
+        <Text style={styles.nutritionConcern}>{nutrition.nutrientConcern.summary}</Text>
+      )}
     </View>
   );
 }
@@ -1229,8 +1425,9 @@ function IngredientRow({ ingredient, isFirst, isLast, index, onPress }) {
 
 const COLLAPSED_COUNT = 5;
 
-export function IngredientsSection({ ingredients, onIngredientPress, totalCount, fadeLastItem }) {
-  const { styles, theme } = useStyles();
+export function IngredientsSection({ ingredients, onIngredientPress }) {
+  const { styles } = useStyles();
+  const reduceMotion = useReducedMotion();
   const [expanded, setExpanded] = useState(false);
 
   if (!ingredients || ingredients.length === 0) return null;
@@ -1239,31 +1436,30 @@ export function IngredientsSection({ ingredients, onIngredientPress, totalCount,
   const neutral = ingredients.filter((i) => i.rating === "neutral").length;
   const bad = ingredients.filter((i) => i.rating === "bad").length;
   const total = ingredients.length;
-  const displayTotal = totalCount || total;
 
   const segments = [];
   if (good > 0) segments.push({ color: Colors.ingredientGood, opacity: 1, flex: good / total, label: `${good} Good` });
   if (neutral > 0) segments.push({ color: Colors.ingredientNeutral, opacity: 0.4, flex: neutral / total, label: `${neutral} Neutral` });
   if (bad > 0) segments.push({ color: Colors.ingredientBad, opacity: 0.85, flex: bad / total, label: `${bad} Concerning` });
 
-  // Free users: show all passed ingredients (caller slices to 3 with fadeLastItem)
-  // Pro users: show first 5 collapsed, all when expanded
-  const canExpand = !fadeLastItem && total > COLLAPSED_COUNT;
+  const canExpand = total > COLLAPSED_COUNT;
   const visibleIngredients = canExpand && !expanded
     ? ingredients.slice(0, COLLAPSED_COUNT)
     : ingredients;
 
   const toggleExpand = () => {
     Haptics.selectionAsync();
-    LayoutAnimation.configureNext(
-      LayoutAnimation.create(250, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity)
-    );
+    if (!reduceMotion) {
+      LayoutAnimation.configureNext(
+        LayoutAnimation.create(250, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity)
+      );
+    }
     setExpanded(!expanded);
   };
 
   return (
     <View style={styles.ingredientsSection}>
-      <Text style={styles.ingredientsTitle}>{`Ingredients (${displayTotal})`}</Text>
+      <Text style={styles.ingredientsTitle}>{`Ingredients (${total})`}</Text>
 
       {/* Summary bar */}
       <View style={styles.ingSummaryBar}>
@@ -1290,35 +1486,11 @@ export function IngredientsSection({ ingredients, onIngredientPress, totalCount,
             <Text style={styles.ingSummaryLabelText}>{seg.label}</Text>
           </View>
         ))}
-        {totalCount != null && totalCount > total && (
-          <Text style={styles.ingSummaryLabelText}>· {totalCount - total} more</Text>
-        )}
       </View>
 
       {/* Rows (natural order — not reordered) */}
       {visibleIngredients.map((ing, i) => {
         const isLast = i === visibleIngredients.length - 1 && !canExpand;
-        const isFadedLast = fadeLastItem && i === visibleIngredients.length - 1;
-
-        if (isFadedLast) {
-          return (
-            <View key={i} pointerEvents="none">
-              <IngredientRow
-                ingredient={ing}
-                isFirst={i === 0}
-                isLast={true}
-                index={i}
-                onPress={() => {}}
-              />
-              <LinearGradient
-                colors={["transparent", theme.bg]}
-                locations={[0, 0.7]}
-                style={RNStyleSheet.absoluteFill}
-                pointerEvents="none"
-              />
-            </View>
-          );
-        }
 
         return (
           <IngredientRow
@@ -1332,9 +1504,14 @@ export function IngredientsSection({ ingredients, onIngredientPress, totalCount,
         );
       })}
 
-      {/* Expand / collapse toggle (pro users only, >5 ingredients) */}
+      {/* Keep long exact lists compact without hiding them behind a paywall. */}
       {canExpand && (
-        <TouchableOpacity onPress={toggleExpand} activeOpacity={0.7}>
+        <TouchableOpacity
+          onPress={toggleExpand}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={expanded ? "Show fewer ingredients" : `Show all ${total} ingredients`}
+        >
           <View style={styles.ingExpandButton}>
             <Text style={styles.ingExpandText}>
               {expanded ? "Show less" : `Show all ${total} ingredients`}
@@ -1468,24 +1645,28 @@ export function IngredientSheet({ ingredient, onDismiss, isPro = true, onUpgrade
       <View style={{ flex: 1 }}>
         {/* Backdrop */}
         <Animated.View
-          style={[RNStyleSheet.absoluteFill, { backgroundColor: "#000" }, backdropAnimStyle]}
-          pointerEvents="none"
+          style={[
+            RNStyleSheet.absoluteFill,
+            { backgroundColor: "#000", pointerEvents: "none" },
+            backdropAnimStyle,
+          ]}
         />
-        <Pressable style={RNStyleSheet.absoluteFill} onPress={dismiss} />
+        <Pressable
+          style={RNStyleSheet.absoluteFill}
+          onPress={dismiss}
+          accessibilityRole="button"
+          accessibilityLabel="Close ingredient detail"
+        />
 
         {/* Sheet — anchored to bottom */}
-        <View style={{ flex: 1, justifyContent: "flex-end" }} pointerEvents="box-none">
+        <View style={{ flex: 1, justifyContent: "flex-end", pointerEvents: "box-none" }}>
           <Animated.View
             style={[
               {
                 backgroundColor: theme.card,
                 borderTopLeftRadius: 20,
                 borderTopRightRadius: 20,
-                shadowColor: "#000",
-                shadowOffset: { width: 0, height: -4 },
-                shadowOpacity: 0.08,
-                shadowRadius: 20,
-                elevation: 10,
+                boxShadow: "0 -4px 20px rgba(0, 0, 0, 0.08)",
               },
               sheetAnimStyle,
             ]}
@@ -1542,6 +1723,9 @@ export function IngredientSheet({ ingredient, onDismiss, isPro = true, onUpgrade
                           dismiss();
                           onUpgrade?.();
                         }}
+                        accessibilityRole="button"
+                        accessibilityLabel="Unlock ingredient details"
+                        accessibilityHint={`Opens ${BRAND_PRO_NAME} plans`}
                         style={({ pressed }) => [
                           sheetGateStyles.button,
                           { backgroundColor: theme.buttonPrimary, opacity: pressed ? 0.8 : 1 },
@@ -1621,252 +1805,11 @@ const sheetGateStyles = RNStyleSheet.create({
   },
 });
 
-// --- ReviewsSection (card with accent border, collapsible, pill tags) ---
-
-const STAR_GOLD = "#F59E0B";
-
-function formatReviewCount(count) {
-  if (!count) return null;
-  if (typeof count === "string") return count;
-  if (count >= 1000) return `${(count / 1000).toFixed(count % 1000 === 0 ? 0 : 1)}K`;
-  return String(count);
-}
-
-function getReviewAccentColor(score, outOf = 5) {
-  if (score >= outOf) return Colors.scoreExcellent;
-  if (score >= outOf * 0.8) return Colors.scoreDecent;
-  if (score >= outOf * 0.6) return Colors.scoreFair;
-  return Colors.scoreConcerning;
-}
-
-function ReviewStars({ score, outOf = 5 }) {
-  const fullStars = Math.floor(score);
-  const hasHalf = score - fullStars >= 0.3;
-  const stars = [];
-
-  for (let i = 0; i < outOf; i++) {
-    if (i < fullStars) {
-      stars.push(
-        <Star key={i} size={14} color={STAR_GOLD} fill={STAR_GOLD} strokeWidth={1.5} />
-      );
-    } else if (i === fullStars && hasHalf) {
-      stars.push(
-        <View key={i} style={{ width: 14, height: 14 }}>
-          <Star
-            size={14}
-            color={Colors.divider}
-            fill={Colors.divider}
-            strokeWidth={1.5}
-            style={{ position: "absolute" }}
-          />
-          <View style={{ width: 7, height: 14, overflow: "hidden" }}>
-            <Star size={14} color={STAR_GOLD} fill={STAR_GOLD} strokeWidth={1.5} />
-          </View>
-        </View>
-      );
-    } else {
-      stars.push(
-        <Star key={i} size={14} color={Colors.divider} fill={Colors.divider} strokeWidth={1.5} />
-      );
-    }
-  }
-
-  return (
-    <View style={{ flexDirection: "row", gap: 2 }}>
-      {stars}
-    </View>
-  );
-}
-
-// Truncate pill text at last complete word before 35 chars (no ellipsis)
-function truncatePillText(text) {
-  if (!text || text.length <= 35) return text;
-  const truncated = text.substring(0, 35);
-  const lastSpace = truncated.lastIndexOf(" ");
-  return lastSpace > 0 ? truncated.substring(0, lastSpace) : truncated;
-}
-
-function ReviewPill({ text, bgColor, textColor, index }) {
-  const { styles } = useStyles();
-  const opacity = useSharedValue(0);
-  const scale = useSharedValue(0.9);
-
-  useEffect(() => {
-    opacity.value = withDelay(index * 80, withTiming(1, { duration: 250 }));
-    scale.value = withDelay(index * 80, withSpring(1, { damping: 15, stiffness: 150 }));
-  }, []);
-
-  const animStyle = useAnimatedStyle(() => ({
-    opacity: opacity.value,
-    transform: [{ scale: scale.value }],
-  }));
-
-  return (
-    <Animated.View style={[styles.reviewPill, { backgroundColor: bgColor }, animStyle]}>
-      <Text style={[styles.reviewPillText, { color: textColor }]} numberOfLines={1}>
-        {truncatePillText(text)}
-      </Text>
-    </Animated.View>
-  );
-}
-
-export function ReviewsSection({ customerRating }) {
-  const { styles, theme } = useStyles();
-  const [expanded, setExpanded] = useState(true);
-  const rotation = useSharedValue(0);
-
-  if (!customerRating) return null;
-
-  const accentColor = getReviewAccentColor(customerRating.score, customerRating.outOf || 5);
-
-  const toggle = () => {
-    Haptics.selectionAsync();
-    LayoutAnimation.configureNext(
-      LayoutAnimation.create(250, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity)
-    );
-    rotation.value = withTiming(expanded ? 1 : 0, { duration: 200 });
-    setExpanded(!expanded);
-  };
-
-  const chevronStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${rotation.value * 180}deg` }],
-  }));
-
-  const praises = (customerRating.commonPraises || []).slice(0, 3);
-  const complaints = (customerRating.commonComplaints || []).slice(0, 3);
-
-  return (
-    <View style={[styles.reviewCard, { borderLeftColor: accentColor }]}>
-      {/* Header — title + collapse chevron */}
-      <TouchableOpacity onPress={toggle} activeOpacity={0.7} style={styles.reviewHeaderRow}>
-        <Text style={styles.reviewTitle}>Customer Reviews</Text>
-        <Animated.View style={chevronStyle}>
-          <ChevronDown size={20} color={theme.textTertiary} strokeWidth={2} />
-        </Animated.View>
-      </TouchableOpacity>
-
-      {expanded && (
-        <View style={{ marginTop: Spacing.elementGap }}>
-          {/* Rating: big number + stars, count below */}
-          <View>
-            <View style={styles.reviewRatingRow}>
-              <Text style={styles.reviewBigScore}>{customerRating.score}</Text>
-              <ReviewStars score={customerRating.score} outOf={customerRating.outOf || 5} />
-            </View>
-            {customerRating.totalReviews && (
-              <Text style={styles.reviewCountText}>
-                {formatReviewCount(customerRating.totalReviews)} reviews
-              </Text>
-            )}
-          </View>
-
-          {/* Summary text */}
-          {customerRating.sentiment && (
-            <Text style={styles.reviewSummary} numberOfLines={2}>
-              {customerRating.sentiment}
-            </Text>
-          )}
-
-          {/* Loved pills */}
-          {praises.length > 0 && (
-            <View style={styles.reviewTagSection}>
-              <Text style={[styles.reviewTagLabel, { color: Colors.lovedPillText }]}>Loved</Text>
-              <View style={styles.reviewTagsWrap}>
-                {praises.map((tag, i) => (
-                  <ReviewPill
-                    key={i}
-                    text={tag}
-                    bgColor={Colors.lovedPillBg}
-                    textColor={Colors.lovedPillText}
-                    index={i}
-                  />
-                ))}
-              </View>
-            </View>
-          )}
-
-          {/* Watch out pills */}
-          {complaints.length > 0 && (
-            <View style={styles.reviewTagSection}>
-              <Text style={[styles.reviewTagLabel, { color: Colors.watchOutPillText }]}>Watch out</Text>
-              <View style={styles.reviewTagsWrap}>
-                {complaints.map((tag, i) => (
-                  <ReviewPill
-                    key={i}
-                    text={tag}
-                    bgColor={Colors.watchOutPillBg}
-                    textColor={Colors.watchOutPillText}
-                    index={praises.length + i}
-                  />
-                ))}
-              </View>
-            </View>
-          )}
-        </View>
-      )}
-    </View>
-  );
-}
-
-// --- RecallCard (recall: red-tinted, clean: green-tinted — no shadow) ---
-
-export function RecallCard({ recallHistory }) {
-  const { styles } = useStyles();
-  const [expanded, setExpanded] = useState(false);
-
-  if (!recallHistory) return null;
-
-  const isClean = /^(none|no recalls?)\b/i.test(recallHistory);
-
-  if (isClean) {
-    return (
-      <View style={styles.recallCardClean}>
-        <View style={styles.recallHeaderRow}>
-          <CheckCircle2 size={16} color={Colors.ingredientGood} strokeWidth={2} />
-          <Text style={styles.recallLabelClean}>NO RECALLS</Text>
-        </View>
-        <Text style={styles.recallTextClean}>
-          No recalls found for this product or brand.
-        </Text>
-      </View>
-    );
-  }
-
-  const needsTruncate = recallHistory.length > 120;
-
-  const toggleExpand = () => {
-    Haptics.selectionAsync();
-    LayoutAnimation.configureNext(
-      LayoutAnimation.create(250, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity)
-    );
-    setExpanded(true);
-  };
-
-  return (
-    <View style={styles.recallCardWarning}>
-      <View style={styles.recallHeaderRow}>
-        <AlertTriangle size={16} color="#EF4444" strokeWidth={2} />
-        <Text style={styles.recallLabelWarning}>RECALL HISTORY</Text>
-      </View>
-      <Text
-        style={styles.recallTextWarning}
-        numberOfLines={expanded ? undefined : 3}
-      >
-        {recallHistory}
-      </Text>
-      {needsTruncate && !expanded && (
-        <TouchableOpacity onPress={toggleExpand} hitSlop={8}>
-          <Text style={styles.recallSeeDetails}>See details</Text>
-        </TouchableOpacity>
-      )}
-    </View>
-  );
-}
-
 // --- ScanAnotherButton (outline, Reanimated scale press state) ---
 
 export function ScanAnotherButton({ onPress }) {
   const { styles } = useStyles();
+  const reduceMotion = useReducedMotion();
   const scale = useSharedValue(1);
 
   const scaleStyle = useAnimatedStyle(() => ({
@@ -1877,15 +1820,17 @@ export function ScanAnotherButton({ onPress }) {
     <TouchableOpacity
       activeOpacity={1}
       onPressIn={() => {
-        scale.value = withSpring(0.97, { damping: 20, stiffness: 300 });
+        scale.value = reduceMotion ? 1 : withSpring(0.97, { damping: 20, stiffness: 300 });
       }}
       onPressOut={() => {
-        scale.value = withSpring(1, { damping: 15, stiffness: 150 });
+        scale.value = reduceMotion ? 1 : withSpring(1, { damping: 15, stiffness: 150 });
       }}
       onPress={() => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         onPress();
       }}
+      accessibilityRole="button"
+      accessibilityLabel="Scan another product"
     >
       <Animated.View style={[styles.scanAnotherButton, scaleStyle]}>
         <Text style={styles.scanAnotherText}>Scan Another Product</Text>
@@ -1916,6 +1861,34 @@ const shareCardStyles = RNStyleSheet.create({
     textAlign: "center",
     lineHeight: 26,
   },
+  petSafetyBanner: {
+    width: "100%",
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginTop: 12,
+  },
+  petSafetyBannerCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  petSafetyBannerLabel: {
+    fontSize: 9,
+    fontWeight: "800",
+    letterSpacing: 0,
+    marginBottom: 2,
+  },
+  petSafetyBannerTitle: {
+    color: Colors.textPrimary,
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 16,
+  },
   centerContent: {
     flex: 1,
     justifyContent: "center",
@@ -1936,12 +1909,12 @@ const shareCardStyles = RNStyleSheet.create({
   scoreNumber: {
     fontSize: 36,
     fontWeight: "700",
-    letterSpacing: -1,
+    letterSpacing: 0,
   },
   scoreGradeLabel: {
     fontSize: 11,
     fontWeight: "600",
-    letterSpacing: 2,
+    letterSpacing: 0,
     textTransform: "uppercase",
     marginTop: 2,
   },
@@ -1963,7 +1936,7 @@ const shareCardStyles = RNStyleSheet.create({
     fontSize: 9,
     fontWeight: "600",
     color: Colors.textTertiary,
-    letterSpacing: 0.5,
+    letterSpacing: 0,
     textTransform: "uppercase",
     marginBottom: 2,
   },
@@ -1973,23 +1946,44 @@ const shareCardStyles = RNStyleSheet.create({
     color: Colors.textPrimary,
   },
   watermark: {
+    alignItems: "center",
+    paddingTop: 16,
+  },
+  watermarkBrand: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    paddingTop: 16,
   },
   watermarkText: {
     fontSize: 11,
     fontWeight: "400",
     color: Colors.textTertiary,
   },
+  shareLinkText: {
+    marginTop: 5,
+    fontSize: 10,
+    fontWeight: "500",
+    color: Colors.textSecondary,
+    textAlign: "center",
+  },
 });
 
-export const ShareCard = forwardRef(function ShareCard({ result, nutrition }, ref) {
-  if (!result?.overallScore) return null;
+export const ShareCard = forwardRef(function ShareCard({ result, nutrition, shareUrl, humanFood = false, petType, petName, petSafety }, ref) {
+  if (humanFood && !result?.safetyLevel) return null;
+  if (!humanFood && !result?.overallScore) return null;
 
   const score = result.overallScore;
-  const config = getScoreConfig(score);
+  const safetyConfig = {
+    safe: { label: "SAFE", color: Colors.scoreExcellent, Icon: CheckCircle2 },
+    caution: { label: "CAUTION", color: Colors.scoreDecent, Icon: AlertTriangle },
+    dangerous: { label: "DANGEROUS", color: Colors.scoreConcerning, Icon: AlertCircle },
+  }[result.safetyLevel] || { label: "UNKNOWN", color: Colors.textTertiary, Icon: AlertCircle };
+  const config = humanFood ? safetyConfig : getScoreConfig(score);
+  const petSafetyConfig = {
+    safe: { label: "PET FIT", color: Colors.scoreExcellent, bg: "rgba(47,143,91,0.10)", Icon: CheckCircle2 },
+    caution: { label: "CHECK FOR THIS PET", color: Colors.scoreDecent, bg: "rgba(216,148,28,0.10)", Icon: AlertTriangle },
+    avoid: { label: "AVOID FOR THIS PET", color: Colors.scoreConcerning, bg: "rgba(199,74,70,0.10)", Icon: AlertCircle },
+  }[petSafety?.level] || null;
   const size = 120;
   const strokeWidth = 10;
   const radius = (size - strokeWidth) / 2;
@@ -2010,12 +2004,35 @@ export const ShareCard = forwardRef(function ShareCard({ result, nutrition }, re
     <View ref={ref} collapsable={false} style={shareCardStyles.card}>
       {/* Product name */}
       <Text style={shareCardStyles.productName} numberOfLines={2}>
-        {result.productName}
+        {humanFood ? (result.foodName || result.productName || "Food safety check") : result.productName}
       </Text>
+
+      {!humanFood && petSafety?.personalized && petSafetyConfig ? (
+        <View
+          style={[
+            shareCardStyles.petSafetyBanner,
+            { backgroundColor: petSafetyConfig.bg, borderColor: petSafetyConfig.color },
+          ]}
+        >
+          <petSafetyConfig.Icon size={18} color={petSafetyConfig.color} strokeWidth={2.3} />
+          <View style={shareCardStyles.petSafetyBannerCopy}>
+            <Text style={[shareCardStyles.petSafetyBannerLabel, { color: petSafetyConfig.color }]}>
+              {petSafetyConfig.label}
+            </Text>
+            <Text style={shareCardStyles.petSafetyBannerTitle} numberOfLines={2}>
+              {petSafety.label}
+            </Text>
+          </View>
+        </View>
+      ) : null}
 
       {/* Center: ring + stats */}
       <View style={shareCardStyles.centerContent}>
-        <View style={shareCardStyles.ringContainer}>
+        {humanFood ? (
+          <View style={[shareCardStyles.ringContainer, { borderRadius: 60, backgroundColor: `${safetyConfig.color}16` }]}>
+            <safetyConfig.Icon size={52} color={safetyConfig.color} strokeWidth={1.8} />
+          </View>
+        ) : <View style={shareCardStyles.ringContainer}>
           <Svg width={size} height={size}>
             <Circle
               cx={size / 2}
@@ -2035,8 +2052,7 @@ export const ShareCard = forwardRef(function ShareCard({ result, nutrition }, re
               strokeDasharray={circumference}
               strokeDashoffset={fillOffset}
               strokeLinecap="round"
-              rotation={-90}
-              origin={`${size / 2}, ${size / 2}`}
+              transform={`rotate(-90 ${size / 2} ${size / 2})`}
             />
           </Svg>
           <View style={shareCardStyles.ringLabel}>
@@ -2047,9 +2063,18 @@ export const ShareCard = forwardRef(function ShareCard({ result, nutrition }, re
               {config.label}
             </Text>
           </View>
-        </View>
+        </View>}
 
-        {stats.length > 0 && (
+        {humanFood ? (
+          <>
+            <Text style={[shareCardStyles.scoreNumber, { color: safetyConfig.color, fontSize: 30 }]}>{safetyConfig.label}</Text>
+            <Text style={shareCardStyles.watermarkText}>
+              For {petName || (petType === "dog" ? "dogs" : petType === "cat" ? "cats" : "your pet")}
+            </Text>
+          </>
+        ) : null}
+
+        {!humanFood && stats.length > 0 && (
           <View style={shareCardStyles.statsRow}>
             {stats.slice(0, 4).map((s, i) => (
               <View key={i} style={shareCardStyles.statPill}>
@@ -2065,8 +2090,15 @@ export const ShareCard = forwardRef(function ShareCard({ result, nutrition }, re
 
       {/* Watermark */}
       <View style={shareCardStyles.watermark}>
-        <PawPrint size={12} color={Colors.textTertiary} strokeWidth={2} />
-        <Text style={shareCardStyles.watermarkText}>Scanned with Woof</Text>
+        <View style={shareCardStyles.watermarkBrand}>
+          <BrandLogo size={16} accessibilityLabel={`${BRAND_NAME} logo`} />
+          <Text style={shareCardStyles.watermarkText}>Scanned with {BRAND_NAME}</Text>
+        </View>
+        {!!shareUrl && (
+          <Text style={shareCardStyles.shareLinkText} numberOfLines={1}>
+            Get {BRAND_NAME}: {shareUrl}
+          </Text>
+        )}
       </View>
     </View>
   );
@@ -2076,12 +2108,13 @@ export const ShareCard = forwardRef(function ShareCard({ result, nutrition }, re
 
 export function FirstScanToast({ visible }) {
   const theme = useTheme();
+  const reduceMotion = useReducedMotion();
   if (!visible) return null;
 
   return (
     <Animated.View
-      entering={FadeInUp.duration(300)}
-      exiting={FadeOut.duration(300)}
+      entering={reduceMotion ? undefined : FadeInUp.duration(300)}
+      exiting={reduceMotion ? undefined : FadeOut.duration(300)}
       style={[toastStyles.container, { backgroundColor: theme.card, ...Shadows.card }]}
     >
       <PawPrint size={14} color={Colors.scoreExcellent} strokeWidth={2} />
@@ -2101,7 +2134,11 @@ const toastStyles = RNStyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 20,
-    marginTop: 12,
+    position: "absolute",
+    left: 20,
+    right: 20,
+    bottom: 28,
+    zIndex: 40,
   },
   text: {
     fontSize: 13,
@@ -2112,24 +2149,29 @@ const toastStyles = RNStyleSheet.create({
 // --- Shimmer skeleton components (LinearGradient sweep) ---
 
 function ShimmerOverlay() {
+  const theme = useTheme();
+  const reduceMotion = useReducedMotion();
   const translateX = useSharedValue(-375);
 
   useEffect(() => {
+    if (reduceMotion) return;
     translateX.value = withRepeat(
       withTiming(375, { duration: 1500, easing: Easing.inOut(Easing.ease) }),
       -1
     );
-  }, []);
+  }, [reduceMotion]);
 
   const shimmerStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: translateX.value }],
   }));
 
+  if (reduceMotion) return null;
+
   return (
     <Animated.View style={[RNStyleSheet.absoluteFill, { overflow: "hidden" }]}>
       <Animated.View style={[{ width: 375, height: "100%" }, shimmerStyle]}>
         <LinearGradient
-          colors={["transparent", "rgba(255,255,255,0.6)", "transparent"]}
+          colors={["transparent", theme.skeletonShimmer, "transparent"]}
           start={{ x: 0, y: 0.5 }}
           end={{ x: 1, y: 0.5 }}
           style={{ width: 375, height: "100%" }}
@@ -2191,10 +2233,11 @@ export function SkeletonCircle({ size = 180, strokeWidth = 12 }) {
 
 export function LoadingSkeleton({ loadingStatus, isSlowLoading }) {
   const { styles, theme } = useStyles();
+  const reduceMotion = useReducedMotion();
 
   return (
     <Animated.View
-      exiting={FadeOut.duration(200)}
+      exiting={reduceMotion ? undefined : FadeOut.duration(200)}
       style={styles.scrollContent}
     >
       {/* Name placeholder */}
@@ -2259,7 +2302,8 @@ export function LoadingSkeleton({ loadingStatus, isSlowLoading }) {
         </Text>
         {isSlowLoading && (
           <Animated.Text
-            entering={FadeInUp.duration(300)}
+            maxFontSizeMultiplier={MAX_FONT_SIZE_MULTIPLIER}
+            entering={reduceMotion ? undefined : FadeInUp.duration(300)}
             style={{
               color: theme.textTertiary,
               ...Typography.caption,
@@ -2277,38 +2321,95 @@ export function LoadingSkeleton({ loadingStatus, isSlowLoading }) {
 
 // --- ErrorState (redesigned — AlertCircle, descriptive copy, black CTA) ---
 
-export function ErrorState({ error, mode, onRetry, onScanAnother }) {
+function scanPhotoErrorMessage(error, mode) {
+  const message = String(error || "").trim();
+  const normalized = message.toLowerCase();
+
+  if (normalized.includes("network") || normalized.includes("connection")) {
+    return "The connection was interrupted. Check your internet and try again.";
+  }
+  if (
+    normalized.includes("validation")
+    || normalized.includes("invalid response")
+    || normalized.includes("parse")
+    || normalized.includes("incomplete pet-food analysis")
+    || normalized.includes("analysis stream ended")
+    || normalized.includes("no response from claude")
+  ) {
+    if (mode === "ingredient_capture") {
+      return "We couldn't read a complete ingredients list from that photo. Retake it in good light with the full list centered.";
+    }
+    return "We couldn't read enough food details from that photo. Retake it in good light with the food centered.";
+  }
+  if (message) return message;
+  return mode === "ingredient_capture"
+    ? "We couldn't read the ingredients list. Retake it in good light with the full list centered."
+    : "We couldn't read this photo. Retake it in good light with the food centered.";
+}
+
+export function ErrorState({
+  error,
+  mode,
+  isScanLimit,
+  onUpgrade,
+  onRetry,
+  onScanAnother,
+  onHistorySearch,
+  historyProductName,
+  historyScanMode,
+  scanReversed,
+}) {
   const { styles, theme } = useStyles();
 
   // Check if this is a session expiry error
   const isSessionError = error?.includes("Session expired") || error?.includes("session expired");
 
-  const title = isSessionError
+  const title = isScanLimit
+    ? "Free Scans Used"
+    : isSessionError
     ? "Session Expired"
     : mode === "history"
-    ? "Result Expired"
+    ? "Saved Result Unavailable"
     : mode === "barcode"
     ? "Barcode Not Found"
+    : mode === "ingredient_capture"
+    ? "Couldn't read ingredients"
+    : mode === "human_food"
+    ? "Couldn't check this food"
     : "Couldn't analyze this label";
 
-  const buttonLabel = isSessionError
+  const buttonLabel = isScanLimit
+    ? "Upgrade to Pro"
+    : isSessionError
     ? "Sign In Again"
     : mode === "history"
-    ? "Back to Home"
+    ? (historyScanMode === "human_food" ? "Scan Food Again" : "Search Saved Product")
     : mode === "barcode"
     ? "Take Photo Instead"
+    : mode === "ingredient_capture"
+    ? "Try Ingredients Again"
+    : mode === "human_food"
+    ? "Try Food Again"
     : "Try Again";
 
-  const onPress = isSessionError
+  const onPress = isScanLimit
+    ? onUpgrade
+    : isSessionError
     ? () => {
         // Force sign out when session is expired
         supabase.auth.signOut().catch((err) => {
-          console.log("[ERROR_STATE] Sign out failed:", err.message);
+          logger.debug("[ERROR_STATE] Sign out failed:", err.message);
         });
       }
-    : mode === "history" || mode === "barcode"
+    : mode === "history"
+    ? (historyScanMode === "human_food" ? onScanAnother : onHistorySearch)
+    : mode === "barcode"
     ? onScanAnother
     : onRetry;
+  const isPhotoRecoveryMode = mode === "human_food" || mode === "ingredient_capture" || mode === "photo";
+  const displayError = isPhotoRecoveryMode && !isScanLimit && !isSessionError
+    ? scanPhotoErrorMessage(error, mode)
+    : error;
 
   return (
     <View style={styles.errorContainer}>
@@ -2316,14 +2417,37 @@ export function ErrorState({ error, mode, onRetry, onScanAnother }) {
         <AlertCircle size={48} color={theme.textTertiary} strokeWidth={1.5} />
       </View>
       <Text style={styles.errorTitle}>{title}</Text>
-      <Text style={styles.errorText}>{error}</Text>
+      <Text style={styles.errorText}>{displayError}</Text>
+      {mode === "history" && historyProductName ? (
+        <Text style={[styles.errorText, { marginTop: -14, marginBottom: 16, fontWeight: "700" }]} numberOfLines={2}>
+          {historyProductName}
+        </Text>
+      ) : null}
+      {scanReversed ? (
+        <Text style={[styles.errorText, { marginTop: -16, marginBottom: 18, fontWeight: "700" }]}>
+          This scan wasn't counted.
+        </Text>
+      ) : null}
       <TouchableOpacity
         style={styles.retryButton}
         onPress={onPress}
         activeOpacity={0.8}
+        accessibilityRole="button"
+        accessibilityLabel={buttonLabel}
       >
         <Text style={styles.retryButtonText}>{buttonLabel}</Text>
       </TouchableOpacity>
+      {mode === "history" && historyScanMode !== "human_food" ? (
+        <TouchableOpacity
+          style={[styles.retryButton, { marginTop: 10, backgroundColor: theme.surface }]}
+          onPress={onScanAnother}
+          activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel="Scan product again"
+        >
+          <Text style={[styles.retryButtonText, { color: theme.textPrimary }]}>Scan Product Again</Text>
+        </TouchableOpacity>
+      ) : null}
     </View>
   );
 }
@@ -2332,11 +2456,18 @@ export function ErrorState({ error, mode, onRetry, onScanAnother }) {
 
 export function StreamingDots() {
   const { styles } = useStyles();
+  const reduceMotion = useReducedMotion();
   const dot1 = useSharedValue(0.3);
   const dot2 = useSharedValue(0.3);
   const dot3 = useSharedValue(0.3);
 
   useEffect(() => {
+    if (reduceMotion) {
+      dot1.value = 1;
+      dot2.value = 0.65;
+      dot3.value = 0.35;
+      return;
+    }
     const pulse = withRepeat(
       withSequence(
         withTiming(1, { duration: 500 }),
@@ -2359,7 +2490,7 @@ export function StreamingDots() {
       ),
       -1
     ));
-  }, []);
+  }, [reduceMotion]);
 
   const style1 = useAnimatedStyle(() => ({ opacity: dot1.value }));
   const style2 = useAnimatedStyle(() => ({ opacity: dot2.value }));
@@ -2376,7 +2507,7 @@ export function StreamingDots() {
 
 // --- Safety Badge (human food mode) ---
 
-export function SafetyBadge({ safetyLevel, petType }) {
+export function SafetyBadge({ safetyLevel, petType, petName }) {
   const theme = useTheme();
   const config = {
     safe: { label: "SAFE", sublabel: "to feed", color: Colors.scoreExcellent, bg: "rgba(52,199,89,0.08)", Icon: CheckCircle2 },
@@ -2384,7 +2515,16 @@ export function SafetyBadge({ safetyLevel, petType }) {
     dangerous: { label: "DANGEROUS", sublabel: "do not feed", color: Colors.scoreConcerning, bg: "rgba(239,68,68,0.08)", Icon: AlertCircle },
   }[safetyLevel] || { label: "UNKNOWN", sublabel: "", color: theme.textTertiary, bg: theme.surface, Icon: AlertCircle };
 
-  const petLabel = petType === "dog" ? "dogs" : "cats";
+  const petLabel = petName
+    ? petName
+    : petType === "dog"
+      ? "dogs"
+      : petType === "cat"
+        ? "cats"
+        : "your pet";
+  const safetyAction = petName && safetyLevel === "dangerous"
+    ? `do not feed to ${petName}`
+    : `${config.sublabel}${config.sublabel ? " for " : ""}${petLabel}`;
 
   return (
     <View style={{ alignItems: "center", paddingVertical: 28 }}>
@@ -2396,11 +2536,11 @@ export function SafetyBadge({ safetyLevel, petType }) {
       }}>
         <config.Icon size={52} color={config.color} strokeWidth={1.5} />
       </View>
-      <Text style={{ fontSize: 32, fontWeight: "800", color: config.color, letterSpacing: 1.5 }}>
+      <Text style={{ fontSize: 32, fontWeight: "800", color: config.color, letterSpacing: 0 }}>
         {config.label}
       </Text>
-      <Text style={{ fontSize: 14, fontWeight: "500", color: theme.textTertiary, marginTop: 4, textTransform: "uppercase", letterSpacing: 0.5 }}>
-        {config.sublabel} for {petLabel}
+      <Text style={{ fontSize: 14, fontWeight: "500", color: theme.textTertiary, marginTop: 4, textTransform: "uppercase", letterSpacing: 0 }}>
+        {safetyAction}
       </Text>
     </View>
   );

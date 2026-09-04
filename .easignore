@@ -1,0 +1,48 @@
+# Dependencies and local environments
+node_modules/
+.venv*/
+.git/
+
+# Expo and generated build output
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+/ios/
+/android/
+.kotlin/
+
+# Local data, catalog workspaces, and release evidence
+/outputs/
+/output/
+/inputs/
+/store/
+/tmp/
+/audit/
+/.agent-preflight/
+/docs/
+/scripts/
+/supabase/
+
+# Local package-manager experiments
+/pnpm-lock.yaml
+/pnpm-workspace.yaml
+
+# Credentials and machine-local configuration
+.env
+.env*.local
+*.jks
+*.p8
+*.p12
+*.pem
+*.key
+*.mobileprovision
+
+# Local/editor artifacts
+.DS_Store
+*.orig.*
+*.tsbuildinfo
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+.metro-health-check*

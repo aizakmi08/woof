@@ -1,0 +1,257 @@
+{
+  "app": "Woof",
+  "run_id": "2026-06-30-premium",
+  "generated_at": "2026-06-30",
+  "purpose": "Premium App Store screenshot refresh with product-proof-first pet food scanner positioning.",
+  "source_polish_layer": "outputs/app-store/screenshots/2026-06-30-premium/source/premium-polish-01.png",
+  "source_polish_layers": [
+    "outputs/app-store/screenshots/2026-06-30-premium/source/premium-polish-01.png",
+    "outputs/app-store/screenshots/2026-06-30-premium/source/premium-polish-02.png",
+    "outputs/app-store/screenshots/2026-06-30-premium/source/premium-polish-03.png",
+    "outputs/app-store/screenshots/2026-06-30-premium/source/premium-polish-04.png"
+  ],
+  "source_polish_provenance": [
+    "Generated no-text ImageGen polish layer copied from /Users/admin/Documents/woof/inputs/app-store-screenshots/2026-06-30/polish/store-aisle.png",
+    "Generated no-text ImageGen polish layer copied from /Users/admin/Documents/woof/inputs/app-store-screenshots/2026-06-30/polish/nutrition-kitchen.png",
+    "Generated no-text ImageGen polish layer copied from /Users/admin/Documents/woof/inputs/app-store-screenshots/2026-06-30/polish/ingredient-review.png",
+    "Generated no-text ImageGen polish layer copied from /Users/admin/Documents/woof/inputs/app-store-screenshots/2026-06-30/polish/human-food.png"
+  ],
+  "competitor_research": [
+    "Bobby Approved - Food Scanner",
+    "Fooducate",
+    "Yuko Scan for Food Safety",
+    "OneLabel - Product Scanner"
+  ],
+  "deterministic_layers": [
+    "captions",
+    "app UI composites",
+    "scores and ingredient labels",
+    "device frames",
+    "safe-zone layout",
+    "export filenames and dimensions"
+  ],
+  "claim_guardrails": [
+    "No unsupported third-party source claims",
+    "No review, alert, or historical incident claims",
+    "No professional approval, certainty, or diagnosis claims",
+    "Human food checks remain informational only"
+  ],
+  "families": [
+    {
+      "id": "iphone-69",
+      "label": "iPhone 6.9-inch portrait",
+      "screenshots": [
+        {
+          "index": 1,
+          "slug": "scan-before-you-buy",
+          "caption": "Scan before you buy",
+          "headline": "Scan before you buy",
+          "path": "outputs/app-store/screenshots/2026-06-30-premium/iphone-69/01-scan-before-you-buy.png",
+          "width": 1320,
+          "height": 2868,
+          "mode": "scan",
+          "layout": "right"
+        },
+        {
+          "index": 2,
+          "slug": "food-score-in-seconds",
+          "caption": "Score food in seconds",
+          "headline": "Score food in seconds",
+          "path": "outputs/app-store/screenshots/2026-06-30-premium/iphone-69/02-food-score-in-seconds.png",
+          "width": 1320,
+          "height": 2868,
+          "mode": "score",
+          "layout": "center"
+        },
+        {
+          "index": 3,
+          "slug": "spot-ingredient-flags",
+          "caption": "Spot ingredient flags",
+          "headline": "Spot ingredient flags",
+          "path": "outputs/app-store/screenshots/2026-06-30-premium/iphone-69/03-spot-ingredient-flags.png",
+          "width": 1320,
+          "height": 2868,
+          "mode": "ingredients",
+          "layout": "left"
+        },
+        {
+          "index": 4,
+          "slug": "can-my-dog-eat-this",
+          "caption": "Can my dog eat this?",
+          "headline": "Can my dog eat this?",
+          "path": "outputs/app-store/screenshots/2026-06-30-premium/iphone-69/04-can-my-dog-eat-this.png",
+          "width": 1320,
+          "height": 2868,
+          "mode": "human_food",
+          "layout": "center"
+        },
+        {
+          "index": 5,
+          "slug": "try-three-scans-free",
+          "caption": "Try 3 scans free",
+          "headline": "Try 3 scans free",
+          "path": "outputs/app-store/screenshots/2026-06-30-premium/iphone-69/05-try-three-scans-free.png",
+          "width": 1320,
+          "height": 2868,
+          "mode": "guest",
+          "layout": "right"
+        },
+        {
+          "index": 6,
+          "slug": "unlimited-label-checks",
+          "caption": "Unlimited label checks",
+          "headline": "Unlimited label checks",
+          "path": "outputs/app-store/screenshots/2026-06-30-premium/iphone-69/06-unlimited-label-checks.png",
+          "width": 1320,
+          "height": 2868,
+          "mode": "pro",
+          "layout": "center"
+        }
+      ]
+    },
+    {
+      "id": "iphone-67",
+      "label": "iPhone 6.7-inch portrait",
+      "screenshots": [
+        {
+          "index": 1,
+          "slug": "scan-before-you-buy",
+          "caption": "Scan before you buy",
+          "headline": "Scan before you buy",
+          "path": "outputs/app-store/screenshots/2026-06-30-premium/iphone-67/01-scan-before-you-buy.png",
+          "width": 1290,
+          "height": 2796,
+          "mode": "scan",
+          "layout": "right"
+        },
+        {
+          "index": 2,
+          "slug": "food-score-in-seconds",
+          "caption": "Score food in seconds",
+          "headline": "Score food in seconds",
+          "path": "outputs/app-store/screenshots/2026-06-30-premium/iphone-67/02-food-score-in-seconds.png",
+          "width": 1290,
+          "height": 2796,
+          "mode": "score",
+          "layout": "center"
+        },
+        {
+          "index": 3,
+          "slug": "spot-ingredient-flags",
+          "caption": "Spot ingredient flags",
+          "headline": "Spot ingredient flags",
+          "path": "outputs/app-store/screenshots/2026-06-30-premium/iphone-67/03-spot-ingredient-flags.png",
+          "width": 1290,
+          "height": 2796,
+          "mode": "ingredients",
+          "layout": "left"
+        },
+        {
+          "index": 4,
+          "slug": "can-my-dog-eat-this",
+          "caption": "Can my dog eat this?",
+          "headline": "Can my dog eat this?",
+          "path": "outputs/app-store/screenshots/2026-06-30-premium/iphone-67/04-can-my-dog-eat-this.png",
+          "width": 1290,
+          "height": 2796,
+          "mode": "human_food",
+          "layout": "center"
+        },
+        {
+          "index": 5,
+          "slug": "try-three-scans-free",
+          "caption": "Try 3 scans free",
+          "headline": "Try 3 scans free",
+          "path": "outputs/app-store/screenshots/2026-06-30-premium/iphone-67/05-try-three-scans-free.png",
+          "width": 1290,
+          "height": 2796,
+          "mode": "guest",
+          "layout": "right"
+        },
+        {
+          "index": 6,
+          "slug": "unlimited-label-checks",
+          "caption": "Unlimited label checks",
+          "headline": "Unlimited label checks",
+          "path": "outputs/app-store/screenshots/2026-06-30-premium/iphone-67/06-unlimited-label-checks.png",
+          "width": 1290,
+          "height": 2796,
+          "mode": "pro",
+          "layout": "center"
+        }
+      ]
+    },
+    {
+      "id": "ipad-13",
+      "label": "iPad 13-inch portrait",
+      "screenshots": [
+        {
+          "index": 1,
+          "slug": "scan-before-you-buy",
+          "caption": "Scan before you buy",
+          "headline": "Scan before you buy",
+          "path": "outputs/app-store/screenshots/2026-06-30-premium/ipad-13/01-scan-before-you-buy.png",
+          "width": 2064,
+          "height": 2752,
+          "mode": "scan",
+          "layout": "right"
+        },
+        {
+          "index": 2,
+          "slug": "food-score-in-seconds",
+          "caption": "Score food in seconds",
+          "headline": "Score food in seconds",
+          "path": "outputs/app-store/screenshots/2026-06-30-premium/ipad-13/02-food-score-in-seconds.png",
+          "width": 2064,
+          "height": 2752,
+          "mode": "score",
+          "layout": "center"
+        },
+        {
+          "index": 3,
+          "slug": "spot-ingredient-flags",
+          "caption": "Spot ingredient flags",
+          "headline": "Spot ingredient flags",
+          "path": "outputs/app-store/screenshots/2026-06-30-premium/ipad-13/03-spot-ingredient-flags.png",
+          "width": 2064,
+          "height": 2752,
+          "mode": "ingredients",
+          "layout": "left"
+        },
+        {
+          "index": 4,
+          "slug": "can-my-dog-eat-this",
+          "caption": "Can my dog eat this?",
+          "headline": "Can my dog eat this?",
+          "path": "outputs/app-store/screenshots/2026-06-30-premium/ipad-13/04-can-my-dog-eat-this.png",
+          "width": 2064,
+          "height": 2752,
+          "mode": "human_food",
+          "layout": "center"
+        },
+        {
+          "index": 5,
+          "slug": "try-three-scans-free",
+          "caption": "Try 3 scans free",
+          "headline": "Try 3 scans free",
+          "path": "outputs/app-store/screenshots/2026-06-30-premium/ipad-13/05-try-three-scans-free.png",
+          "width": 2064,
+          "height": 2752,
+          "mode": "guest",
+          "layout": "right"
+        },
+        {
+          "index": 6,
+          "slug": "unlimited-label-checks",
+          "caption": "Unlimited label checks",
+          "headline": "Unlimited label checks",
+          "path": "outputs/app-store/screenshots/2026-06-30-premium/ipad-13/06-unlimited-label-checks.png",
+          "width": 2064,
+          "height": 2752,
+          "mode": "pro",
+          "layout": "center"
+        }
+      ]
+    }
+  ]
+}
