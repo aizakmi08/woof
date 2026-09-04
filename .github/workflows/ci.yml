@@ -11,6 +11,7 @@ on:
 jobs:
   smoke:
     name: Smoke checks
+    if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -153,7 +154,7 @@ jobs:
         run: npm run check:release
 
   release-provenance:
-    name: Release provenance
+    name: Hotfix release gates
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
 
@@ -170,7 +171,22 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --no-audit --fund=false
+
+      - name: Check JavaScript syntax
+        run: npm run check:syntax
+
+      - name: Check nullable default-parameter safety
+        run: npm run check:nullable-defaults
+
+      - name: Exercise typed product opening
+        run: npm run test:product-open
+
+      - name: Run unit suite
+        run: npm test -- --runInBand
+
+      - name: Check product resolver contract
+        run: npm run check:resolver-contract
 
       - name: Verify clean, committed, tagged, and pushed release source
         run: npm run release:verify-source
