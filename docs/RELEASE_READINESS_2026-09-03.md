@@ -3,7 +3,7 @@
 Date: 2026-09-03 (America/Los_Angeles)
 
 Release branch: `codex/production-release-20260716`
-Tested source commit: `eca2f28f` ([CI run 33817219070](https://github.com/aizakmi08/woof/actions/runs/33817219070))
+Tested source commit: `71122c0d` ([CI run 33822682981](https://github.com/aizakmi08/woof/actions/runs/33822682981), all three jobs passed)
 
 Requested local marketing version: `1.2.2`
 Decision: **BLOCKED — do not build or submit yet**
@@ -12,12 +12,12 @@ This report records what was actually tested. It does not claim that the app has
 
 ## Executive decision
 
-The release line is consolidated and the most important nutrition-scoring path is proved against a real production row. Smoke, disposable PostgreSQL, and native StoreKit CI are green on the tested source commit. The quota boundary, deletion durability, GTIN index, and first-day KPI view are implemented and pass a disposable PostgreSQL test suite, but they are not deployed. Four independent release blockers remain:
+The release line is consolidated and the most important nutrition-scoring path is proved against a real production row. Smoke, disposable PostgreSQL, and native StoreKit CI are green on tested source commit `71122c0d`. The product-row device regression passes an eight-cell simulator matrix. The quota boundary, deletion durability, GTIN index, and first-day KPI view are implemented and pass a disposable PostgreSQL test suite, but they are not deployed. Four independent release blockers remain:
 
 1. Apple reports live version `1.2.4`; every local release file intentionally remains `1.2.2`. Apple will not accept a lower marketing version. The owner must authorize a new version greater than `1.2.4`; no version was changed here.
 2. The four production boundary migrations and two changed Edge Functions are not deployed. The current live grants still permit the catalog quota bypass, the deletion tombstone is absent, and the normalized GTIN index and release KPI view do not exist.
-3. The live catalog fails the existing completeness contract: 395 ready brands versus 750 required, 16,294 of 16,299 ready rows have verified ingredients, and 10,445 open queue rows affect 14,127 products. No assertion or threshold was weakened.
-4. The full simulator matrix and real-iPhone checklist are incomplete. Shipping without them would make public users the first people to test physical packages, purchases, offline entitlement persistence, and VoiceOver in this build.
+3. The live catalog fails the existing completeness contract: 395 ready brands versus 750 required, 16,294 of 16,299 ready rows have verified ingredients, and 10,449 open queue rows affect 14,131 products. No assertion or threshold was weakened.
+4. The product-row flow passes all eight appearance/text/device cells, but the broader release-journey matrix and real-iPhone checklist are incomplete. Shipping without them would make public users the first people to test physical packages, purchases, offline entitlement persistence, and VoiceOver in this build.
 
 ## 1. Branch consolidation
 
@@ -55,7 +55,7 @@ This proves that the old hard-wired balance score of 52 is no longer the product
 | Full-catalog quota bypass | PASS | OPEN until migration + new binary | Teaser RPCs expose identity fields only. `consume_verified_catalog_product` atomically binds the scan ID to the product hash, consumes quota, and returns full ingredients/nutrients only on allowance. Direct ingredient/nutrient column grants and seven full-row RPC grants are revoked. |
 | CI service-role secret scope | PASS | Applies when CI runs | The key is no longer job-scoped. A Boolean-only detection step selects the catalog check; the service key is injected only into that step. |
 | Account deletion | PASS | OPEN until migration + webhook deploy | Deletion removes `analytics_events`, typed-query/submitted-ingredient `product_events`, scan/rate state, auth state, and every RevenueCat identifier location. A private SHA-256 tombstone rejects delayed RevenueCat inserts at both the webhook and database-trigger boundaries. |
-| Repo/build hygiene | PASS | N/A | `.gitignore` covers `inputs/`, `output/`, `outputs/`, `tmp/`, `audit/`, and `.agent-preflight/`. `.easignore` excludes local data, docs, scripts, Supabase sources, secrets, and generated native folders. No tracked contract PDF, key, token capture, signing file, or provisioning profile was found. Final secret scan passed 1,282 tracked/source files. |
+| Repo/build hygiene | PASS | N/A | `.gitignore` covers `inputs/`, `output/`, `outputs/`, `tmp/`, `audit/`, and `.agent-preflight/`. `.easignore` excludes local data, docs, scripts, Supabase sources, secrets, and generated native folders. No tracked contract PDF, key, token capture, signing file, or provisioning profile was found. Final secret scan passed 1,292 tracked/source files. |
 
 Live read-only verification on 2026-09-03 showed `authenticated` still has full `product_data` and ingredient-column SELECT, all three dead counter RPCs remain executable, and none of the new atomic consumer, deletion-tombstone table, normalized-GTIN index, or release-monitoring view exists. This is why deployment is mandatory before a public binary.
 
@@ -123,58 +123,68 @@ Status: **PASS — zero production vulnerabilities**
 
 `npm ci`, `npm audit --omit=dev`, and the documented dependency gate report 0 moderate, 0 high, and 0 critical findings. No advisory baseline was raised.
 
+### Product-open integration finding
+
+Status: **PASS for the regression harness / BLOCKED for the undeployed live contract**
+
+The first simulator run reproduced a distinct integration failure after the row tap: Results called `consume_verified_catalog_product`, and production returned “function not found” because migration `20260903204346` is approval-gated and not deployed. The row itself was interactive; this was not a Pro restriction. Development search fixtures were also incorrectly falling through to that live quota RPC, contradicting the fixture-isolation contract. `ProductSearchScreen` now sends a development-only result snapshot for every deterministic search fixture while preserving the selected product identity. The regression test proves the fixture route includes that snapshot, and the real simulator flow proves the selected 5 lb row opens Results.
+
+This fixture correction does not hide the production dependency. A public binary from this branch must not be built until the atomic consumer migration is applied and the read-only live performance/contract check passes. A pre-deploy binary would make product rows navigate to an analysis error for real users.
+
 ## 5. Automated evidence and timings
 
-The fail-fast preflight stopped at the first failure. Suites after that point were run separately and are labeled accordingly.
+The latest dependency-free fail-fast preflight passed checks 1–32, then stopped at the live-catalog credential guard as designed because no secret was loaded into the shell; it took 119.05s. The live catalog gate was then run separately with credentials loaded only into that process. Suites after the stop were also run separately and are labeled accordingly.
 
 | # | Suite | Result | Observed time | Evidence |
 | ---: | --- | --- | ---: | --- |
-| 1 | Git whitespace | PASS | 0.05s | `git diff --check` |
-| 2 | Secret scan | PASS | 0.22s | 1,282 files in final rerun |
-| 3 | JS syntax/product guards | PASS | 7.11s | 197 files |
-| 4 | Nullable default-parameter safety | PASS | 0.59s | 52 app files; bad fixture detected |
-| 5 | Product resolver contract | PASS | 1.14s | 6 tests |
-| 6 | Behavioral coverage | PASS | 3.07s | 12 suites, 69 passed, 1 intentionally skipped; 51.01% statements / 41.81% branches / 57% functions / 54.66% lines |
-| 7 | Catalog quality | PASS | 15.37s | Production contract checks |
-| 8 | Catalog scraper contract | PASS | 3.35s | 28 fixtures |
-| 9 | CI release alignment | PASS | 0.04s | 38 commands |
+| 1 | Git whitespace | PASS | 0.03s | `git diff --check` |
+| 2 | Secret scan | PASS | 0.37s | 1,292 files after simulator evidence |
+| 3 | JS syntax/product guards | PASS | 8.34s | 198 files |
+| 4 | Nullable default-parameter safety | PASS | 0.66s | 52 app files; bad fixture detected |
+| 5 | Product resolver contract | PASS | 2.47s | 6 tests |
+| 6 | Behavioral coverage | PASS | 5.00s | 12 suites, 70 passed, 1 intentionally skipped; 51.74% statements / 42.51% branches / 57% functions / 55.41% lines |
+| 7 | Catalog quality | PASS | 3.31s | Production contract checks |
+| 8 | Catalog scraper contract | PASS | 3.72s | 28 fixtures |
+| 9 | CI release alignment | PASS | 0.05s | 38 commands |
 | 10 | GitHub release audit | PASS | 1.41s | Branch/PR/workflow contract |
 | 11 | Analytics privacy | PASS | 0.06s | Redaction and event contract |
-| 12 | App Privacy disclosure | PASS | 0.04s | Embedded/hosted disclosure alignment |
-| 13 | Accessibility static gate | PASS | 0.08s | 13 files |
-| 14 | Pet-profile safety | PASS | 0.04s | 8 scenarios |
-| 15 | Claim safety and runtime Woof brand | PASS | 0.06s | 61 files at preflight; final dependency-free preflight also passed after the logger correction |
+| 12 | App Privacy disclosure | PASS | 0.05s | Embedded/hosted disclosure alignment |
+| 13 | Accessibility static gate | PASS | 0.10s | 13 files |
+| 14 | Pet-profile safety | PASS | 0.05s | 8 scenarios |
+| 15 | Claim safety and runtime Woof brand | PASS | 0.07s | 61 files at preflight; final dependency-free preflight also passed after the logger correction |
 | 16 | App Store listing package | PASS | 0.04s | Length/claim rules |
-| 17 | App Store screenshots | PASS | 0.05s | 18 assets structurally checked |
-| 18 | EAS versioning contract | PASS | 0.04s | Local metadata consistency only |
-| 19 | RevenueCat readiness | PASS | 0.04s | Static/native/CI contract |
-| 20 | SQL migrations | PASS | 0.59s | 822 migrations at preflight; final count may increase only with this report's validation assets |
-| 21 | KPI runbook | PASS | 0.04s | Includes first-day release view |
-| 22 | Deployment readiness | PASS | 0.04s | 816 audit migrations, 5 functions |
-| 23 | Release-evidence structure | PASS | 0.04s | 6 ready, 12 pending; not strict release evidence |
-| 24 | Native crash-reporting contract | PASS | 0.04s | Sentry integration/config contract |
-| 25 | Edge Function safety | PASS | 0.04s | 5 functions |
-| 26 | Edge Function typecheck | PASS | 0.55s | 5 functions |
-| 27 | Edge request boundaries | PASS | 2.77s | 19 assertions |
+| 17 | App Store screenshots | PASS | 0.06s | 18 assets structurally checked |
+| 18 | EAS versioning contract | PASS | 0.05s | Local metadata consistency only |
+| 19 | RevenueCat readiness | PASS | 0.05s | Static/native/CI contract |
+| 20 | SQL migrations | PASS | 0.69s | 822 migrations at preflight; final count may increase only with this report's validation assets |
+| 21 | KPI runbook | PASS | 0.05s | Includes first-day release view |
+| 22 | Deployment readiness | PASS | 0.05s | 816 audit migrations, 5 functions |
+| 23 | Release-evidence structure | PASS | 0.05s | 6 ready, 12 pending; not strict release evidence |
+| 24 | Native crash-reporting contract | PASS | 0.07s | Sentry integration/config contract |
+| 25 | Edge Function safety | PASS | 0.05s | 5 functions |
+| 26 | Edge Function typecheck | PASS | 0.67s | 5 functions |
+| 27 | Edge request boundaries | PASS | 2.84s | 19 assertions |
 | 28 | Edge fingerprints | PASS | 0.06s | 5 fingerprints generated |
-| 29 | Live Edge verifier dry run | PASS | 0.04s | Configuration only; not deployment |
-| 30 | Live Auth verifier dry run | PASS | 0.04s | Configuration only; three dashboard checks remain manual |
-| 31 | Production dependency audit | PASS | 0.64s | 0 moderate/high/critical |
-| 32 | Production license audit | PASS | 1.69s | 660 packages, 16 expressions |
-| 33 | Live catalog completeness | FAIL | 40.87s | 395/750 brands; 16,294/16,299 verified ingredients; 10,445 queue rows affecting 14,127 products |
+| 29 | Live Edge verifier dry run | PASS | 0.05s | Configuration only; not deployment |
+| 30 | Live Auth verifier dry run | PASS | 0.05s | Configuration only; three dashboard checks remain manual |
+| 31 | Production dependency audit | PASS | 85.36s | Full install + audit; 0 moderate/high/critical |
+| 32 | Production license audit | PASS | 2.64s | 660 packages, 16 expressions |
+| 33 | Live catalog credential guard | FAIL(expected without secrets) | 0.30s | Preflight stopped without printing or persisting credentials |
+| — | Live catalog completeness | FAIL (separate) | 36.54s | 395/750 brands; 16,294/16,299 verified ingredients; 10,449 queue rows affecting 14,131 products |
 | 34 | Expo SDK package versions | PASS (separate) | 0.83s | Reached after fail-fast stop manually |
 | 35 | Expo config resolution | PASS (separate) | 1.74s | Reached after fail-fast stop manually |
-| 36 | Expo iOS/Android/web exports | PASS (separate) | 58.5s | 46 native and 16 web files; QA fixture markers absent |
+| 36 | Expo iOS/Android/web exports | PASS (separate) | 85.90s latest | 46 native and 16 web files; QA fixture markers absent after the product-row fixture fix |
 | 37 | Expo native prebuild | PASS (separate) | 6.85s | Clean temporary iOS/Android generation |
 | 38 | Release metadata | PASS (separate) | 0.31s | Local version 1.2.2; remote number still must be read before build |
-| — | Disposable PostgreSQL 17 integration | PASS | 0.5s | 75 assertions, including grants, deletion race, quota idempotency, KPI view, validation, rollback |
+| — | Disposable PostgreSQL 17 integration | PASS | 0.5s local; 1m47s CI job | 75 assertions, including grants, deletion race, quota idempotency, KPI view, validation, rollback |
 | — | Live production-path scoring | PASS | 7.46s | Real Nature's Logic row |
 | — | Live App Store listing | FAIL | 0.40s | Local 1.2.2 behind live 1.2.4 |
 | — | Live catalog RPC performance | BLOCKED(migrations not deployed) | 11.29s | Refused to grade missing teaser/index boundary |
 | — | Hosted StoreKit app/test compilation | PASS | local cold build | Generated app host and test bundle compiled under Xcode 26.6 before test execution |
 | — | Local StoreKit transaction execution | BLOCKED(Apple iOS 26.5 CLI defect) | 41.47s full test operation; strengthened Ask to Buy test interrupted after 90s | Product-catalog assertion passed in the full run; the strengthened test compiled, then the local StoreKit daemon returned `SKInternalErrorDomain Code=3` while resetting the session and hung while loading products |
-| — | CI StoreKit execution on pinned iOS 26.1 | PASS | 16m17s job; 4.01s tests | Run `33817219070`: 4 passed, 1 skipped by the explicit monthly-expiry opt-in, 0 failures. Covered product/catalog parity, purchase persistence, cancellation/expiry, and in-app Ask to Buy pending/approve/decline behavior. |
-| — | Maestro matrix | BLOCKED(Maestro absent; matrix not executed) | — | Only the product-row regression flow exists; the full matrix was not executed |
+| — | CI StoreKit execution on pinned iOS 26.1 | PASS | 27m15s job; 5.135s tests | Run `33822682981`: 4 passed, 1 skipped by the explicit monthly-expiry opt-in, 0 failures. Covered product/catalog parity, purchase persistence, cancellation/expiry, and in-app Ask to Buy pending/approve/decline behavior. Smoke passed in 11m50s and disposable PostgreSQL passed in 1m47s in the same run. |
+| — | Product-row Maestro matrix | PASS | 517.36s aggregate | Maestro 2.10.0; 8/8 English cells passed across SE/Pro Max, light/dark, and default/maximum text; screenshots and JSON retained |
+| — | Full release-journey Maestro matrix | NOT-RUN(missing flows) | — | The executable suite still covers only product-row opening; it does not cover every scenario listed in section 8 |
 | — | Clean checkout: clone → `npm ci` → Expo export | PASS | final verification | Run from the committed release candidate with no untracked source dependency |
 
 `npm run verify` was not used as a coverage claim; it remains a thin existence/configuration check.
@@ -207,7 +217,7 @@ After migration, `npm run check:live-catalog-performance` samples each new RPC t
 
 Static accessibility status: **PASS**. The Home pet picker is a modal with focus/dismiss semantics, a labeled 44x44 dismiss target, and reduced-motion handling. Contrast checks cover light and dark palettes; light tertiary text was corrected to `#6B6B65`.
 
-Device accessibility status: **NOT-RUN**. VoiceOver reading order, rotor behavior, maximum Dynamic Type clipping, and actual touch interaction still require the real-iPhone checklist.
+Device accessibility status: **PARTIAL**. Product-row navigation and the first Results viewport passed at `accessibility-extra-extra-extra-large` on both device classes in light and dark mode. VoiceOver reading order, rotor behavior, other critical screens, and physical touch interaction still require the real-iPhone checklist.
 
 The product-row null regression is fixed at the callee boundary. `labelSummaryTitle` defensively accepts nullable input instead of relying on a `= {}` default, which only handles `undefined`. The Babel-based checker scans app files for nullable values flowing into functions guarded only by object default parameters and self-tests against both a bad and fixed fixture. It passed 52 app files. The free and Pro row-open regression test also passed.
 
@@ -215,7 +225,22 @@ The product-row null regression is fixed at the callee boundary. `labelSummaryTi
 
 Required device cells are 2 appearances × 2 Dynamic Type sizes × 2 device classes = 8 cells: light/dark; default/maximum text; SE-class/large iPhone. Each cell must cover onboarding, guest auth success/failures, every scan mode, every resolver decision, apostrophe/typo/timeout search, candidate confirmation and “None of these,” ingredient capture with both consent choices, all Results states, quota/reversal copy, all paywall entries/failures, four restore outcomes, review-prompt cadence, pet profile/AVOID banner, history search/filter/compare/recovery, and per-screen offline behavior.
 
-Status for all eight cells: **BLOCKED(Maestro is not installed and the E2E matrix was not executed)**. CI booted an iOS 26.1 simulator only for the native StoreKit contract suite; that is not a substitute for the requested UI matrix. The repository contains one repeatable development-only product-row flow, but camera packages, memory/low-storage pressure, real RevenueCat state, and VoiceOver remain physical-device work even if the simulator matrix runs.
+Product-row status: **PASS — 8/8 cells**. Maestro 2.10.0 drove the development app from Home to Development QA, through the typed-search fixture, tapped the exact 5 lb product accessibility row, and asserted Results showed the selected product. The runner handles fresh onboarding and the development client, records every cell, and is exposed as `npm run test:e2e:ios-matrix`. The app currently ships only its English development language.
+
+| Cell | Status | Time |
+| --- | --- | ---: |
+| SE / light / default text | PASS | 62.082s |
+| SE / light / maximum text | PASS | 63.008s |
+| SE / dark / default text | PASS | 61.923s |
+| SE / dark / maximum text | PASS | 62.706s |
+| Pro Max / light / default text | PASS | 81.419s |
+| Pro Max / light / maximum text | PASS | 63.165s |
+| Pro Max / dark / default text | PASS | 61.464s |
+| Pro Max / dark / maximum text | PASS | 61.595s |
+
+Evidence: `docs/context-evidence/2026-09-03/ios-e2e-product-open/results.json` and its eight screenshots.
+
+Full release-journey status: **NOT-RUN(missing executable flows)**. The eight cells do not claim coverage of guest-auth failures, real scan modes, every resolver state, candidate/“None of these,” both ingredient-consent choices, all Results/paywall/restore/prompt/history/offline states, or other screens at maximum text. Camera packages, memory/low-storage pressure, real RevenueCat state, and VoiceOver remain physical-device work. This incomplete suite remains a release blocker even though the user-reported product-row defect now has device-level coverage.
 
 ## 9. One-page real-iPhone owner checklist
 
@@ -316,7 +341,7 @@ After upload, use App Store Connect to attach the build to the owner-approved ve
 
 ## 14. Remaining unknowns and consequence
 
-- All eight appearance/text/device E2E cells are unrun.
+- The product-row appearance/text/device matrix passes 8/8, but the broader scenario list has no complete executable E2E flow and is not run.
 - Physical recognition for the named packages and adverse camera conditions is unrun on this candidate.
 - Real barcode, purchase, restore, cancellation/expiry, pending/Ask-to-Buy, airplane-mode restart, and RevenueCat/profile agreement are unrun on this candidate.
 - VoiceOver, maximum Dynamic Type, cold start, tap-to-camera, and Results-paint budgets are unrun on the final binary.
