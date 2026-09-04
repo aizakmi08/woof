@@ -1,0 +1,87 @@
+{
+  "generatedAt": "2026-09-04T00:36:12.559Z",
+  "app": "woof.app",
+  "metro": "local:8081",
+  "results": [
+    {
+      "cell": "se-light-default-text",
+      "device": "Woof E2E SE",
+      "appearance": "light",
+      "contentSize": "large",
+      "status": "PASS",
+      "durationMs": 62082,
+      "screenshot": "docs/context-evidence/2026-09-03/ios-e2e-product-open/se-light-default-text-pass.png",
+      "detail": null
+    },
+    {
+      "cell": "se-light-maximum-text",
+      "device": "Woof E2E SE",
+      "appearance": "light",
+      "contentSize": "accessibility-extra-extra-extra-large",
+      "status": "PASS",
+      "durationMs": 63008,
+      "screenshot": "docs/context-evidence/2026-09-03/ios-e2e-product-open/se-light-maximum-text-pass.png",
+      "detail": null
+    },
+    {
+      "cell": "se-dark-default-text",
+      "device": "Woof E2E SE",
+      "appearance": "dark",
+      "contentSize": "large",
+      "status": "PASS",
+      "durationMs": 61923,
+      "screenshot": "docs/context-evidence/2026-09-03/ios-e2e-product-open/se-dark-default-text-pass.png",
+      "detail": null
+    },
+    {
+      "cell": "se-dark-maximum-text",
+      "device": "Woof E2E SE",
+      "appearance": "dark",
+      "contentSize": "accessibility-extra-extra-extra-large",
+      "status": "PASS",
+      "durationMs": 62706,
+      "screenshot": "docs/context-evidence/2026-09-03/ios-e2e-product-open/se-dark-maximum-text-pass.png",
+      "detail": null
+    },
+    {
+      "cell": "large-light-default-text",
+      "device": "Woof E2E Large",
+      "appearance": "light",
+      "contentSize": "large",
+      "status": "PASS",
+      "durationMs": 81419,
+      "screenshot": "docs/context-evidence/2026-09-03/ios-e2e-product-open/large-light-default-text-pass.png",
+      "detail": null
+    },
+    {
+      "cell": "large-light-maximum-text",
+      "device": "Woof E2E Large",
+      "appearance": "light",
+      "contentSize": "accessibility-extra-extra-extra-large",
+      "status": "PASS",
+      "durationMs": 63165,
+      "screenshot": "docs/context-evidence/2026-09-03/ios-e2e-product-open/large-light-maximum-text-pass.png",
+      "detail": null
+    },
+    {
+      "cell": "large-dark-default-text",
+      "device": "Woof E2E Large",
+      "appearance": "dark",
+      "contentSize": "large",
+      "status": "PASS",
+      "durationMs": 61464,
+      "screenshot": "docs/context-evidence/2026-09-03/ios-e2e-product-open/large-dark-default-text-pass.png",
+      "detail": null
+    },
+    {
+      "cell": "large-dark-maximum-text",
+      "device": "Woof E2E Large",
+      "appearance": "dark",
+      "contentSize": "accessibility-extra-extra-extra-large",
+      "status": "PASS",
+      "durationMs": 61595,
+      "screenshot": "docs/context-evidence/2026-09-03/ios-e2e-product-open/large-dark-maximum-text-pass.png",
+      "detail": null
+    }
+  ]
+}

@@ -96,8 +96,24 @@ jest.mock("../../services/performanceTimings", () => ({
 }));
 jest.mock("../../services/devQaFixtures", () => ({
   DEV_QA_DRY_BAG_BOUNDARY_PRODUCTS: [],
-  DEV_QA_PET_RESULT: {},
-  DEV_QA_SEARCH_PRODUCTS: [],
+  DEV_QA_PET_RESULT: {
+    productName: "QA source result",
+    brand: "QA Fixture",
+    petType: "dog",
+    overallScore: 82,
+  },
+  DEV_QA_SEARCH_PRODUCTS: [{
+    cacheKey: "dev-qa-small-5lb",
+    productName: "QA Small Breed Chicken Recipe",
+    brand: "QA Fixture",
+    petType: "dog",
+    foodForm: "dry",
+    packageSize: "5 lb bag",
+    ingredientCount: 5,
+    ingredientVerificationStatus: "manufacturer",
+    imageVerificationStatus: "manufacturer",
+    imageUrl: "https://qa.invalid/dev-product-5lb.png",
+  }],
 }));
 jest.mock("../../services/verifiedScoring", () => ({
   buildVerifiedPetFoodAnalysis: jest.fn(),
@@ -172,6 +188,39 @@ describe("typed catalog search", () => {
       "catalog_product_opened",
       expect.objectContaining({ selection_mode: "manual_search_result" })
     );
+  });
+
+  test("development search fixtures open Results without requiring the live quota RPC", async () => {
+    const navigation = {
+      goBack: jest.fn(),
+      navigate: jest.fn(),
+      replace: jest.fn(),
+    };
+
+    const screen = await render(
+      <ProductSearchScreen
+        navigation={navigation}
+        route={{ params: { devFixture: "typed_results" } }}
+      />
+    );
+
+    const row = await screen.findByRole("button", {
+      name: /QA Fixture.*QA Small Breed Chicken Recipe.*5 lb bag.*Verified/i,
+    }, { timeout: 2000 });
+    fireEvent.press(row);
+
+    await waitFor(() => {
+      expect(navigation.navigate).toHaveBeenCalledWith("Results", expect.objectContaining({
+        mode: "catalog",
+        cacheKey: "dev-qa-small-5lb",
+        devFixtureResult: expect.objectContaining({
+          productName: "QA Small Breed Chicken Recipe",
+          brand: "QA Fixture",
+          petType: "dog",
+          overallScore: 82,
+        }),
+      }));
+    });
   });
 
   test("changing label inputs mid-flight restarts lookup and clears loading", async () => {

@@ -1133,9 +1133,16 @@ export default function ProductSearchScreen({ navigation, route }) {
       return;
     }
 
-    const devFixtureResult = devLiveResolver
-      ? buildVerifiedPetFoodAnalysis(catalogProductToVerifiedProduct(resolvedProduct))
-      : null;
+    const devFixtureResult = devFixture
+      ? {
+        ...DEV_QA_PET_RESULT,
+        productName: resolvedProduct.productName || DEV_QA_PET_RESULT.productName,
+        brand: resolvedProduct.brand || DEV_QA_PET_RESULT.brand,
+        petType: resolvedProduct.petType || DEV_QA_PET_RESULT.petType,
+      }
+      : devLiveResolver
+        ? buildVerifiedPetFoodAnalysis(catalogProductToVerifiedProduct(resolvedProduct))
+        : null;
     navigation.navigate("Results", {
       mode: "catalog",
       cacheKey: resolvedProduct.cacheKey,
@@ -1149,6 +1156,7 @@ export default function ProductSearchScreen({ navigation, route }) {
     });
   }, [
     canScan,
+    devFixture,
     devLiveResolver,
     identification,
     labelCaptureStartedAt,

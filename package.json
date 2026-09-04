@@ -12,6 +12,7 @@
     "test:contracts": "jest --runInBand tests/contracts tests/regression tests/property",
     "test:db": "node scripts/run-database-tests.mjs",
     "test:edge-requests": "node scripts/run-edge-request-tests.mjs",
+    "test:e2e:ios-matrix": "node scripts/run-ios-e2e-matrix.mjs",
     "test:live-scoring": "node scripts/prove-live-production-scoring.mjs",
     "check:live-catalog-performance": "node scripts/check-live-catalog-rpc-performance.mjs",
     "verify": "node scripts/verify-project.js",
