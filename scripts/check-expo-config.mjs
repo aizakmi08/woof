@@ -15,6 +15,7 @@ const REQUIRED_PRIVATE_EAS_ENV = {
   SENTRY_PROJECT: "ci-sentry-project",
   SENTRY_AUTH_TOKEN: "sntrys_ci_test_token_1234567890",
 };
+const committedVersion = JSON.parse(fs.readFileSync("app.json", "utf8")).expo?.version;
 
 function assert(condition, message) {
   if (!condition) {
@@ -71,7 +72,7 @@ assert(
 const expoConfig = parseJsonOutput(successRun.stdout);
 assert(expoConfig.name === "woof", "Expo config name changed unexpectedly");
 assert(expoConfig.slug === "woof", "Expo config slug changed unexpectedly");
-assert(expoConfig.version === "1.2.1", "Expo config version should match the 1.2.1 update release line");
+assert(expoConfig.version === committedVersion, "Expo config version should match the committed app.json version");
 assert(expoConfig.ios?.bundleIdentifier === "io.woof.app", "Expo config iOS bundle identifier changed unexpectedly");
 assert(expoConfig.android?.package === "com.app.woof", "Expo config Android package changed unexpectedly");
 

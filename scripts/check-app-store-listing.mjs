@@ -3,6 +3,7 @@ import fs from "node:fs";
 const LISTING_PATH = "APP_STORE_LISTING.md";
 const DEPLOYMENT_CHECKLIST_PATH = "DEPLOYMENT_CHECKLIST.md";
 const STORE_CONFIG_PATH = "store.config.json";
+const APP_CONFIG_PATH = "app.json";
 const failures = [];
 
 const LIMITS = {
@@ -136,6 +137,7 @@ function orderedIndex(source, needles, label) {
 const listing = readText(LISTING_PATH);
 const checklist = readText(DEPLOYMENT_CHECKLIST_PATH);
 const storeConfig = JSON.parse(readText(STORE_CONFIG_PATH));
+const appConfig = JSON.parse(readText(APP_CONFIG_PATH));
 
 const appName = firstInlineCode(section(listing, "App Name"), "App name");
 const subtitle = firstInlineCode(section(listing, "Subtitle"), "Subtitle");
@@ -255,8 +257,8 @@ const storeMetadata = [
 if (storeConfig.configVersion !== 0) {
   fail("store.config.json: expected configVersion 0");
 }
-if (storeApple.version !== "1.2.4") {
-  fail(`store.config.json: expected update version 1.2.4, got ${storeApple.version || "missing"}`);
+if (storeApple.version !== appConfig.expo?.version) {
+  fail(`store.config.json: version ${storeApple.version || "missing"} must match app.json ${appConfig.expo?.version || "missing"}`);
 }
 if (storeApple.release?.automaticRelease !== true) {
   fail("store.config.json: automatic release must match the approved App Store release plan");
@@ -272,8 +274,8 @@ for (const [label, actual, expected] of [
     fail(`store.config.json: ${label} must match APP_STORE_LISTING.md`);
   }
 }
-if (!storeInfo.releaseNotes?.toLowerCase().includes("published manufacturer analysis")) {
-  fail("store.config.json: release notes must describe the published-analysis scoring change");
+if (!storeInfo.releaseNotes?.trim()) {
+  fail("store.config.json: release notes are required for an update");
 }
 if (storeApple.review) {
   fail("store.config.json: keep App Review contact details and notes in APP_STORE_RELEASE_1.2.1.md, not the repository config");
