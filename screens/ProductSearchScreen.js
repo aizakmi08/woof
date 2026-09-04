@@ -299,9 +299,10 @@ function productVariantChips(product = {}) {
 }
 
 function labelSummaryTitle(identification = {}) {
-  const brand = collapseRepeatedIdentityText(identification.brand);
-  const productName = collapseRepeatedIdentityText(identification.productName);
-  const recognizedQuery = collapseRepeatedIdentityText(identification.searchQuery);
+  const safeIdentification = identification || {};
+  const brand = collapseRepeatedIdentityText(safeIdentification.brand);
+  const productName = collapseRepeatedIdentityText(safeIdentification.productName);
+  const recognizedQuery = collapseRepeatedIdentityText(safeIdentification.searchQuery);
   if (!productName) return brand || recognizedQuery || "No readable product label";
   if (brand && !normalizeText(productName).includes(normalizeText(brand))) {
     return collapseRepeatedIdentityText(`${brand} ${productName}`);

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "source": "Reconstructed from EAS build metadata on 2026-09-03",
+  "releases": [
+    {
+      "version": "1.2.3",
+      "iosBuildNumber": "56",
+      "easBuildId": "45185b70-01b7-4bb3-9c0f-3b0279052dd9",
+      "gitCommit": "1186543929473745bcd6e95aad6d85923cc4173d",
+      "tag": "v1.2.3",
+      "provenance": "Exact EAS-recorded commit recovered locally; tag reconstructed after shipment."
+    },
+    {
+      "version": "1.2.4",
+      "iosBuildNumber": "59",
+      "easBuildId": "f90abb12-0ad0-48dd-8bce-dcf14db2fe8b",
+      "gitCommit": "47a7d8307dd57136e9da629b720121c3ed7f8581",
+      "tag": "v1.2.4",
+      "publicReleaseAt": "2026-09-02T07:18:00Z",
+      "provenance": "Exact EAS-recorded commit and signed IPA recovered; tag reconstructed after shipment."
+    }
+  ]
+}
