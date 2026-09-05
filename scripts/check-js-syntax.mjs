@@ -884,11 +884,18 @@ function checkAppReviewLoop() {
     'error_name: "development_build"',
     "function reviewStorageKey",
     "function reviewStorageKeys",
+    "REVIEW_LAST_PROMPT_VERSION_KEY_PREFIX",
     "review_state_scoped",
     "clearReviewPromptStorage",
     "acknowledgeReviewComplete",
     'reason: "review_already_completed"',
+    'reason: "version_already_requested"',
     'reason: "not_enough_new_successes"',
+    'import * as StoreReview from "expo-store-review"',
+    "StoreReview.isAvailableAsync()",
+    "StoreReview.requestReview()",
+    "requestSystemReview",
+    'error_name: "system_review_unavailable"',
     "app_review_prompt_viewed",
     "app_review_requested",
     "app_review_opened",
@@ -907,10 +914,7 @@ function checkAppReviewLoop() {
     "userId: user?.id || null",
     "showPostScanPrompt",
     "showFirstScanToast",
-    "ReviewPrompt",
-    "openStoreReview(reviewContext())",
-    "acknowledgeReviewComplete(reviewContext())",
-    "Could Not Open App Store",
+    "requestSystemReview(reviewContext(), eligibility)",
     "if (scansUsed < 3) return",
     "hasMeaningfulAnalysisResult(event.result)",
     'errorCode: "EMPTY_ANALYSIS_RESULT"',
@@ -923,18 +927,11 @@ function checkAppReviewLoop() {
     }
   }
 
-  for (const needle of [
-    "ReviewPrompt",
-    "Rate {BRAND_NAME}",
-    "Help more pet parents find {BRAND_NAME}",
-    "I already reviewed {BRAND_NAME}",
-  ]) {
-    if (!componentsSource.includes(needle)) {
-      failures.push({
-        file: "screens/ResultsScreen/components.js",
-        output: `Missing review prompt UI marker: ${needle}`,
-      });
-    }
+  if (resultsSource.includes("<ReviewPrompt") || componentsSource.includes("export function ReviewPrompt")) {
+    failures.push({
+      file: "screens/ResultsScreen/index.js",
+      output: "Automatic App Store review requests must not use a custom review prompt.",
+    });
   }
 
   for (const needle of [

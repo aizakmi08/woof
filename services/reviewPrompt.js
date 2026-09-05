@@ -1,4 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import Constants from "expo-constants";
+import * as StoreReview from "expo-store-review";
 import { Linking, Platform } from "react-native";
 import { trackEvent } from "./analytics";
 import {
@@ -22,8 +24,10 @@ const REVIEW_SUCCESS_COUNT_KEY_PREFIX = "@woof_review_success_count:";
 const REVIEW_PROMPT_COUNT_KEY_PREFIX = "@woof_review_prompt_count:";
 const REVIEW_LAST_PROMPT_AT_KEY_PREFIX = "@woof_review_last_prompt_at:";
 const REVIEW_LAST_PROMPT_SUCCESS_COUNT_KEY_PREFIX = "@woof_review_last_prompt_success_count:";
+const REVIEW_LAST_PROMPT_VERSION_KEY_PREFIX = "@woof_review_last_prompt_version:";
 const REVIEW_COMPLETED_KEY_PREFIX = "@woof_review_completed:";
 const LEGACY_LAST_PROMPT_SUCCESS_COUNT_KEY = "@woof_review_last_prompt_success_count";
+const LEGACY_LAST_PROMPT_VERSION_KEY = "@woof_review_last_prompt_version";
 const LEGACY_REVIEW_COMPLETED_KEY = "@woof_review_completed";
 
 // Keep these names in the integration surface so release checks make the
@@ -61,12 +65,26 @@ function reviewStorageKeys(userId) {
       LEGACY_LAST_PROMPT_SUCCESS_COUNT_KEY,
       userId
     ),
+    lastPromptVersion: reviewStorageKey(
+      REVIEW_LAST_PROMPT_VERSION_KEY_PREFIX,
+      LEGACY_LAST_PROMPT_VERSION_KEY,
+      userId
+    ),
     reviewCompleted: reviewStorageKey(
       REVIEW_COMPLETED_KEY_PREFIX,
       LEGACY_REVIEW_COMPLETED_KEY,
       userId
     ),
   };
+}
+
+function appVersion(context = {}) {
+  return String(
+    context.appVersion
+      || Constants.nativeAppVersion
+      || Constants.expoConfig?.version
+      || "unknown"
+  );
 }
 
 async function readNumber(key) {
@@ -105,10 +123,11 @@ export async function maybeShowReviewPrompt(context = {}) {
 
   const reviewKeys = reviewStorageKeys(context.userId || null);
   const successCount = await recordEligibleSuccess(context);
-  const [promptCount, lastPromptSuccessCount, lastPromptAt, completedValue] = await Promise.all([
+  const [promptCount, lastPromptSuccessCount, lastPromptAt, lastPromptVersion, completedValue] = await Promise.all([
     readNumber(reviewKeys.promptCount),
     readNumber(reviewKeys.lastPromptSuccessCount),
     readNumber(reviewKeys.lastPromptAt),
+    AsyncStorage.getItem(reviewKeys.lastPromptVersion),
     AsyncStorage.getItem(reviewKeys.reviewCompleted),
   ]);
   const eligibility = reviewPromptDecision({
@@ -116,29 +135,77 @@ export async function maybeShowReviewPrompt(context = {}) {
     promptCount,
     lastPromptSuccessCount,
     lastPromptAt,
+    lastPromptVersion: lastPromptVersion || "",
+    currentVersion: appVersion(context),
     reviewCompleted: completedValue === "true",
     isPro: context.isPro,
     remainingScans: context.remainingScans,
   });
   if (!eligibility.show) return eligibility;
-  return { show: true, promptCount: promptCount + 1, successfulResultCount: successCount };
+  return {
+    show: true,
+    promptCount: promptCount + 1,
+    successfulResultCount: successCount,
+    appVersion: appVersion(context),
+  };
 }
 
-export async function markReviewPromptVisible(context = {}, eligibility = {}) {
+async function markReviewPromptRequested(context = {}, eligibility = {}) {
   const reviewKeys = reviewStorageKeys(context.userId || null);
   const promptCount = Math.max(1, Number(eligibility.promptCount) || 1);
   const successCount = Math.max(0, Number(eligibility.successfulResultCount) || 0);
+  const requestedVersion = eligibility.appVersion || appVersion(context);
   await AsyncStorage.multiSet([
     [reviewKeys.promptCount, String(promptCount)],
     [reviewKeys.lastPromptAt, String(Date.now())],
     [reviewKeys.lastPromptSuccessCount, String(successCount)],
+    [reviewKeys.lastPromptVersion, requestedVersion],
   ]);
   trackEvent("app_review_prompt_viewed", {
     ...baseProperties(context),
     successful_result_count: successCount,
     prompt_count: promptCount,
+    app_version: requestedVersion,
+    presentation: "system_native",
+    display_confirmed: false,
     review_state_scoped: !!context.userId,
   });
+}
+
+export async function requestSystemReview(context = {}, eligibility = {}) {
+  const properties = {
+    ...baseProperties(context),
+    store: Platform.OS === "ios" ? "app_store" : Platform.OS === "android" ? "play_store" : "web",
+    method: "system_native",
+    app_version: eligibility.appVersion || appVersion(context),
+  };
+
+  if (__DEV__) {
+    return { requested: false, reason: "development_build" };
+  }
+
+  try {
+    const available = await StoreReview.isAvailableAsync();
+    if (!available) {
+      trackEvent("app_review_open_failed", {
+        ...properties,
+        error_name: "system_review_unavailable",
+      });
+      return { requested: false, reason: "system_review_unavailable" };
+    }
+
+    trackEvent("app_review_requested", properties);
+    await StoreReview.requestReview();
+    await markReviewPromptRequested(context, eligibility);
+    trackEvent("app_review_opened", properties);
+    return { requested: true };
+  } catch (err) {
+    trackEvent("app_review_open_failed", {
+      ...properties,
+      error_name: err?.code || err?.name || "unknown",
+    });
+    return { requested: false, reason: "system_review_failed" };
+  }
 }
 
 export async function dismissReviewPrompt(context = {}) {
@@ -204,6 +271,7 @@ export async function clearReviewPromptStorage(userId = null) {
     LEGACY_PROMPT_COUNT_KEY,
     LEGACY_LAST_PROMPT_AT_KEY,
     LEGACY_LAST_PROMPT_SUCCESS_COUNT_KEY,
+    LEGACY_LAST_PROMPT_VERSION_KEY,
     LEGACY_REVIEW_COMPLETED_KEY,
   ];
 
@@ -214,6 +282,7 @@ export async function clearReviewPromptStorage(userId = null) {
       userKeys.promptCount,
       userKeys.lastPromptAt,
       userKeys.lastPromptSuccessCount,
+      userKeys.lastPromptVersion,
       userKeys.reviewCompleted
     );
   }

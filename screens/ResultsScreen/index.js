@@ -80,15 +80,11 @@ import {
   GuestSavePrompt,
   FirstScanToast,
   SafetyBadge,
-  ReviewPrompt,
 } from "./components";
 import { useStyles } from "./styles";
 import {
-  acknowledgeReviewComplete,
-  dismissReviewPrompt,
-  markReviewPromptVisible,
   maybeShowReviewPrompt,
-  openStoreReview,
+  requestSystemReview,
 } from "../../services/reviewPrompt";
 import {
   normalizePetProfile,
@@ -1140,8 +1136,6 @@ export default function ResultsScreen({ route, navigation }) {
   const shareCardRef = useRef();
   const [selectedIngredient, setSelectedIngredient] = useState(null);
   const [showPostScanPrompt, setShowPostScanPrompt] = useState(false);
-  const [showReviewPrompt, setShowReviewPrompt] = useState(false);
-  const [reviewPromptEligibility, setReviewPromptEligibility] = useState(null);
   const [showGuestSavePrompt, setShowGuestSavePrompt] = useState(false);
   const [savingGuestProvider, setSavingGuestProvider] = useState(null);
   const hasCompletedResultForPrompt = hasMeaningfulAnalysisResult(result);
@@ -1194,8 +1188,7 @@ export default function ResultsScreen({ route, navigation }) {
       (user?.id && !isAnonymous) ||
       !hasCompletedResultForPrompt ||
       showFirstScanToast ||
-      showPostScanPrompt ||
-      showReviewPrompt
+      showPostScanPrompt
     ) {
       return;
     }
@@ -1237,7 +1230,6 @@ export default function ResultsScreen({ route, navigation }) {
     user?.id,
     showFirstScanToast,
     showPostScanPrompt,
-    showReviewPrompt,
   ]);
 
   const dismissGuestSavePrompt = () => {
@@ -1341,8 +1333,7 @@ export default function ResultsScreen({ route, navigation }) {
       maybeShowReviewPrompt(reviewContext())
         .then((eligibility) => {
           if (!cancelled && eligibility.show) {
-            setReviewPromptEligibility(eligibility);
-            setShowReviewPrompt(true);
+            requestSystemReview(reviewContext(), eligibility).catch(() => {});
           }
         })
         .catch(() => {});
@@ -1364,33 +1355,6 @@ export default function ResultsScreen({ route, navigation }) {
     showGuestSavePrompt,
     reviewContext,
   ]);
-
-  const handleReviewDismiss = () => {
-    setShowReviewPrompt(false);
-    dismissReviewPrompt(reviewContext());
-  };
-
-  const handleReviewVisible = useCallback(() => {
-    if (!reviewPromptEligibility) return;
-    markReviewPromptVisible(reviewContext(), reviewPromptEligibility).catch(() => {});
-    setReviewPromptEligibility(null);
-  }, [reviewContext, reviewPromptEligibility]);
-
-  const handleReviewRate = async () => {
-    setShowReviewPrompt(false);
-    const opened = await openStoreReview(reviewContext());
-    if (!opened) {
-      Alert.alert(
-        "Could Not Open App Store",
-        `Ratings are available from the App Store version of ${BRAND_NAME}. Please try again later.`
-      );
-    }
-  };
-
-  const handleReviewAlreadyCompleted = async () => {
-    setShowReviewPrompt(false);
-    await acknowledgeReviewComplete(reviewContext());
-  };
 
   const handleScanAnother = () => {
     trackEvent("scan_another_tapped", { mode });
@@ -2429,17 +2393,6 @@ export default function ResultsScreen({ route, navigation }) {
       </Animated.ScrollView>
 
       <FirstScanToast visible={!hasFullResultAccess && (showFirstScanToast || (__DEV__ && devPrompt === "first_scan"))} />
-
-      {(showReviewPrompt || (__DEV__ && devPrompt === "review")) ? (
-        <View style={{ position: "absolute", left: 16, right: 16, bottom: Math.max(insets.bottom, 12) + 12, zIndex: 30 }}>
-          <ReviewPrompt
-            onVisible={handleReviewVisible}
-            onRate={handleReviewRate}
-            onDismiss={handleReviewDismiss}
-            onAlreadyReviewed={handleReviewAlreadyCompleted}
-          />
-        </View>
-      ) : null}
 
       {/* Off-screen share card for view-shot capture */}
       {hasShareableResult && (

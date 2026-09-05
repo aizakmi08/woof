@@ -273,6 +273,22 @@ async function checkReviewPromptCadence() {
     "an unavailable scan balance must not be misread as an exhausted free plan"
   );
   assert(
+    policy.reviewPromptDecision({
+      successCount: 6,
+      currentVersion: "1.2.5",
+      lastPromptVersion: "1.2.5",
+    }).reason === "version_already_requested",
+    "the same app version must never request another system review prompt"
+  );
+  assert(
+    policy.reviewPromptDecision({
+      successCount: 6,
+      currentVersion: "1.2.6",
+      lastPromptVersion: "1.2.5",
+    }).show === true,
+    "a later app version may request a review after the engagement gates pass"
+  );
+  assert(
     policy.reviewPromptDecision({ successCount: 2, remainingScans: 0 }).reason
       === "free_limit_exhausted",
     "the review request must not stack on the exhausted-free-plan upgrade moment"

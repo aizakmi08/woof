@@ -220,7 +220,6 @@ export default function DevQAScreen({ navigation }) {
         <QaSection title="Prompts" theme={theme}>
           <QaButton label="First-scan toast" theme={theme} onPress={() => openPetResult({ devPrompt: "first_scan" })} />
           <QaButton label="Guest-save card" theme={theme} onPress={() => openPetResult({ devPrompt: "guest_save" })} />
-          <QaButton label="Review card" theme={theme} onPress={() => openPetResult({ devPrompt: "review" })} />
           <QaButton label="Post-scan card" theme={theme} onPress={() => openPetResult({ devPrompt: "post_scan" })} />
         </QaSection>
 

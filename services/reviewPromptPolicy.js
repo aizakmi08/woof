@@ -24,6 +24,8 @@ export function reviewPromptDecision({
   promptCount = 0,
   lastPromptSuccessCount = 0,
   lastPromptAt = 0,
+  lastPromptVersion = "",
+  currentVersion = "",
   reviewCompleted = false,
   isPro = false,
   remainingScans = null,
@@ -31,6 +33,10 @@ export function reviewPromptDecision({
 } = {}) {
   if (reviewCompleted) {
     return { show: false, reason: "review_already_completed" };
+  }
+
+  if (currentVersion && lastPromptVersion === currentVersion) {
+    return { show: false, reason: "version_already_requested" };
   }
 
   if (successCount < MIN_SUCCESSFUL_RESULTS) {
